@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>错层 Wrong Floor</title>
+    <link rel="stylesheet" href="./styles/main.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="game-canvas"></canvas>
+      <div id="vignette"></div>
+      <div id="danger"></div>
+      <div id="flash"></div>
+
+      <div id="hud" class="hidden">
+        <header class="hud-top">
+          <div>
+            <p id="record">记录  0 / 5</p>
+            <p id="timer">00:00</p>
+            <p id="objective">跟着前面的人</p>
+          </div>
+          <button id="btn-mute-hud" type="button" data-mute>Mute  静音</button>
+        </header>
+        <p id="chase" class="hidden">反方向 · 按住 Shift · EXIT</p>
+        <div id="crosshair"></div>
+        <p id="subtitle" aria-live="polite"></p>
+        <p id="prompt"></p>
+      </div>
+
+      <button id="btn-exit-demo" class="hidden" type="button">Exit Demo  退出演示</button>
+      <p id="demo-badge" class="hidden">DEMO</p>
+
+      <section id="menu">
+        <div class="menu-card">
+          <p class="eyebrow">Wrong Floor</p>
+          <h1>错层</h1>
+          <p class="logline">拍下教室里不该存在的东西。看见那双眼睛之后，跑。</p>
+          <div class="menu-actions">
+            <button id="btn-start" type="button">Start<span>开始游戏</span></button>
+            <button id="btn-demo" type="button">Watch Demo<span>观看演示</span></button>
+          </div>
+          <label class="volume">
+            Volume  音量
+            <input id="menu-volume" type="range" min="0" max="1" step="0.01" value="0.8" />
+          </label>
+          <button id="btn-mute-menu" type="button" data-mute>Mute  静音</button>
+          <ul class="controls">
+            <li>WASD 移动 · Mouse 环顾 · Shift 冲刺</li>
+            <li>E 或 左键：拾起相机 / 拍照</li>
+            <li>M 静音 · Esc 暂停 · 方向键也能转向</li>
+          </ul>
+          <p id="menu-note"></p>
+        </div>
+      </section>
+
+      <section id="screen-panel" class="hidden">
+        <div class="menu-card">
+          <h2 id="panel-title"></h2>
+          <p id="panel-text"></p>
+          <div class="menu-actions">
+            <button id="btn-resume" type="button">Resume  继续</button>
+            <button id="btn-retry" type="button">Retry  再试一次</button>
+            <button id="btn-restart" type="button">Restart  重新开始</button>
+            <button id="btn-back" type="button">Menu  返回标题</button>
+          </div>
+          <label class="volume">
+            Volume  音量
+            <input id="panel-volume" type="range" min="0" max="1" step="0.01" value="0.8" />
+          </label>
+        </div>
+      </section>
+
+      <p id="boot-error" class="hidden"></p>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

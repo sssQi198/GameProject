@@ -1,0 +1,14 @@
+{
+  "name": "w05-3d-game",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "错层 Wrong Floor — browser 3D game (Three.js)",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
