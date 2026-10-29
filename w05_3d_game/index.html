@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="./styles/main.css" />
   </head>
   <body>
-    <div id="app">
+    <div id="app" class="screen-open">
       <canvas id="game-canvas"></canvas>
       <div id="vignette"></div>
       <div id="danger"></div>
@@ -73,6 +73,18 @@
 
       <p id="boot-error" class="hidden"></p>
     </div>
-    <script type="module" src="./src/main.js"></script>
+    <script>
+      function showServeHint() {
+        var el = document.getElementById('boot-error');
+        el.innerHTML =
+          '<span>游戏没有启动：直接双击 index.html 时，浏览器会拦住游戏脚本，按钮点了也没反应。<br><br>' +
+          '请双击 <b>w05_3d_game/start.bat</b>，它会自动打开游戏。<br>' +
+          '或者在 w05_3d_game 目录运行 <code>node server.js</code>，再打开 ' +
+          '<a href="http://127.0.0.1:5173">http://127.0.0.1:5173</a></span>';
+        el.classList.remove('hidden');
+      }
+      if (location.protocol === 'file:') showServeHint();
+    </script>
+    <script type="module" src="./src/main.js" onerror="showServeHint()"></script>
   </body>
 </html>

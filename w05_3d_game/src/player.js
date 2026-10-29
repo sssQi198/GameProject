@@ -262,24 +262,44 @@ export function bindPlayerInput(player, canvas) {
   });
   window.addEventListener('blur', () => heldKeys.clear());
 
-  canvas.addEventListener('mousemove', (event) => {
+  canvas.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 && event.button !== 2) return;
+    if (document.pointerLockElement === canvas) {
+      if (event.button === 0) player.queueInteract();
+      return;
+    }
+    dragLook = true;
+    dragMoved = 0;
+    dragButton = event.button;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    canvas.setPointerCapture?.(event.pointerId);
+  });
+  canvas.addEventListener('pointermove', (event) => {
     if (document.pointerLockElement === canvas) {
       player.pointerLook(event.movementX, event.movementY);
-    } else if (dragLook) {
-      player.pointerLook(event.movementX, event.movementY);
+      return;
     }
+    if (!dragLook) return;
+    const dx = event.clientX - lastX;
+    const dy = event.clientY - lastY;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    dragMoved += Math.abs(dx) + Math.abs(dy);
+    if (dx || dy) player.pointerLook(dx, dy);
   });
-  canvas.addEventListener('mousedown', (event) => {
-    if (event.button === 0 && document.pointerLockElement === canvas) player.queueInteract();
-    if (event.button === 2 || (event.button === 0 && document.pointerLockElement !== canvas)) dragLook = true;
-  });
-  window.addEventListener('mouseup', () => {
+  window.addEventListener('pointerup', () => {
+    if (dragLook && dragButton === 0 && dragMoved < 6) player.queueInteract();
     dragLook = false;
   });
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 }
 
 let dragLook = false;
+let dragMoved = 0;
+let dragButton = 0;
+let lastX = 0;
+let lastY = 0;
 
 function clamp(v, a, b) {
   return Math.max(a, Math.min(b, v));

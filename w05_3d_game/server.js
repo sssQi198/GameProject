@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)));
 const port = Number(process.env.PORT) || 5173;
@@ -39,6 +40,29 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`错层 Wrong Floor  http://127.0.0.1:${port}`);
+const url = `http://127.0.0.1:${port}`;
+const shouldOpen = process.argv.includes('--open');
+
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.log(`端口 ${port} 已经有服务在跑，直接打开 ${url}`);
+    if (shouldOpen) openBrowser(url);
+    process.exit(0);
+  }
+  throw error;
 });
+
+server.listen(port, '127.0.0.1', () => {
+  console.log(`错层 Wrong Floor  ${url}`);
+  console.log('关掉这个窗口就会停止游戏服务器。');
+  if (shouldOpen) openBrowser(url);
+});
+
+function openBrowser(target) {
+  const [cmd, args] = process.platform === 'win32'
+    ? ['cmd', ['/c', 'start', '', target]]
+    : process.platform === 'darwin'
+      ? ['open', [target]]
+      : ['xdg-open', [target]];
+  spawn(cmd, args, { stdio: 'ignore', detached: true }).unref();
+}

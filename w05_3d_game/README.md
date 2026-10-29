@@ -6,12 +6,18 @@
 
 需要 Node.js 18 或更高。Three.js 和 lil-gui 已经放在 `vendor/`，不用再装依赖。
 
+Windows 上直接双击 `start.bat`，它会启动本地服务器并打开浏览器。玩的时候别关那个黑色窗口。
+
+也可以用终端：
+
 ```bash
 cd w05_3d_game
 node server.js
 ```
 
-也可以 `npm run dev`。打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)。请用桌面版 Chrome 或 Edge。不要直接双击 `index.html`，浏览器会拦住模块脚本。
+然后打开 [http://127.0.0.1:5173](http://127.0.0.1:5173)。`npm start` 会自动打开浏览器。请用桌面版 Chrome 或 Edge。
+
+不要直接双击 `index.html`。地址栏变成 `C:/...` 或 `file://` 时，浏览器会拦住游戏脚本，标题画面能看到，但按钮点了没反应。页面会提示改用 `start.bat`。
 
 ## Controls
 
@@ -58,6 +64,7 @@ http://127.0.0.1:5173/?debug
 
 ```text
 w05_3d_game/
+├── start.bat           Windows 双击启动：开服务器 + 打开浏览器
 ├── index.html          入口：canvas、HUD、菜单
 ├── styles/main.css     菜单、HUD、结算
 ├── src/

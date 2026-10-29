@@ -44,22 +44,22 @@ export class Hud {
   }
 
   bind(handlers) {
-    byId('btn-start').addEventListener('click', () => {
+    bindPress(byId('btn-start'), () => {
       this.audio.unlock();
       handlers.onStart();
     });
-    byId('btn-demo').addEventListener('click', () => {
+    bindPress(byId('btn-demo'), () => {
       this.audio.unlock();
       handlers.onDemo();
     });
-    this.buttons.resume.addEventListener('click', handlers.onResume);
-    this.buttons.retry.addEventListener('click', handlers.onRetry);
-    this.buttons.restart.addEventListener('click', () => {
+    bindPress(this.buttons.resume, handlers.onResume);
+    bindPress(this.buttons.retry, handlers.onRetry);
+    bindPress(this.buttons.restart, () => {
       this.audio.unlock();
       handlers.onRestart();
     });
-    this.buttons.menu.addEventListener('click', handlers.onMenu);
-    this.exitDemo.addEventListener('click', handlers.onExitDemo);
+    bindPress(this.buttons.menu, handlers.onMenu);
+    bindPress(this.exitDemo, handlers.onExitDemo);
     for (const button of this.muteButtons) {
       button.addEventListener('click', () => {
         this.audio.unlock();
@@ -75,12 +75,14 @@ export class Hud {
     this.exitDemo.classList.add('hidden');
     this.demoBadge.classList.add('hidden');
     this.menuNote.textContent = note;
+    this.syncScreen();
   }
 
   showPlay() {
     this.menu.classList.add('hidden');
     this.hud.classList.remove('hidden');
     this.panel.classList.add('hidden');
+    this.syncScreen();
   }
 
   setDemo(on) {
@@ -100,10 +102,17 @@ export class Hud {
     for (const [name, el] of Object.entries(this.buttons)) {
       el.classList.toggle('hidden', !show.includes(name));
     }
+    this.syncScreen();
   }
 
   hidePanel() {
     this.panel.classList.add('hidden');
+    this.syncScreen();
+  }
+
+  syncScreen() {
+    const open = !this.menu.classList.contains('hidden') || !this.panel.classList.contains('hidden');
+    document.getElementById('app').classList.toggle('screen-open', open);
   }
 
   setRecord(done, total) {
@@ -157,4 +166,20 @@ function byId(id) {
   const el = document.getElementById(id);
   if (!el) throw new Error(`缺少界面节点 #${id}`);
   return el;
+}
+
+/** pointerup 和 click 都接。嵌入预览里经常只有其中一个能送到按钮。 */
+function bindPress(el, fn) {
+  let last = 0;
+  const run = (event) => {
+    if (event.button != null && event.button !== 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const now = performance.now();
+    if (now - last < 350) return;
+    last = now;
+    fn();
+  };
+  el.addEventListener('pointerup', run);
+  el.addEventListener('click', run);
 }

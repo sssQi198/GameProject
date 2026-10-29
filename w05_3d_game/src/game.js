@@ -44,6 +44,7 @@ export class Game {
     this.notedNpc = false;
     this.prepareShoot = false;
     this.menuNote = '';
+    this.pointerLocked = false;
     this.raycaster = new THREE.Raycaster();
     this.center = new THREE.Vector2(0, 0);
     this.player.onStep = () => {
@@ -133,7 +134,9 @@ export class Game {
 
   onPointerLockChange() {
     const locked = document.pointerLockElement === this.canvas;
-    if (!locked && !this.intentionalUnlock && this.isLive() && !this.demoActive && !this.paused) {
+    const wasLocked = this.pointerLocked;
+    this.pointerLocked = locked;
+    if (!locked && wasLocked && !this.intentionalUnlock && this.isLive() && !this.demoActive && !this.paused) {
       this.pause();
     }
     this.intentionalUnlock = false;
@@ -187,8 +190,11 @@ export class Game {
 
   requestLock() {
     if (this.demoActive) return;
-    const lock = this.canvas.requestPointerLock?.();
-    if (lock?.catch) lock.catch(() => {});
+    requestAnimationFrame(() => {
+      if (!this.isLive() || this.paused || this.demoActive) return;
+      const lock = this.canvas.requestPointerLock?.();
+      if (lock?.catch) lock.catch(() => {});
+    });
   }
 
   isLive() {

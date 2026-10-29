@@ -8,12 +8,14 @@ Week 05 小组作业：浏览器里的第一人称 3D 短篇。教室每进一�
 
 需要 Node.js 18 或更高。Three.js 已经放在仓库里，不用 `npm install`。
 
+Windows 上双击 `w05_3d_game/start.bat` 就行，它会打开浏览器。或者：
+
 ```bash
 cd w05_3d_game
 node server.js
 ```
 
-打开 http://127.0.0.1:5173 。操作、演示模式和已知限制写在 [w05_3d_game/README.md](w05_3d_game/README.md)。
+打开 http://127.0.0.1:5173 。不要直接双击 `index.html`，那样按钮点了没反应。操作、演示模式和已知限制写在 [w05_3d_game/README.md](w05_3d_game/README.md)。
 
 ## 仓库里有什么
 

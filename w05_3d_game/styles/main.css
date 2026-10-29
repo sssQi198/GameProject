@@ -17,11 +17,19 @@ html, body, #app {
   overflow: hidden;
 }
 
+#app { position: relative; }
+
 #game-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
   display: block;
   width: 100%;
   height: 100%;
 }
+
+/* 标题 / 暂停盖住画布。画布默认不接点击，否则 WebGL 层会吃掉开始按钮。 */
+#app.screen-open #game-canvas { pointer-events: none; }
 
 #vignette,
 #danger,
@@ -32,7 +40,12 @@ html, body, #app {
 #boot-error {
   position: absolute;
   inset: 0;
+  z-index: 2;
 }
+
+#menu,
+#screen-panel,
+#boot-error { z-index: 4; }
 
 #vignette {
   pointer-events: none;
@@ -286,6 +299,15 @@ input[type="range"] { width: min(16rem, 50vw); accent-color: var(--blood); }
   text-align: center;
   background: var(--bg);
   color: var(--ink);
+  line-height: 1.8;
+  margin: 0;
+}
+
+#boot-error a { color: #f0d7a8; }
+
+#boot-error code {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--line);
 }
 
 .hidden { display: none !important; }
