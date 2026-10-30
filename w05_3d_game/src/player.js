@@ -29,7 +29,10 @@ export class Player {
     this.pendingDY = 0;
     this.interactQueued = false;
     this.stepAccum = 0;
-    this.bob = 0;
+    this.gaitPhase = 0;
+    this.gaitPulse = 0;
+    this.gaitPulseVelocity = 0;
+    this.gaitAmount = 0;
     this.speedScale = 1;
     this.onStep = null;
 
@@ -56,6 +59,10 @@ export class Player {
     this.pendingDY = 0;
     this.interactQueued = false;
     this.stepAccum = 0;
+    this.gaitPhase = 0;
+    this.gaitPulse = 0;
+    this.gaitPulseVelocity = 0;
+    this.gaitAmount = 0;
     this.moving = false;
     this.sprinting = false;
     this.syncCamera();
@@ -145,7 +152,7 @@ export class Player {
       this.pendingDX = 0;
       this.pendingDY = 0;
     }
-    this.syncCamera();
+    this.syncCamera(dt);
   }
 
   applyLookLock(dt) {
@@ -183,6 +190,7 @@ export class Player {
     this.pitch += (0 - this.pitch) * (1 - Math.exp(-6 * dt));
     this.moving = moved > 0.001;
     this.sprinting = speed > CONFIG.walkSpeed + 0.4;
+    this.advanceGait(moved, dt);
     this.accumulateStep(moved);
     this.courseDone = false;
   }
@@ -223,7 +231,24 @@ export class Player {
     const next = moveCircle(this.x, this.z, mx, mz, this.radius, colliders);
     this.x = next.x;
     this.z = next.z;
-    this.accumulateStep(Math.hypot(this.x - beforeX, this.z - beforeZ));
+    const moved = Math.hypot(this.x - beforeX, this.z - beforeZ);
+    this.moving = moved > 0.001;
+    this.advanceGait(moved, dt);
+    this.accumulateStep(moved);
+  }
+
+  advanceGait(distance, dt) {
+    const target = distance > 0.0001 ? 1 : 0;
+    const blend = 1 - Math.exp(-12 * dt);
+    this.gaitAmount += (target - this.gaitAmount) * blend;
+    if (distance <= 0.0001) return;
+
+    const stride = this.sprinting ? 1.05 : 1.25;
+    const previousPhase = this.gaitPhase;
+    this.gaitPhase = (this.gaitPhase + distance / stride) % 1;
+    if (this.gaitPhase < previousPhase) {
+      this.gaitPulseVelocity -= this.sprinting ? 0.42 : 0.32;
+    }
   }
 
   accumulateStep(distance) {
@@ -236,17 +261,45 @@ export class Player {
     }
   }
 
-  syncCamera() {
+  syncCamera(dt = 0.016) {
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    if (this.moving && !this.lookTarget && !reduce) this.bob += 0.16;
-    else this.bob = 0;
-    const bob = this.moving && !this.lookTarget && !reduce ? Math.sin(this.bob * 10) * 0.028 : 0;
-    this.camera.position.set(this.x, CONFIG.eyeHeight + bob, this.z);
+    const active = this.moving && !this.lookTarget && !reduce;
+    const target = active ? 1 : 0;
+    this.gaitAmount += (target - this.gaitAmount) * (1 - Math.exp(-12 * dt));
+
+    if (active) {
+      this.gaitPulseVelocity *= Math.exp(-14 * dt);
+      this.gaitPulse += this.gaitPulseVelocity * dt;
+      this.gaitPulse = clamp(this.gaitPulse, -0.018, 0.004);
+    } else {
+      this.gaitPulse += (0 - this.gaitPulse) * (1 - Math.exp(-18 * dt));
+      this.gaitPulseVelocity *= Math.exp(-18 * dt);
+      if (this.gaitAmount < 0.01) {
+        this.gaitPhase = 0;
+        this.gaitPulse = 0;
+        this.gaitPulseVelocity = 0;
+      }
+    }
+
+    const phase = this.gaitPhase;
+    const stepDip = phase < 0.22
+      ? -smoothStep(phase / 0.22) * 0.006
+      : phase < 0.42
+        ? -0.006 + smoothStep((phase - 0.22) / 0.2) * 0.006
+        : 0;
+    const bobY = (stepDip + this.gaitPulse) * this.gaitAmount;
+    const bobX = Math.sin(phase * Math.PI * 2) * 0.0022 * this.gaitAmount;
+
+    this.camera.position.set(this.x + bobX, CONFIG.eyeHeight + bobY, this.z);
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
     this.camera.rotation.z = 0;
   }
+}
+
+function smoothStep(t) {
+  return t * t * (3 - 2 * t);
 }
 
 const heldKeys = new Set();
