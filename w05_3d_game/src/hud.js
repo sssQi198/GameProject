@@ -16,7 +16,6 @@ export class Hud {
     this.subtitle = byId('subtitle');
     this.prompt = byId('prompt');
     this.crosshair = byId('crosshair');
-    this.flash = byId('flash');
     this.danger = byId('danger');
     this.demoBadge = byId('demo-badge');
     this.exitDemo = byId('btn-exit-demo');
@@ -155,12 +154,6 @@ export class Hud {
 
   setChase(on) {
     this.chase.classList.toggle('hidden', !on);
-  }
-
-  flash() {
-    this.flash.classList.remove('on');
-    void this.flash.offsetWidth;
-    this.flash.classList.add('on');
   }
 
   syncMute(muted) {

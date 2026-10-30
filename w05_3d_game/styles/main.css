@@ -33,7 +33,6 @@ html, body, #app {
 
 #vignette,
 #danger,
-#flash,
 #hud,
 #menu,
 #screen-panel,
@@ -56,21 +55,6 @@ html, body, #app {
   pointer-events: none;
   opacity: 0;
   background: radial-gradient(ellipse at center, transparent 25%, rgba(80, 0, 0, 0.82) 100%);
-}
-
-#flash {
-  pointer-events: none;
-  background: #f7f4ee;
-  opacity: 0;
-}
-
-#flash.on {
-  animation: shutter 280ms ease-out;
-}
-
-@keyframes shutter {
-  0% { opacity: 0.9; }
-  100% { opacity: 0; }
 }
 
 #hud { pointer-events: none; }

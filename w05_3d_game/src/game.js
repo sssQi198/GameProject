@@ -56,6 +56,7 @@ export class Game {
       if (this.phase === 'menu' || this.paused) return;
       this.audio.footstep(this.level.isInsideRoom(this.player.x, this.player.z));
     };
+    this.canvas.addEventListener('click', () => this.tryRelock());
     this.hud.showMenu('');
     this.player.setLamp(0);
   }
@@ -201,8 +202,20 @@ export class Game {
     requestAnimationFrame(() => {
       if (!this.isLive() || this.paused || this.demoActive) return;
       const lock = this.canvas.requestPointerLock?.();
-      if (lock?.catch) lock.catch(() => {});
+      if (lock?.catch) {
+        lock.catch(() => {
+          // Esc 退出后浏览器有约 1.25s 的重锁冷却；失败时提示玩家点击画面
+          if (this.isLive() && !this.paused && !this.demoActive) this.say('点击画面锁定鼠标视角', 2.5);
+        });
+      }
     });
+  }
+
+  /** 游戏中指针未锁定时，点击画布重新锁定鼠标。 */
+  tryRelock() {
+    if (this.demoActive || this.paused || !this.isLive()) return;
+    if (document.pointerLockElement === this.canvas) return;
+    this.requestLock();
   }
 
   isLive() {
@@ -438,9 +451,13 @@ export class Game {
     }
     if (this.cameraState === 'holstered') {
       this.setCameraState('drawing');
+      this.audio.cameraUp();
       return;
     }
-    if (this.cameraState === 'raised') this.setCameraState('lowering');
+    if (this.cameraState === 'raised') {
+      this.setCameraState('lowering');
+      this.audio.cameraDown();
+    }
   }
 
   onShoot() {
@@ -460,7 +477,6 @@ export class Game {
   tryPhoto() {
     if (this.photoLock > 0 || this.phase !== 'level' || !this.hasCamera || this.cleared) return;
     this.photoLock = 0.4;
-    this.hud.flash();
     this.camera.updateMatrixWorld(true);
     this.raycaster.far = CONFIG.photoRange;
     this.raycaster.setFromCamera(this.center, this.camera);

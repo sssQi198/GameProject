@@ -142,12 +142,24 @@ export class AudioBus {
   }
 
   shutter(success) {
-    // 「咔嚓」v4：攻击_tick + 中频「咔」+ 45ms 后高频「嚓」+ 机身震感，响度与脆度兼顾
+    // 「咔嚓」：攻击 tick + 中频「咔」，85ms 后高频「嚓」，两段间隔分明
     this.burst({ duration: 0.008, gain: 0.45, type: 'highpass', freq: 6000, q: 0.7 });
     this.burst({ duration: 0.035, gain: 0.6, type: 'bandpass', freq: 2400, q: 1.5 });
-    this.burst({ duration: 0.028, gain: 0.65, type: 'highpass', freq: 3800, q: 0.7, delay: 0.045 });
+    this.burst({ duration: 0.028, gain: 0.65, type: 'highpass', freq: 3800, q: 0.7, delay: 0.085 });
     this.burst({ duration: 0.05, gain: 0.12, type: 'lowpass', freq: 500, q: 0.7 });
     if (success) this.tone(660, 0.12, 0.07, 'sine');
+  }
+
+  cameraUp() {
+    // 拿出相机：衣物摩擦，音高上扬
+    this.burst({ duration: 0.2, gain: 0.1, type: 'bandpass', freq: 750, q: 0.8 });
+    this.burst({ duration: 0.14, gain: 0.06, type: 'bandpass', freq: 1400, q: 0.9, delay: 0.07 });
+  }
+
+  cameraDown() {
+    // 收起相机：衣物摩擦，音高下沉
+    this.burst({ duration: 0.2, gain: 0.09, type: 'bandpass', freq: 520, q: 0.8 });
+    this.burst({ duration: 0.14, gain: 0.05, type: 'bandpass', freq: 900, q: 0.9, delay: 0.07 });
   }
 
   photoFail() {
