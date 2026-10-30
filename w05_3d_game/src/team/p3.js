@@ -1,6 +1,6 @@
 /**
  * P3 杂物、灯闪、窗帘。
- * level.curtainNear / level.curtainFar 是两块窗帘网格。
+ * level.curtains 是走廊墙一侧的窗帘。curtainNear / curtainFar 仍指向靠门的两块。
  * 杂物不要挡拍照：网格会自动标 userData.noRay。
  * 监听拍照成功好做「灯稳 1 秒」：on(EVENT.photoOk, ...)
  */
@@ -18,9 +18,11 @@ export function extraProps() {
 }
 
 export function tick(level, dt, env) {
-  const sway = Math.sin(env.time * 0.7) * 0.012;
-  if (level.curtainNear) level.curtainNear.rotation.y = sway;
-  if (level.curtainFar) level.curtainFar.rotation.z = sway * 0.4;
+  const sway = Math.sin(env.time * 0.7) * 0.02;
+  const curtains = level.curtains?.length
+    ? level.curtains
+    : [level.curtainNear, level.curtainFar].filter(Boolean);
+  for (const curtain of curtains) curtain.rotation.y = sway;
   void dt;
 }
 

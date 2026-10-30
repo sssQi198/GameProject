@@ -103,11 +103,11 @@ export class DemoDirector {
 
   point(step) {
     if (step.to === 'hall') return { x: step.x ?? 0, z: LAYOUT.hall.z };
-    if (step.to === 'inside') return { x: step.x ?? 0, z: 3.55 };
+    if (step.to === 'inside') return { x: step.x ?? 0, z: LAYOUT.room.maxZ - 2.45 };
     if (step.to === 'pickup') return { ...LAYOUT.pickup };
     if (step.to === 'aisle') {
       const stand = this.game.level.getAnomalyStand(1);
-      return { x: stand.x, z: 4.05 };
+      return { x: 0, z: stand.z };
     }
     if (step.to === 'stand') return { ...this.game.level.getAnomalyStand(1) };
     if (step.to === 'ending') return { ...LAYOUT.classmateEnd };

@@ -312,16 +312,13 @@ export class Game {
   }
 
   updateFlow(dt) {
-    if (this.phase === 'entering' && this.player.z < 3.9) this.beginLevel(this.levelIndex + 1);
+    if (this.phase === 'entering' && this.player.z < LAYOUT.room.maxZ - 2.1) this.beginLevel(this.levelIndex + 1);
     if (this.phase === 'leaving' && this.level.isInsideRoom(this.player.x, this.player.z)) this.phase = 'level';
     if (this.phase === 'leaving' && this.player.z > 7.35) {
       if (this.levelIndex >= LEVELS) this.beginFinale();
       else this.enterCorridor();
     }
-    if (this.phase === 'corridor' && this.level.loopEnabled) {
-      if (this.player.x > LAYOUT.loopEdge) this.player.x -= LAYOUT.loopSpan;
-      if (this.player.x < -LAYOUT.loopEdge) this.player.x += LAYOUT.loopSpan;
-    }
+    this.wrapCorridor();
     if (this.phase === 'prologue' && this.level.npcDone && !this.notedNpc) {
       this.notedNpc = true;
       this.say(copy.doorStillOpen, 2.2);
@@ -364,6 +361,18 @@ export class Game {
     } else {
       this.say(copy.roomChanged, 2.3);
     }
+  }
+
+  wrapCorridor() {
+    if (this.phase === 'finaleLook' || this.phase === 'finaleChase' || this.phase === 'epilogue' || this.phase === 'win' || this.phase === 'lose') return;
+    if (this.player.z <= LAYOUT.room.maxZ) return;
+    const x = this.player.x;
+    let wrapped = x;
+    if (x > LAYOUT.loopMax) wrapped = LAYOUT.loopMin;
+    else if (x < LAYOUT.loopMin) wrapped = LAYOUT.loopMax;
+    if (wrapped === x) return;
+    this.player.x = wrapped;
+    this.player.camera.position.x += wrapped - x;
   }
 
   enterCorridor() {

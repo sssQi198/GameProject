@@ -187,8 +187,9 @@ export class Level {
       const push = min - dist;
       prop.x += (dx / dist) * push;
       prop.z += (dz / dist) * push;
-      prop.x = clamp(prop.x, -5.45, 5.45);
-      prop.z = clamp(prop.z, -4.45, 4.2);
+      const room = LAYOUT.room;
+      prop.x = clamp(prop.x, room.minX + 0.6, room.maxX - 0.6);
+      prop.z = clamp(prop.z, room.minZ + 0.6, room.maxZ - 0.85);
       const solved = pushOut(prop.x, prop.z, prop.r, this.staticColliders);
       prop.x = solved.x;
       prop.z = solved.z;
@@ -267,8 +268,8 @@ export class Level {
   }
 
   updateShowcase(time, camera) {
-    camera.position.set(1.85 + Math.sin(time * 0.18) * 0.22, 1.64, 0.05);
-    camera.lookAt(0.15, 1.4, -4.1);
+    camera.position.set(-1.6 + Math.sin(time * 0.18) * 0.25, 1.64, -0.35);
+    camera.lookAt(8.6, 1.5, 0.2);
   }
 
   updateLights(env) {
@@ -277,8 +278,10 @@ export class Level {
     const calm = env.mood === 'calm';
     this.flickerDark = isFlickerDark(env.time, env.mood);
     const base = calm ? CONFIG.roomLight * 0.3 : chase ? 1.2 : CONFIG.roomLight;
-    this.roomLight.intensity = menu ? CONFIG.roomLight * 0.9 : this.flickerDark ? base * 0.04 : base;
-    this.fixture.material.emissiveIntensity = this.roomLight.intensity > 8 ? 0.8 : 0.05;
+    const scaled = base * 0.46;
+    const intensity = menu ? CONFIG.roomLight * 0.42 : this.flickerDark ? scaled * 0.04 : scaled;
+    for (const light of this.roomLights) light.intensity = intensity;
+    this.fixtureMat.emissiveIntensity = intensity > 4 ? 0.75 : 0.05;
     this.doorLight.intensity = env.phase === 'prologue' || env.phase === 'entering' ? CONFIG.doorLight : chase ? 0 : 6;
     const lamp = chase ? 0 : calm ? CONFIG.hallLamp * 1.6 : CONFIG.hallLamp;
     for (const light of this.hallLamps) light.intensity = lamp;
@@ -381,11 +384,7 @@ export class Level {
     this.addBox(room.maxX - room.minX + t * 2, h, t, 0, h / 2, room.minZ - t / 2, this.materials.wall, true);
 
     const doorHalf = LAYOUT.door.half;
-    const northZ = room.maxZ + t / 2;
-    const leftW = -doorHalf - (room.minX - t / 2);
-    const rightW = room.maxX + t / 2 - doorHalf;
-    this.addBox(leftW, h, t, (room.minX - t / 2 - doorHalf) / 2, h / 2, northZ, this.materials.wall, true);
-    this.addBox(rightW, h, t, (doorHalf + room.maxX + t / 2) / 2, h / 2, northZ, this.materials.wall, true);
+    this.buildCorridorWall(h, t, doorHalf);
     this.doorCollider = {
       minX: -doorHalf,
       maxX: doorHalf,
@@ -396,25 +395,26 @@ export class Level {
     this.addBox(0.34, hall.height, hall.minZ - (room.maxZ + t) + 0.2, -doorHalf - 0.17, hall.height / 2, (room.maxZ + t + hall.minZ) / 2, this.materials.hall, true);
     this.addBox(0.34, hall.height, hall.minZ - (room.maxZ + t) + 0.2, doorHalf + 0.17, hall.height / 2, (room.maxZ + t + hall.minZ) / 2, this.materials.hall, true);
 
-    const hallSouthZ = hall.minZ - t / 2;
-    const hallNorthZ = hall.maxZ + t / 2;
-    this.addBox(-hall.minX - doorHalf, hall.height, t, (hall.minX + -doorHalf) / 2, hall.height / 2, hallSouthZ, this.materials.hall, true);
-    this.addBox(hall.maxX - doorHalf, hall.height, t, (doorHalf + hall.maxX) / 2, hall.height / 2, hallSouthZ, this.materials.hall, true);
-    this.addBox(alcove.minX - hall.minX, hall.height, t, (hall.minX + alcove.minX) / 2, hall.height / 2, hallNorthZ, this.materials.hall, true);
-    this.addBox(hall.maxX - alcove.maxX, hall.height, t, (alcove.maxX + hall.maxX) / 2, hall.height / 2, hallNorthZ, this.materials.hall, true);
-    this.addBox(t, hall.height, hall.maxZ - hall.minZ + t, hall.minX - t / 2, hall.height / 2, hall.z, this.materials.hall, true);
-    this.addBox(t, hall.height, hall.maxZ - hall.minZ + t, hall.maxX + t / 2, hall.height / 2, hall.z, this.materials.hall, true);
+    const hallT = 0.42;
+    const hallSouthZ = hall.minZ - hallT / 2;
+    const hallNorthZ = hall.maxZ + hallT / 2;
+    this.addBox(-hall.minX - doorHalf, hall.height, hallT, (hall.minX + -doorHalf) / 2, hall.height / 2, hallSouthZ, this.materials.hall, true);
+    this.addBox(hall.maxX - doorHalf, hall.height, hallT, (doorHalf + hall.maxX) / 2, hall.height / 2, hallSouthZ, this.materials.hall, true);
+    this.addBox(alcove.minX - hall.minX, hall.height, hallT, (hall.minX + alcove.minX) / 2, hall.height / 2, hallNorthZ, this.materials.hall, true);
+    this.addBox(hall.maxX - alcove.maxX, hall.height, hallT, (alcove.maxX + hall.maxX) / 2, hall.height / 2, hallNorthZ, this.materials.hall, true);
+    this.addBox(hallT, hall.height, hall.maxZ - hall.minZ + hallT, hall.minX - hallT / 2, hall.height / 2, hall.z, this.materials.hall, true);
+    this.addBox(hallT, hall.height, hall.maxZ - hall.minZ + hallT, hall.maxX + hallT / 2, hall.height / 2, hall.z, this.materials.hall, true);
 
     const alcoveDepth = alcove.backZ - hall.maxZ;
-    this.addBox(t, hall.height, alcoveDepth, alcove.minX - t / 2, hall.height / 2, (hall.maxZ + alcove.backZ) / 2, this.materials.hall, true);
-    this.addBox(t, hall.height, alcoveDepth, alcove.maxX + t / 2, hall.height / 2, (hall.maxZ + alcove.backZ) / 2, this.materials.hall, true);
-    this.addBox(alcove.maxX - alcove.minX + t, hall.height, t, (alcove.minX + alcove.maxX) / 2, hall.height / 2, alcove.backZ + t / 2, this.materials.hall, true);
+    this.addBox(hallT, hall.height, alcoveDepth, alcove.minX - hallT / 2, hall.height / 2, (hall.maxZ + alcove.backZ) / 2, this.materials.hall, true);
+    this.addBox(hallT, hall.height, alcoveDepth, alcove.maxX + hallT / 2, hall.height / 2, (hall.maxZ + alcove.backZ) / 2, this.materials.hall, true);
+    this.addBox(alcove.maxX - alcove.minX + hallT, hall.height, hallT, (alcove.minX + alcove.maxX) / 2, hall.height / 2, alcove.backZ + hallT / 2, this.materials.hall, true);
     this.addPlane(alcove.maxX - alcove.minX, alcoveDepth, (alcove.minX + alcove.maxX) / 2, 0.02, (hall.maxZ + alcove.backZ) / 2, floorMat);
 
     this.addBox(room.maxX - room.minX + 1, 0.16, room.maxZ - room.minZ + 1, 0, room.height + 0.08, 0, this.materials.ceiling, false);
     this.addBox(hall.maxX - hall.minX, 0.14, hall.maxZ - hall.minZ, (hall.minX + hall.maxX) / 2, hall.height + 0.05, hall.z, this.materials.ceiling, false);
 
-    // 墙面重复线脚，传送 24 米后花纹对齐
+    // 墙面线脚每 4 米一条，±20 米对调后仍然对齐
     for (let x = hall.minX + 4; x < hall.maxX; x += 4) {
       if (Math.abs(x) < 1.4) continue;
       this.addBox(0.08, 1.2, 0.06, x, 1.5, hall.minZ + 0.04, this.materials.trim, false);
@@ -424,46 +424,104 @@ export class Level {
     }
   }
 
-  buildFurniture() {
-    const { desks } = LAYOUT;
-    for (const x of desks.cols) {
-      for (const z of desks.rows) this.addDesk(x, z);
-    }
-    this.addBox(1.9, 0.78, 0.78, 0, 0.39, -3.35, this.materials.desk, true);
-    this.addBox(3.3, 1.35, 0.08, 0, 1.75, -4.9, this.materials.board, false);
-    this.addBox(3.5, 1.55, 0.1, 0, 1.75, -4.98, this.materials.trim, false);
+  buildCorridorWall(h, t, doorHalf) {
+    const { room } = LAYOUT;
+    const northZ = room.maxZ + t / 2;
+    this.staticColliders.push(
+      { minX: room.minX, maxX: -doorHalf, minZ: room.maxZ, maxZ: room.maxZ + t },
+      { minX: doorHalf, maxX: room.maxX, minZ: room.maxZ, maxZ: room.maxZ + t },
+    );
+    const lintel = h - LAYOUT.door.height;
+    this.addBox(doorHalf * 2, lintel, t, 0, LAYOUT.door.height + lintel / 2, northZ, this.materials.wall, false);
+    this.curtains = [];
+    this.addWindowRun(room.minX, -doorHalf, northZ, t, h);
+    this.addWindowRun(doorHalf, room.maxX, northZ, t, h);
+    this.curtainFar = this.curtains[5] ?? null;
+    this.curtainNear = this.curtains[6] ?? null;
+  }
 
-    const curtainMat = this.materials.curtain;
-    this.curtainFar = this.addBox(0.06, 2.55, 2.3, 5.9, 1.55, -1.7, curtainMat, false);
-    this.curtainNear = this.addBox(0.08, 2.7, 2.5, 5.86, 1.5, 0.7, curtainMat, false);
+  addWindowRun(x0, x1, northZ, t, h) {
+    const count = 3;
+    const winW = 1.9;
+    const sill = 0.95;
+    const winTop = 2.28;
+    const span = x1 - x0;
+    const pier = (span - count * winW) / (count + 1);
+    const mid = (x0 + x1) / 2;
+    const wall = this.materials.wall;
+    this.addBox(span, sill, t, mid, sill / 2, northZ, wall, false);
+    this.addBox(span, h - winTop, t, mid, winTop + (h - winTop) / 2, northZ, wall, false);
+    let cursor = x0;
+    for (let i = 0; i < count; i += 1) {
+      this.addBox(pier, winTop - sill, t, cursor + pier / 2, (sill + winTop) / 2, northZ, wall, false);
+      cursor += pier;
+      const center = cursor + winW / 2;
+      this.addWindowGlass(center, (sill + winTop) / 2, winW - 0.08, winTop - sill - 0.08, northZ);
+      this.addCurtain(center);
+      cursor += winW;
+    }
+    this.addBox(pier, winTop - sill, t, cursor + pier / 2, (sill + winTop) / 2, northZ, wall, false);
+  }
+
+  addWindowGlass(x, y, w, h, z) {
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h), this.materials.glass);
+    glass.position.set(x, y, z);
+    markNoRay(glass);
+    this.scene.add(glass);
+  }
+
+  addCurtain(x) {
+    const { room } = LAYOUT;
+    const z = room.maxZ - 0.05;
+    for (const side of [-0.55, 0.55]) {
+      const curtain = this.addBox(0.72, 2.6, 0.04, x + side, 1.42, z, this.materials.curtain, false);
+      markNoRay(curtain);
+      this.curtains.push(curtain);
+    }
+  }
+
+  buildFurniture() {
+    const { desks, room } = LAYOUT;
+    for (const x of desks.towardBoard) {
+      for (const z of desks.across) this.addDesk(x, z);
+    }
+    this.addBox(0.72, 0.78, 1.7, 8.2, 0.39, 0, this.materials.desk, true);
+    const boardX = room.maxX - 0.07;
+    const board = this.addBox(0.08, 1.45, 4.2, boardX, 1.75, 0, this.materials.board, false);
+    const frame = this.addBox(0.06, 1.7, 4.5, boardX + 0.05, 1.75, 0, this.materials.trim, false);
+    markNoRay(board);
+    markNoRay(frame);
 
     const clock = new THREE.Mesh(
       new THREE.CircleGeometry(0.28, 24),
       new THREE.MeshBasicMaterial({ map: clockTexture(), toneMapped: false }),
     );
-    clock.position.set(-5.92, 2.25, -1.1);
+    clock.position.set(room.minX + 0.04, 2.25, -2.4);
     clock.rotation.y = Math.PI / 2;
+    markNoRay(clock);
     this.scene.add(clock);
 
     const poster = new THREE.Mesh(
       new THREE.PlaneGeometry(0.7, 0.9),
       new THREE.MeshBasicMaterial({ map: posterTexture(), toneMapped: false }),
     );
-    poster.position.set(-5.92, 1.5, 2.2);
+    poster.position.set(room.minX + 0.04, 1.45, 2.6);
     poster.rotation.y = Math.PI / 2;
+    markNoRay(poster);
     this.scene.add(poster);
   }
 
   addDesk(x, z) {
     const { topW, topD, topH } = LAYOUT.desks;
-    this.addBox(topW, topH, topD, x, topH / 2, z, this.materials.desk, true);
+    this.addBox(topD, topH, topW, x, topH / 2, z, this.materials.desk, true);
     const chair = new THREE.Group();
     const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.08, 0.42), this.materials.chair);
     seat.position.y = 0.46;
     const back = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.4, 0.06), this.materials.chair);
     back.position.set(0, 0.7, 0.18);
     chair.add(seat, back);
-    chair.position.set(x, 0, z + 0.48);
+    chair.rotation.y = -Math.PI / 2;
+    chair.position.set(x - 0.48, 0, z);
     markNoRay(chair);
     this.scene.add(chair);
   }
@@ -495,7 +553,7 @@ export class Level {
     this.npcPath = [
       new THREE.Vector3(6.5, 0, LAYOUT.hall.z),
       new THREE.Vector3(0.15, 0, LAYOUT.hall.z),
-      new THREE.Vector3(0.15, 0, 4.15),
+      new THREE.Vector3(0.15, 0, LAYOUT.room.maxZ - 0.85),
     ];
     markNoRay(this.npc);
     this.npc.visible = false;
@@ -557,10 +615,10 @@ export class Level {
 
   buildProps() {
     const specs = [
-      { mesh: bottleMesh(), x: 4.55, z: 3.7, r: 0.18 },
-      { mesh: paperMesh(), x: -4.3, z: -0.15, r: 0.22 },
-      { mesh: bookMesh(), x: 2.15, z: -2.45, r: 0.2 },
-      { mesh: mopMesh(), x: -5.25, z: 4.15, r: 0.16 },
+      { mesh: bottleMesh(), x: 7.4, z: 2.75, r: 0.18 },
+      { mesh: paperMesh(), x: -8.6, z: 0, r: 0.22 },
+      { mesh: bookMesh(), x: 3.2, z: -2.75, r: 0.2 },
+      { mesh: mopMesh(), x: -8.5, z: 4.7, r: 0.16 },
     ];
     specs.push(...extraProps());
     for (const spec of specs) {
@@ -574,7 +632,7 @@ export class Level {
       new THREE.MeshStandardMaterial({ color: 0x1d2420, roughness: 1 }),
     );
     trash.scale.y = 0.75;
-    trash.position.set(5.15, 0.18, -4.15);
+    trash.position.set(-8.8, 0.18, -5.15);
     trash.userData.fakeAnomaly = true;
     this.scene.add(trash);
   }
@@ -583,21 +641,17 @@ export class Level {
     this.ambient = new THREE.AmbientLight(0x93a0b4, CONFIG.ambient);
     this.scene.add(this.ambient);
     this.scene.add(new THREE.HemisphereLight(0x1b2433, 0x1a120c, CONFIG.hemi));
-    this.roomLight = new THREE.PointLight(0xffb27a, CONFIG.roomLight, 16, 2);
-    this.roomLight.position.set(0, 2.65, 0.4);
-    this.scene.add(this.roomLight);
-    this.fixture = new THREE.Mesh(
-      new THREE.BoxGeometry(1.4, 0.08, 0.28),
-      new THREE.MeshStandardMaterial({ color: 0x2a2a28, emissive: 0xffc89a, emissiveIntensity: 0.8 }),
-    );
-    this.fixture.position.set(0, 3.02, 0.4);
-    markNoRay(this.fixture);
-    this.scene.add(this.fixture);
+    this.roomLights = [];
+    this.fixtureMat = new THREE.MeshStandardMaterial({ color: 0x2a2a28, emissive: 0xffc89a, emissiveIntensity: 0.8 });
+    for (const x of [-6, -2, 2, 6]) {
+      for (const z of [-3, 3]) this.addRoomLight(x, z);
+    }
+    this.roomLight = this.roomLights[0];
     this.doorLight = new THREE.PointLight(0xffc59a, CONFIG.doorLight, 8, 2);
-    this.doorLight.position.set(0, 2.1, 6.4);
+    this.doorLight.position.set(0, 2.15, LAYOUT.room.maxZ + 0.45);
     this.scene.add(this.doorLight);
-    for (let x = LAYOUT.hall.minX + 8; x < LAYOUT.hall.maxX - 4; x += 8) {
-      const lamp = new THREE.PointLight(0x8ea0c0, CONFIG.hallLamp, 7, 2);
+    for (let x = LAYOUT.hall.minX + 5; x <= LAYOUT.hall.maxX - 5; x += 5) {
+      const lamp = new THREE.PointLight(0x8ea0c0, CONFIG.hallLamp, 14, 2);
       lamp.position.set(x, 2.55, LAYOUT.hall.z);
       this.scene.add(lamp);
       this.hallLamps.push(lamp);
@@ -609,6 +663,17 @@ export class Level {
       markNoRay(bulb);
       this.scene.add(bulb);
     }
+  }
+
+  addRoomLight(x, z) {
+    const light = new THREE.PointLight(0xffb27a, CONFIG.roomLight, 12, 2);
+    light.position.set(x, 2.72, z);
+    this.scene.add(light);
+    this.roomLights.push(light);
+    const fixture = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.07, 0.26), this.fixtureMat);
+    fixture.position.set(x, 3.05, z);
+    markNoRay(fixture);
+    this.scene.add(fixture);
   }
 
   addBox(w, h, d, x, y, z, material, collider) {
@@ -650,6 +715,14 @@ function makeMaterials() {
     board: new THREE.MeshStandardMaterial({ color: 0x1c2420, roughness: 0.55 }),
     trim: new THREE.MeshStandardMaterial({ color: 0x1a1c1a, roughness: 0.7 }),
     curtain: new THREE.MeshStandardMaterial({ color: 0x6e3438, roughness: 0.95, side: THREE.DoubleSide }),
+    glass: new THREE.MeshStandardMaterial({
+      color: 0x9bb7c9,
+      transparent: true,
+      opacity: 0.22,
+      roughness: 0.06,
+      metalness: 0.08,
+      side: THREE.DoubleSide,
+    }),
     door: new THREE.MeshStandardMaterial({ color: 0x5c4030, roughness: 0.72 }),
     bulb: new THREE.MeshStandardMaterial({ color: 0x22262c, emissive: 0x8ea0c0, emissiveIntensity: 0.3 }),
   };

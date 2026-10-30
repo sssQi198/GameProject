@@ -51,6 +51,7 @@ function createSeat() {
   const legR = leg.clone();
   legR.position.x = 0.1;
   group.add(torso, shoulder, neck, buried, leg, legR);
+  group.rotation.y = -Math.PI / 2;
   tag(group, 1, 'seat');
   const baseShoulder = shoulder.position.y;
   return {
@@ -86,13 +87,14 @@ function createBoard() {
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(2.55, 0.95), mat);
   group.add(plane);
   group.position.set(LAYOUT.board.x, LAYOUT.board.y, LAYOUT.board.z);
+  group.rotation.y = -Math.PI / 2;
   tag(group, 2, 'board');
   let scratchIn = 0;
   return {
     level: 2,
     id: 'board',
     group,
-    stand: { x: 0.2, z: -1.7 },
+    stand: { x: 6.2, z: 0 },
     aimY: 0,
     update(dt, env) {
       const wave = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(env.time * 2.4));
@@ -124,12 +126,13 @@ function createCurtain() {
   const eyeL = eyePair(-0.09, 0.06, eyeMat, pupil);
   const eyeR = eyePair(0.09, 0.06, eyeMat, pupil);
   group.add(bulge, eyeL, eyeR);
+  group.rotation.y = Math.PI;
   tag(group, 3, 'curtain');
   return {
     level: 3,
     id: 'curtain',
     group,
-    stand: { x: 2.4, z: 0.2 },
+    stand: { x: 2.08, z: 2.75 },
     aimY: 0,
     update(dt, env) {
       const open = env.flickerDark ? 1 : 0.02;
@@ -169,7 +172,7 @@ function createEcho() {
     level: 4,
     id: 'echo',
     group,
-    stand: { x: LAYOUT.echo.x, z: LAYOUT.echo.z + 1.35 },
+    stand: { x: -1.05, z: LAYOUT.echo.z },
     aimY: 0.16,
     update(dt, env) {
       prints.forEach((print, i) => {
@@ -213,7 +216,7 @@ function createDoorVision() {
     level: 5,
     id: 'door',
     group,
-    stand: { x: 0, z: 2.4 },
+    stand: { x: 0, z: 4.2 },
     aimY: 0,
     parent: 'door',
     update(dt, env) {
