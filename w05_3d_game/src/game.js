@@ -399,6 +399,7 @@ export class Game {
     this.audio.setMood('chase');
     this.hud.setObjective(copy.runToExit);
     this.hud.setChase(false);
+    this.autoLowerCamera();
     this.say(copy.itCame, 1.5);
   }
 
@@ -409,6 +410,8 @@ export class Game {
     emit(EVENT.lookUnlock, {});
     this.player.clearInteract();
     this.player.clearShoot();
+    // 注视期间玩家可能又拿出了相机，追逐开启时再收一次；之后仍可按 E 拿出
+    this.autoLowerCamera();
     if (!this.demoActive) this.player.setControl(true);
     this.hud.setChase(true);
     this.say(copy.turnAndSprint, 2.4);
@@ -453,6 +456,14 @@ export class Game {
     else if (this.cameraState === 'shooting' && this.cameraAnimT >= CAMERA_SHOOT_TIME) this.setCameraState('raised');
   }
 
+  /** 阶段完成与终局开启时自动收起相机，与玩家按 E 收起等价；不限制之后再拿出。 */
+  autoLowerCamera() {
+    if (this.cameraState === 'raised' || this.cameraState === 'shooting' || this.cameraState === 'drawing') {
+      this.setCameraState('lowering');
+      this.audio.cameraDown();
+    }
+  }
+
   onInteract() {
     if (this.cameraState === 'none') {
       if (this.level.nearPickup(this.player.x, this.player.z)) this.pickupCamera();
@@ -470,9 +481,12 @@ export class Game {
   }
 
   onShoot() {
-    if (this.cameraState !== 'raised' || this.phase !== 'level' || this.cleared) return;
+    if (this.cameraState !== 'raised' || !this.isLive()) return;
     this.setCameraState('shooting');
-    this.tryPhoto();
+    // 只有「关卡进行中且未拍中」时按快门才参与判定；其余时刻（转移关卡、
+    // 走廊、终局等）只保留快门声与后坐反应，不发射线、不发事件、不碰判定。
+    if (this.phase === 'level' && !this.cleared && this.photoLock <= 0) this.tryPhoto();
+    else this.audio.shutter(false);
   }
 
   pickupCamera() {
@@ -509,6 +523,7 @@ export class Game {
     this.audio.door();
     this.hud.setObjective(copy.doorOpen);
     this.say(anomalyLine(this.levelIndex), 3.1);
+    this.autoLowerCamera();
   }
 
   forceCurrentPhoto() {
