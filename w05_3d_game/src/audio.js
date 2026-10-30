@@ -142,7 +142,11 @@ export class AudioBus {
   }
 
   shutter(success) {
-    this.burst({ duration: 0.05, gain: 0.28, type: 'highpass', freq: 1800, q: 0.4 });
+    // 「咔嚓」v4：攻击_tick + 中频「咔」+ 45ms 后高频「嚓」+ 机身震感，响度与脆度兼顾
+    this.burst({ duration: 0.008, gain: 0.45, type: 'highpass', freq: 6000, q: 0.7 });
+    this.burst({ duration: 0.035, gain: 0.6, type: 'bandpass', freq: 2400, q: 1.5 });
+    this.burst({ duration: 0.028, gain: 0.65, type: 'highpass', freq: 3800, q: 0.7, delay: 0.045 });
+    this.burst({ duration: 0.05, gain: 0.12, type: 'lowpass', freq: 500, q: 0.7 });
     if (success) this.tone(660, 0.12, 0.07, 'sine');
   }
 
@@ -199,9 +203,9 @@ export class AudioBus {
     o.stop(t + duration + 0.02);
   }
 
-  burst({ duration, gain, type, freq, q }) {
+  burst({ duration, gain, type, freq, q, delay = 0 }) {
     if (!this.ctx || !this.noise) return;
-    const t = this.ctx.currentTime;
+    const t = this.ctx.currentTime + delay;
     const src = this.ctx.createBufferSource();
     src.buffer = this.noise;
     const filter = this.ctx.createBiquadFilter();

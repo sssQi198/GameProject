@@ -1,7 +1,10 @@
+import { Viewfinder } from './viewfinder.js';
+
 /** DOM 界面：标题、HUD、暂停 / 胜负、音量。不碰 Three 场景。 */
 export class Hud {
   constructor(audio) {
     this.audio = audio;
+    this.viewfinder = new Viewfinder();
     this.menu = byId('menu');
     this.hud = byId('hud');
     this.panel = byId('screen-panel');
@@ -136,6 +139,10 @@ export class Hud {
 
   setPrompt(text) {
     this.prompt.textContent = text;
+  }
+
+  setCameraState(state) {
+    this.viewfinder.setState(state);
   }
 
   setAimHot(on) {

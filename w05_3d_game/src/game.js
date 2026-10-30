@@ -9,6 +9,9 @@ import { emit } from './team/bus.js';
 import { EVENT } from './team/contract.js';
 
 const LEVELS = 5;
+const CAMERA_DRAW_TIME = 0.45;
+const CAMERA_LOWER_TIME = 0.4;
+const CAMERA_SHOOT_TIME = 0.35;
 
 /**
  * 状态：menu → prologue → level → corridor → … → finaleLook → chase → epilogue → win
@@ -31,6 +34,8 @@ export class Game {
     this.levelIndex = 0;
     this.cleared = false;
     this.hasCamera = false;
+    this.cameraState = 'none';
+    this.cameraAnimT = 0;
     this.wasInside = false;
     this.time = 0;
     this.clock = 0;
@@ -61,6 +66,8 @@ export class Game {
     this.levelIndex = 0;
     this.cleared = false;
     this.hasCamera = false;
+    this.cameraState = 'none';
+    this.cameraAnimT = 0;
     this.wasInside = false;
     this.time = 0;
     this.lineT = 0;
@@ -121,6 +128,7 @@ export class Game {
     this.player.endLookLock();
     this.player.clearCourse();
     this.player.setLamp(0);
+    this.setCameraState('none');
     this.level.reset();
     this.audio.setMood('idle');
     this.audio.stopHeartbeat();
@@ -218,6 +226,7 @@ export class Game {
 
     this.time += dt;
     if (this.photoLock > 0) this.photoLock -= dt;
+    this.updateCameraState(dt);
     if (this.demoActive) this.demo.update(dt);
     this.player.speedScale = this.phase === 'prologue' ? CONFIG.prologueSpeed / CONFIG.walkSpeed : 1;
     this.player.update(dt, this.level.getColliders());
@@ -313,12 +322,14 @@ export class Game {
     if (this.phase === 'epilogue') this.updateEpilogue(dt);
 
     if (this.prepareShoot) {
+      if (this.cameraState === 'holstered') this.setCameraState('raised');
       const point = this.level.getAnomalyAimPoint(this.levelIndex);
       if (point) this.player.facePoint(point.x, point.y, point.z);
       this.tryPhoto();
       this.prepareShoot = false;
-    } else if (this.player.consumeInteract()) {
-      this.onInteract();
+    } else {
+      if (this.player.consumeInteract()) this.onInteract();
+      if (this.player.consumeShoot()) this.onShoot();
     }
   }
 
@@ -375,6 +386,7 @@ export class Game {
     this.player.endLookLock();
     emit(EVENT.lookUnlock, {});
     this.player.clearInteract();
+    this.player.clearShoot();
     if (!this.demoActive) this.player.setControl(true);
     this.hud.setChase(true);
     this.say(copy.turnAndSprint, 2.4);
@@ -404,16 +416,41 @@ export class Game {
     if (this.endingFade >= 1 && this.epilogueT > 2) this.win();
   }
 
+  setCameraState(state) {
+    this.cameraState = state;
+    this.cameraAnimT = 0;
+    this.hasCamera = state !== 'none';
+    this.hud.setCameraState?.(state);
+    this.player.setCameraRigState?.(state);
+  }
+
+  updateCameraState(dt) {
+    this.cameraAnimT += dt;
+    if (this.cameraState === 'drawing' && this.cameraAnimT >= CAMERA_DRAW_TIME) this.setCameraState('raised');
+    else if (this.cameraState === 'lowering' && this.cameraAnimT >= CAMERA_LOWER_TIME) this.setCameraState('holstered');
+    else if (this.cameraState === 'shooting' && this.cameraAnimT >= CAMERA_SHOOT_TIME) this.setCameraState('raised');
+  }
+
   onInteract() {
-    if (!this.hasCamera && this.level.nearPickup(this.player.x, this.player.z)) {
-      this.pickupCamera();
+    if (this.cameraState === 'none') {
+      if (this.level.nearPickup(this.player.x, this.player.z)) this.pickupCamera();
       return;
     }
-    if (this.phase === 'level' && this.hasCamera && !this.cleared) this.tryPhoto();
+    if (this.cameraState === 'holstered') {
+      this.setCameraState('drawing');
+      return;
+    }
+    if (this.cameraState === 'raised') this.setCameraState('lowering');
+  }
+
+  onShoot() {
+    if (this.cameraState !== 'raised' || this.phase !== 'level' || this.cleared) return;
+    this.setCameraState('shooting');
+    this.tryPhoto();
   }
 
   pickupCamera() {
-    this.hasCamera = true;
+    this.setCameraState('holstered');
     this.level.hidePickup();
     this.audio.pickup();
     this.player.setLamp(CONFIG.lamp);
@@ -423,6 +460,7 @@ export class Game {
   tryPhoto() {
     if (this.photoLock > 0 || this.phase !== 'level' || !this.hasCamera || this.cleared) return;
     this.photoLock = 0.4;
+    this.hud.flash();
     this.camera.updateMatrixWorld(true);
     this.raycaster.far = CONFIG.photoRange;
     this.raycaster.setFromCamera(this.center, this.camera);
@@ -440,7 +478,6 @@ export class Game {
     this.cleared = true;
     emit(EVENT.photoOk, { level: this.levelIndex });
     this.hud.setRecord(this.levelIndex, LEVELS);
-    this.hud.flash();
     this.audio.shutter(true);
     if (this.levelIndex === 4) this.audio.breath();
     this.level.setDoorOpen(true);
@@ -464,6 +501,7 @@ export class Game {
     this.audio.win();
     this.hud.setChase(false);
     this.hud.setDanger(0);
+    if (this.cameraState !== 'none') this.setCameraState('holstered');
     this.hud.showPanel('win', copy.winTitle, copy.stillAhead);
   }
 
@@ -477,6 +515,7 @@ export class Game {
     this.audio.stopHeartbeat();
     this.audio.lose();
     this.hud.setChase(false);
+    if (this.cameraState !== 'none') this.setCameraState('holstered');
     this.hud.showPanel('lose', copy.loseTitle, copy.loseBody);
   }
 
@@ -487,7 +526,9 @@ export class Game {
     if (this.phase === 'epilogue' || this.phase === 'win') lamp = CONFIG.lamp * 0.7;
     this.player.setLamp(lamp);
 
-    const aiming = this.phase === 'level' && this.hasCamera && !this.cleared;
+    const aiming = this.phase === 'level'
+      && (this.cameraState === 'raised' || this.cameraState === 'shooting')
+      && !this.cleared;
     let hot = false;
     if (aiming) {
       this.camera.updateMatrixWorld(true);
@@ -498,9 +539,14 @@ export class Game {
     }
     this.hud.setAimHot(hot);
 
-    if (!this.hasCamera && this.level.nearPickup(this.player.x, this.player.z)) this.hud.setPrompt('E  拾起相机');
-    else if (hot) this.hud.setPrompt('E  拍照记录');
+    const cs = this.cameraState;
+    if (cs === 'drawing') this.hud.setPrompt('拿出相机……');
+    else if (cs === 'lowering') this.hud.setPrompt('收起相机……');
+    else if (cs === 'shooting') this.hud.setPrompt('拍摄中……');
+    else if (cs === 'none' && this.level.nearPickup(this.player.x, this.player.z)) this.hud.setPrompt('E  拾起相机');
     else if (this.cleared && this.phase === 'level') this.hud.setPrompt('门开了');
+    else if (cs === 'holstered') this.hud.setPrompt('E  拿出相机');
+    else if (cs === 'raised') this.hud.setPrompt(hot ? 'F  拍摄记录' : 'F  拍摄 · E  收起相机');
     else this.hud.setPrompt('');
 
     if (this.phase === 'finaleChase') {

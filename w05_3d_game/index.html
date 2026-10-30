@@ -13,6 +13,22 @@
       <div id="danger"></div>
       <div id="flash"></div>
 
+      <div id="viewfinder" class="hidden">
+        <div id="vf-screen">
+          <div id="vf-tint"></div>
+          <div id="vf-grain"></div>
+          <div id="vf-overlay"></div>
+          <div id="vf-frame">
+            <span class="vf-corner tl"></span>
+            <span class="vf-corner tr"></span>
+            <span class="vf-corner bl"></span>
+            <span class="vf-corner br"></span>
+            <div id="vf-focus"></div>
+            <p id="vf-status">STBY</p>
+          </div>
+        </div>
+      </div>
+
       <div id="hud" class="hidden">
         <header class="hud-top">
           <div>
@@ -47,7 +63,7 @@
           <button id="btn-mute-menu" type="button" data-mute>Mute  静音</button>
           <ul class="controls">
             <li>WASD 移动 · Mouse 环顾 · Shift 冲刺</li>
-            <li>E 或 左键：拾起相机 / 拍照</li>
+            <li>E：拾起 / 拿出 / 收起相机 · F：拍摄</li>
             <li>M 静音 · Esc 暂停 · 方向键也能转向</li>
           </ul>
           <p id="menu-note"></p>

@@ -65,6 +65,7 @@ try {
         level: game.levelIndex,
         cleared: game.cleared,
         hasCamera: game.hasCamera,
+        cameraState: game.cameraState,
         x: Number(player.x.toFixed(2)),
         z: Number(player.z.toFixed(2)),
         yaw: Number(player.yaw.toFixed(2)),

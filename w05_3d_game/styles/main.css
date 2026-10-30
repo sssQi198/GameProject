@@ -151,9 +151,8 @@ html, body, #app {
 
 #prompt {
   position: absolute;
-  left: 50%;
-  bottom: 8%;
-  transform: translateX(-50%);
+  right: 6%;
+  bottom: 10%;
   letter-spacing: 0.16em;
   color: #f0d7a8;
 }
@@ -315,4 +314,213 @@ input[type="range"] { width: min(16rem, 50vw); accent-color: var(--blood); }
 @media (max-width: 720px) {
   #menu, #screen-panel { padding: 4vh 1.2rem; }
   h1 { letter-spacing: 0.2em; text-indent: 0.2em; }
+}
+
+/* ===== 取景器（节点 3） ===== */
+#viewfinder {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+#vf-screen {
+  position: absolute;
+  inset: 7% 9%;
+  border-radius: 8px;
+  border: 2px solid rgba(240, 230, 210, 0.3);
+  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+  background: transparent;
+}
+
+#vf-tint {
+  position: absolute;
+  inset: 0;
+  background: rgba(150, 190, 200, 0.06);
+  animation: vf-flicker 4s ease-in-out infinite;
+}
+
+@keyframes vf-flicker {
+  0%, 100% { opacity: 0.9; }
+  15% { opacity: 0.85; }
+  30% { opacity: 1; }
+  45% { opacity: 0.88; }
+  60% { opacity: 0.95; }
+  75% { opacity: 0.87; }
+  85% { opacity: 1; }
+  92% { opacity: 0.9; }
+}
+
+#vf-grain {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.02) 0px,
+    rgba(255, 255, 255, 0.02) 1px,
+    transparent 2px,
+    transparent 3px
+  );
+  animation: vf-scan 8s linear infinite;
+}
+
+@keyframes vf-scan {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-10px); }
+}
+
+#vf-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+#vf-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.vf-corner {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+}
+
+.vf-corner::before,
+.vf-corner::after {
+  content: "";
+  position: absolute;
+  background: rgba(240, 230, 210, 0.85);
+}
+
+.vf-corner.tl {
+  top: 8px;
+  left: 8px;
+}
+
+.vf-corner.tr {
+  top: 8px;
+  right: 8px;
+}
+
+.vf-corner.bl {
+  bottom: 8px;
+  left: 8px;
+}
+
+.vf-corner.br {
+  bottom: 8px;
+  right: 8px;
+}
+
+.vf-corner.tl::before,
+.vf-corner.tr::before,
+.vf-corner.bl::before,
+.vf-corner.br::before {
+  width: 2px;
+  height: 16px;
+}
+
+.vf-corner.tl::after,
+.vf-corner.tr::after,
+.vf-corner.bl::after,
+.vf-corner.br::after {
+  width: 16px;
+  height: 2px;
+}
+
+.vf-corner.tl::before { top: 0; left: 0; }
+.vf-corner.tl::after { top: 0; left: 0; }
+
+.vf-corner.tr::before { top: 0; right: 0; }
+.vf-corner.tr::after { top: 0; right: 0; }
+
+.vf-corner.bl::before { bottom: 0; left: 0; }
+.vf-corner.bl::after { bottom: 0; left: 0; }
+
+.vf-corner.br::before { bottom: 0; right: 0; }
+.vf-corner.br::after { bottom: 0; right: 0; }
+
+#vf-focus {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 48px;
+  height: 48px;
+  border: 2px solid rgba(240, 230, 210, 0.85);
+}
+
+#vf-status {
+  position: absolute;
+  top: 12px;
+  left: 16px;
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.15em;
+  color: rgba(240, 230, 210, 0.85);
+}
+
+#viewfinder.opening #vf-screen {
+  animation: vf-open 0.45s ease-out forwards;
+}
+
+@keyframes vf-open {
+  0% { transform: scale(0.72); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+#viewfinder.on #vf-screen {
+  transform: scale(1);
+  opacity: 1;
+}
+
+#viewfinder.shooting #vf-screen {
+  animation: vf-shoot 0.35s ease-out forwards;
+}
+
+@keyframes vf-shoot {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.96); }
+  100% { transform: scale(1); }
+}
+
+#viewfinder.closing #vf-screen {
+  animation: vf-close 0.4s ease-in forwards;
+}
+
+@keyframes vf-close {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.72); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #viewfinder.opening #vf-screen {
+    animation: vf-open-reduced 0.45s ease-out forwards;
+  }
+  #viewfinder.closing #vf-screen {
+    animation: vf-close-reduced 0.4s ease-in forwards;
+  }
+  #viewfinder.shooting #vf-screen {
+    animation: vf-shoot-reduced 0.35s ease-out forwards;
+  }
+  #vf-tint, #vf-grain {
+    animation: none;
+  }
+}
+
+@keyframes vf-open-reduced {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes vf-close-reduced {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes vf-shoot-reduced {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
 }

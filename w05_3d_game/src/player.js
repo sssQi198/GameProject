@@ -2,6 +2,7 @@ import * as THREE from '../vendor/three.module.js';
 import { CONFIG } from './config.js';
 import { moveCircle } from './collision.js';
 import { lookResponsiveness } from './team/p2.js';
+import { CameraRig } from './camera-rig.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const LOOK_LIMIT = 1.25;
@@ -28,6 +29,7 @@ export class Player {
     this.pendingDX = 0;
     this.pendingDY = 0;
     this.interactQueued = false;
+    this.shootQueued = false;
     this.stepAccum = 0;
     this.gaitPhase = 0;
     this.gaitPulse = 0;
@@ -41,6 +43,8 @@ export class Player {
     this.lamp.target.position.set(0, 0, -1);
     camera.add(this.lamp);
     camera.add(this.lamp.target);
+
+    this.cameraRig = new CameraRig(camera);
 
     this.forward = new THREE.Vector3();
     this.right = new THREE.Vector3();
@@ -58,6 +62,7 @@ export class Player {
     this.pendingDX = 0;
     this.pendingDY = 0;
     this.interactQueued = false;
+    this.shootQueued = false;
     this.stepAccum = 0;
     this.gaitPhase = 0;
     this.gaitPulse = 0;
@@ -73,16 +78,25 @@ export class Player {
     if (!on) {
       this.pendingDX = 0;
       this.pendingDY = 0;
+      this.interactQueued = false;
+      this.shootQueued = false;
     }
   }
 
   setScripted(on) {
     this.scripted = on;
-    if (on) this.clearInteract();
+    if (on) {
+      this.clearInteract();
+      this.clearShoot();
+    }
   }
 
   setLamp(intensity) {
     this.lamp.intensity = intensity;
+  }
+
+  setCameraRigState(state) {
+    this.cameraRig.setState(state);
   }
 
   pointerLook(dx, dy) {
@@ -103,6 +117,20 @@ export class Player {
 
   clearInteract() {
     this.interactQueued = false;
+  }
+
+  queueShoot() {
+    this.shootQueued = true;
+  }
+
+  consumeShoot() {
+    const v = this.shootQueued;
+    this.shootQueued = false;
+    return v;
+  }
+
+  clearShoot() {
+    this.shootQueued = false;
   }
 
   setCourse(x, z, speed) {
@@ -295,6 +323,7 @@ export class Player {
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;
     this.camera.rotation.z = 0;
+    this.cameraRig.update(dt);
   }
 }
 
@@ -308,6 +337,7 @@ export function bindPlayerInput(player, canvas) {
   window.addEventListener('keydown', (event) => {
     heldKeys.add(event.code);
     if (event.code === 'KeyE') player.queueInteract();
+    if (event.code === 'KeyF') player.queueShoot();
     if (event.code.startsWith('Arrow') || event.code === 'Space') event.preventDefault();
   });
   window.addEventListener('keyup', (event) => {
@@ -317,10 +347,7 @@ export function bindPlayerInput(player, canvas) {
 
   canvas.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 && event.button !== 2) return;
-    if (document.pointerLockElement === canvas) {
-      if (event.button === 0) player.queueInteract();
-      return;
-    }
+    if (document.pointerLockElement === canvas) return;
     dragLook = true;
     dragMoved = 0;
     dragButton = event.button;
@@ -342,7 +369,6 @@ export function bindPlayerInput(player, canvas) {
     if (dx || dy) player.pointerLook(dx, dy);
   });
   window.addEventListener('pointerup', () => {
-    if (dragLook && dragButton === 0 && dragMoved < 6) player.queueInteract();
     dragLook = false;
   });
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
