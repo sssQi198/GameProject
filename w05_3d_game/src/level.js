@@ -150,6 +150,11 @@ export class Level {
     for (const box of this.staticColliders) out.push(box);
     for (const box of extraColliders()) out.push(box);
     if (!this.doorOpen) out.push(this.doorCollider);
+    // 同学碰撞盒（§4.4）：可见且未进门期间注入 ±0.25m
+    if (this.npc && this.npc.visible && !this.npcDone) {
+      const p = this.npc.position;
+      out.push({ minX: p.x - 0.25, maxX: p.x + 0.25, minZ: p.z - 0.25, maxZ: p.z + 0.25 });
+    }
     return out;
   }
 
@@ -298,6 +303,12 @@ export class Level {
       this.npc.position.set(LAYOUT.classmateEnd.x, 0, LAYOUT.classmateEnd.z);
       this.npc.rotation.y = Math.PI / 2;
       this.setNpcOpacity(1 - (env.classmateFade || 0));
+      // 尾声站姿：呼吸但四肢归位
+      this.npcIdlePhase += dt * 1.7;
+      const breathe = 1 + Math.sin(this.npcIdlePhase) * 0.006;
+      if (this.npcTorso) this.npcTorso.scale.y = breathe;
+      for (const leg of (this.npcLegs ?? [])) leg.rotation.x = 0;
+      for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
       return;
     }
     if (this.npcDone) return;
@@ -309,16 +320,44 @@ export class Level {
     const dx = target.x - this.npc.position.x;
     const dz = target.z - this.npc.position.z;
     const dist = Math.hypot(dx, dz);
-    const step = 1.05 * (env.npcRate || 1) * dt;
+    const speed = 1.3 * (env.npcRate || 1);
+    const step = speed * dt;
     if (dist <= step) {
       this.npc.position.set(target.x, 0, target.z);
       this.npcIndex += 1;
       if (this.npcIndex >= this.npcPath.length) this.hideNpc();
+      // 站桩/到达后四肢归零
+      for (const leg of (this.npcLegs ?? [])) leg.rotation.x = 0;
+      for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
+      if (this.npcTorso) this.npcTorso.position.y = 0;
+      this.npc.position.y = 0;
+      this.npc.rotation.x = 0; // 前倾归零
+      // 停走时锁定当前朝向
+      this.npcSmoothYaw = this.npc.rotation.y;
     } else {
       this.npc.position.x += (dx / dist) * step;
       this.npc.position.z += (dz / dist) * step;
-      this.npc.rotation.y = Math.atan2(dx, dz);
-      this.swingLegs(env.time * (env.npcRate || 1));
+      // 平滑转向：目标朝向为目标方向，当前朝向逐步逼近
+      const targetYaw = Math.atan2(dx, dz);
+      const diff = targetYaw - this.npcSmoothYaw;
+      // 处理 -PI/PI 环绕
+      let wrapped = Math.atan2(Math.sin(diff), Math.cos(diff));
+      const turnRate = 3.0; // 弧度每秒，调低让转弯更平滑
+      const maxTurn = turnRate * dt;
+      if (Math.abs(wrapped) <= maxTurn) {
+        this.npcSmoothYaw = targetYaw;
+      } else {
+        this.npcSmoothYaw += Math.sign(wrapped) * maxTurn;
+      }
+      this.npc.rotation.y = this.npcSmoothYaw;
+      // 步态相位按位移推进：步幅 1.0m，自然慢速
+      this.npcPhase += step / 1.0;
+      this.swingBody(this.npcPhase);
+      // 整体上下起伏：2倍步频，幅度0.012m，模拟行走时身体弹性起伏
+      const bounceY = Math.sin(this.npcPhase * Math.PI * 4) * 0.012;
+      this.npc.position.y = bounceY;
+      // 前倾约 3°（0.05 rad），规划书 §4.3
+      this.npc.rotation.x = 0.05;
     }
   }
 
@@ -327,11 +366,36 @@ export class Level {
     this.pickup.position.y += (0.12 - this.pickup.position.y) * Math.min(1, dt * 3);
   }
 
-  swingLegs(time) {
-    if (!this.npcLegs?.[0] || !this.npcLegs[1]) return;
-    const swing = Math.sin(time * 8) * 0.45;
-    this.npcLegs[0].rotation.x = swing;
-    this.npcLegs[1].rotation.x = -swing;
+  swingBody(time) {
+    const legs = this.npcLegs;
+    const arms = this.npcArms;
+    const torso = this.npcTorso;
+    // time = npcPhase，一次完整步幅(1.0m)对应 phase 增加1，即2π
+    const theta = time * Math.PI * 2;
+    const sinT = Math.sin(theta);
+    const cosT = Math.cos(theta);
+
+    // 腿：摆幅 0.42 rad，与位移同步
+    const legSwing = sinT * 0.42;
+    if (legs?.[0]) legs[0].rotation.x = legSwing;
+    if (legs?.[1]) legs[1].rotation.x = -legSwing;
+
+    // 手臂：用平滑衰减的三角函数替代纯反相，更自然
+    // 手臂摆动幅度比腿小，且有相位延迟
+    // 使用 sin^3 轮廓模拟自然拮抗摆动，肘在摆臂后段更弯曲
+    const armPhase = theta + 0.3;   // 略滞后于腿
+    const armRaw = Math.sin(armPhase);
+    // 限幅 + 软曲线，避免机械感
+    const armSwing = Math.sign(armRaw) * Math.pow(Math.abs(armRaw), 0.9) * 0.22;
+    if (arms?.[0]) arms[0].rotation.x = -armSwing;
+    if (arms?.[1]) arms[1].rotation.x = armSwing;
+
+    // 躯干：改为整体上下起伏（整个npc的位置y浮动），不单独移动torso
+    // 用 2倍步频的单位周期起伏，幅度 0.012m
+    if (torso) {
+      // 保持 torso 位置归零，起伏改为 npc.position.y
+      torso.position.y = 0;
+    }
   }
 
   setNpcOpacity(opacity) {
@@ -546,10 +610,21 @@ export class Level {
 
   buildCharacters() {
     const customMate = createClassmate(THREE);
-    const npc = customMate ? { group: customMate, legs: customMate.userData.legs ?? [], materials: customMate.userData.materials ?? [] } : makePerson(0x242833, 0xc4a48a);
+    const npc = customMate ? {
+      group: customMate,
+      legs: customMate.userData.legs ?? [],
+      arms: customMate.userData.arms ?? [],
+      torso: customMate.userData.torso ?? null,
+      materials: customMate.userData.materials ?? [],
+    } : makePerson(0x242833, 0xc4a48a);
     this.npc = npc.group;
     this.npcLegs = npc.legs;
+    this.npcArms = npc.arms;
+    this.npcTorso = npc.torso;
     this.npcMaterials = npc.materials;
+    this.npcPhase = 0;          // 步态相位，按位移推进
+    this.npcIdlePhase = 0;      // 站姿呼吸相位
+    this.npcSmoothYaw = 0;      // 平滑转向当前角度
     this.npcPath = [
       new THREE.Vector3(6.5, 0, LAYOUT.hall.z),
       new THREE.Vector3(0.15, 0, LAYOUT.hall.z),
