@@ -10,13 +10,146 @@
  *   userData.torso = 躯干网格（用于呼吸缩放），userData.materials 用于尾声淡出。
  * 眼睛：本地高度约 1.62。userData.eyeL / eyeR 会跟着心跳缩放。
  */
+// 复用项目内 Three.js、统一场景坐标，以及拍照识别所需的标签函数。
+import * as THREE from '../../vendor/three.module.js';
+import { LAYOUT } from '../layout.js';
+import { tagAnomaly } from './contract.js';
+
+// 每个数字对应一关；返回值必须符合上方约定，才能被 level.js 挂入场景。
 export const anomalyFactory = {
-  1: null,
-  2: null,
-  3: null,
-  4: null,
-  5: null,
+  1: createSeatAnomaly,
+  2: createBoardAnomaly,
+  3: createCurtainAnomaly,
+  4: createEchoAnomaly,
+  5: createDoorAnomaly,
 };
+
+/**
+ * 第 1 关：后排多出来的人影座位。
+ * 重点是肩膀在灯闪时轻微抬起，给玩家一个“它还活着”的细节。
+ */
+function createSeatAnomaly(level = 1) {
+  const group = new THREE.Group();
+  // 异常根节点放在 layout.js 规定的座位坐标，避免改变场景尺寸。
+  group.position.set(LAYOUT.seat.x, 0, LAYOUT.seat.z);
+  const cloth = new THREE.MeshStandardMaterial({ color: 0x14161c, roughness: 0.9 });
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.66, 0.26), cloth);
+  torso.position.y = 1.12;
+  const shoulder = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.16, 0.28), cloth);
+  shoulder.position.y = 1.4;
+  const neck = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.12, 0.16), cloth);
+  neck.position.y = 1.5;
+  const buried = new THREE.Mesh(new THREE.SphereGeometry(0.14, 14, 10), cloth);
+  buried.position.set(0, 0.72, -0.28);
+  buried.scale.set(1, 0.7, 1.2);
+  const leg = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.48, 0.14), cloth);
+  leg.position.set(-0.1, 0.28, 0.02);
+  const legR = leg.clone();
+  legR.position.x = 0.1;
+  // 所有网格都挂在根节点下；给根节点打标签后，子网格也能被拍照射线识别。
+  group.add(torso, shoulder, neck, buried, leg, legR);
+  group.rotation.y = -Math.PI / 2;
+  tagAnomaly(group, level, 'seat');
+  return { level, id: 'seat', group, stand: { ...LAYOUT.photoStand }, aimY: 1.2,
+    update(dt, env) {
+      const target = 1.4 + (env.flickerDark ? 0.07 : 0);
+      shoulder.position.y += (target - shoulder.position.y) * Math.min(1, dt * 8);
+    } };
+}
+
+/**
+ * 第 2 关：黑板反复长出的文字。
+ * 文字直接绘制到 CanvasTexture，不需要外部图片文件，适合本地离线运行。
+ */
+function createBoardAnomaly(level = 2) {
+  const group = new THREE.Group();
+  // 浏览器 Canvas 负责生成黑板画面和文字贴图。
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024; canvas.height = 384;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#1a221c'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#e6e0d0'; ctx.font = '78px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText('你把它带进来了', 512, 200);
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  // MeshBasicMaterial 不受场景灯光影响，黑板字在昏暗教室里仍然可读。
+  const material = new THREE.MeshBasicMaterial({ map, transparent: true });
+  group.add(new THREE.Mesh(new THREE.PlaneGeometry(2.55, 0.95), material));
+  group.position.set(LAYOUT.board.x, LAYOUT.board.y, LAYOUT.board.z);
+  group.rotation.y = -Math.PI / 2;
+  tagAnomaly(group, level, 'board');
+  return { level, id: 'board', group, stand: { x: 6.2, z: 0 }, aimY: 0,
+    update(dt, env) { material.opacity = env.flickerDark ? 1 : 0.55 + Math.sin(env.time * 2.4) * 0.2; } };
+}
+
+/**
+ * 第 3 关：窗帘内侧的脸。
+ * 正常亮度时眼睛几乎闭合，灯光变暗时睁开，配合 P3 的闪灯逻辑。
+ */
+function createCurtainAnomaly(level = 3) {
+  const group = new THREE.Group();
+  group.position.set(LAYOUT.curtainFace.x, LAYOUT.curtainFace.y, LAYOUT.curtainFace.z);
+  const cloth = new THREE.MeshStandardMaterial({ color: 0x6a3034, roughness: 0.95, side: THREE.DoubleSide });
+  const bulge = new THREE.Mesh(new THREE.SphereGeometry(0.28, 18, 14), cloth);
+  bulge.scale.set(0.7, 1.15, 0.55);
+  const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xf2efe6, toneMapped: false });
+  const pupilMaterial = new THREE.MeshBasicMaterial({ color: 0x14080a, toneMapped: false });
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), eyeMaterial);
+  const eyeR = eyeL.clone();
+  // 瞳孔作为眼球子节点，始终略微向前凸出，避免看起来像平面贴图。
+  for (const [eye, x] of [[eyeL, -0.09], [eyeR, 0.09]]) {
+    eye.position.set(x, 0.06, 0.12);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), pupilMaterial);
+    pupil.position.z = 0.03;
+    eye.add(pupil);
+  }
+  group.add(bulge, eyeL, eyeR); group.rotation.y = Math.PI;
+  tagAnomaly(group, level, 'curtain');
+  return { level, id: 'curtain', group, stand: { x: 2.08, z: 2.75 }, aimY: 0,
+    update(dt, env) {
+      const target = env.flickerDark ? 1 : 0.02;
+      for (const eye of [eyeL, eyeR]) eye.scale.setScalar(eye.scale.x + (target - eye.scale.x) * Math.min(1, dt * 10));
+      bulge.scale.z = 0.45 + Math.sin(env.time * 1.7) * 0.08 + (env.flickerDark ? 0.15 : 0);
+    } };
+}
+
+/**
+ * 第 4 关：第二台相机和延伸到空中的鞋印。
+ * 鞋印只做视觉异常，不承担碰撞或解谜功能，拍照目标是整个根节点。
+ */
+function createEchoAnomaly(level = 4) {
+  const group = new THREE.Group();
+  group.position.set(LAYOUT.echo.x, 0, LAYOUT.echo.z);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.24, 0.24), new THREE.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 0.75 }));
+  const lens = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.08, 16), new THREE.MeshStandardMaterial({ color: 0x252833 }));
+  lens.rotation.z = Math.PI / 2; lens.position.x = 0.25; group.add(body, lens);
+  const printMaterial = new THREE.MeshBasicMaterial({ color: 0x2a211c, transparent: true, opacity: 0.7 });
+  const prints = [];
+  for (let i = 0; i < 4; i += 1) {
+    const print = new THREE.Mesh(new THREE.CircleGeometry(0.11, 12), printMaterial);
+    print.rotation.x = -Math.PI / 2; print.position.set(0.15, 0.03 + i * 0.14, 0.45 + i * 0.38);
+    group.add(print); prints.push(print);
+  }
+  tagAnomaly(group, level, 'echo');
+  return { level, id: 'echo', group, stand: { x: -1.05, z: LAYOUT.echo.z }, aimY: 0.16,
+    update(dt, env) { prints.forEach((print, i) => { print.position.y = 0.04 + i * 0.12 + Math.sin(env.time * 2 + i) * 0.02; }); } };
+}
+
+/**
+ * 第 5 关：门缝里的错层教室和一双眼睛。
+ * parent: 'door' 很重要：level.js 会把根节点挂到门轴上，使画面随门打开。
+ */
+function createDoorAnomaly(level = 5) {
+  const group = new THREE.Group();
+  group.position.set(LAYOUT.door.half, 1.4, -0.08);
+  const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.46, 0.7), new THREE.MeshBasicMaterial({ color: 0x18231f, transparent: true, opacity: 0.9, side: THREE.DoubleSide, toneMapped: false }));
+  const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0xff2438, toneMapped: false });
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 8), eyeMaterial);
+  const eyeR = eyeL.clone(); eyeL.position.set(-0.08, 0.08, 0.02); eyeR.position.set(0.08, 0.08, 0.02);
+  group.add(glass, eyeL, eyeR); tagAnomaly(group, level, 'door');
+  return { level, id: 'door', group, stand: { x: 0, z: 4.2 }, aimY: 0, parent: 'door',
+    update(dt, env) { const s = env.flickerDark ? 1.4 : 0.35; eyeL.scale.setScalar(s); eyeR.scale.setScalar(s); } };
+}
 
 /**
  * 多部件同学 v2（约 16 网格）
@@ -151,6 +284,35 @@ export function createClassmate(THREE) {
   return group;
 }
 
-export function createEyes() {
-  return null;
+/**
+ * 终局实体的眼睛和黑暗罩。
+ * level.js 会读取 userData.eyeL / eyeR，并在追逐时让它们随心跳缩放。
+ */
+export function createEyes(three = THREE) {
+  const group = new three.Group();
+  // MeshBasicMaterial 不受雾和灯光影响，确保终局的红色眼睛看得见。
+  const eyeMaterial = new three.MeshBasicMaterial({ color: 0xff2438, toneMapped: false });
+  const eyeL = new three.Mesh(new three.SphereGeometry(0.07, 16, 12), eyeMaterial);
+  const eyeR = eyeL.clone();
+  eyeL.position.set(-0.11, 1.62, 0.02);
+  eyeR.position.set(0.11, 1.62, 0.02);
+
+  const darkMaterial = new three.MeshBasicMaterial({
+    color: 0x000000,
+    transparent: true,
+    opacity: 0.58,
+    depthWrite: false,
+    side: three.DoubleSide,
+  });
+  // 半透明球体制造“实体周围的一团黑”，depthWrite 关闭以减少遮挡问题。
+  const dark = new three.Mesh(new three.SphereGeometry(1.55, 20, 14), darkMaterial);
+  dark.position.y = 1.45;
+
+  // 微弱红光只负责烘托眼睛，不替代 eyeL / eyeR 的缩放动画。
+  const halo = new three.PointLight(0xff2233, 1.2, 4.5, 2);
+  halo.position.y = 1.6;
+  group.add(eyeL, eyeR, dark, halo);
+  group.userData.eyeL = eyeL;
+  group.userData.eyeR = eyeR;
+  return group;
 }
