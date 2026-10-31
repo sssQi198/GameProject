@@ -10,6 +10,7 @@ export async function attachDebug({ renderer, level }) {
   move.add(CONFIG, 'entitySpeed', 1, 8, 0.05);
   move.add(CONFIG, 'entityCatch', 0.6, 3, 0.05);
   const look = gui.addFolder('画面');
+  look.add(CONFIG, 'brightness', 0.2, 8, 0.05).name('场景亮度');
   look.add(CONFIG, 'exposure', 0.2, 2.5, 0.01).onChange((value) => {
     renderer.toneMappingExposure = value;
   });

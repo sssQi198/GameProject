@@ -9,6 +9,11 @@ export const CONFIG = {
   playerRadius: 0.34,
   eyeHeight: 1.62,
   photoRange: 8.5,
+  /**
+   * 场景亮度。1 是当前气氛。
+   * 调试时只改这个数，环境光、教室灯、走廊灯和雾会一起变。改回气氛时设为 1。
+   */
+  brightness: 1,
   exposure: 0.95,
   ambient: 0.30,
   hemi: 0.40,
