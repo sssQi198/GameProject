@@ -1,4 +1,4 @@
-import { Viewfinder } from './viewfinder.js';
+﻿import { Viewfinder } from './viewfinder.js';
 
 /** DOM 界面：标题、HUD、暂停 / 胜负、音量。不碰 Three 场景。 */
 export class Hud {
@@ -118,26 +118,26 @@ export class Hud {
   }
 
   setRecord(done, total) {
-    this.record.textContent = `记录  ${done} / ${total}`;
+    this.writeText(this.record, 'record', `记录  ${done} / ${total}`);
   }
 
   setTime(seconds) {
     const s = Math.max(0, Math.floor(seconds));
     const m = Math.floor(s / 60);
     const r = s % 60;
-    this.timer.textContent = `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+    this.writeText(this.timer, 'time', `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`);
   }
 
   setObjective(text) {
-    this.objective.textContent = text;
+    this.writeText(this.objective, 'objective', text);
   }
 
   setSubtitle(text) {
-    this.subtitle.textContent = text;
+    this.writeText(this.subtitle, 'subtitle', text);
   }
 
   setPrompt(text) {
-    this.prompt.textContent = text;
+    this.writeText(this.prompt, 'prompt', text);
   }
 
   setCameraState(state) {
@@ -145,11 +145,17 @@ export class Hud {
   }
 
   setAimHot(on) {
+    if (this._aimHot === on) return;
+    this._aimHot = on;
     this.crosshair.classList.toggle('hot', on);
   }
 
   setDanger(amount) {
-    this.danger.style.opacity = String(Math.max(0, Math.min(1, amount)));
+    // 每帧改 style.opacity 会让整块 HUD 重新合成，取两位小数并跳过重复值
+    const value = Math.round(Math.max(0, Math.min(1, amount)) * 100) / 100;
+    if (this._danger === value) return;
+    this._danger = value;
+    this.danger.style.opacity = String(value);
   }
 
   setChase(on) {
@@ -159,6 +165,17 @@ export class Hud {
   syncMute(muted) {
     const label = muted ? 'Unmute  恢复声音' : 'Mute  静音';
     for (const button of this.muteButtons) button.textContent = label;
+  }
+
+  /**
+   * 只在文本真的变了才写 DOM。HUD 每帧都会调 setPrompt / setTime，
+   * 无条件赋值会让浏览器每帧重排一次覆盖层，直接表现为掉帧。
+   */
+  writeText(element, key, value) {
+    this._text = this._text || {};
+    if (this._text[key] === value) return;
+    this._text[key] = value;
+    element.textContent = value;
   }
 }
 

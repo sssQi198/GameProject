@@ -1,4 +1,4 @@
-import * as THREE from '../vendor/three.module.js';
+﻿import * as THREE from '../vendor/three.module.js';
 import { CONFIG } from './config.js';
 import { LAYOUT } from './layout.js';
 import { moveCircle, pushOut } from './collision.js';
@@ -32,6 +32,9 @@ export class Level {
     this.debugColliders = false;
     this.debugGroup = null;
     this._debugDoor = null;
+    this.furnitureVisuals = [];
+    this.classroomModel = null;
+    this.classroomModelError = null;
 
     scene.background = new THREE.Color(FOG);
     scene.fog = new THREE.FogExp2(FOG, CONFIG.fogMenu);
@@ -47,6 +50,44 @@ export class Level {
     this.buildLights();
     const extra = createSceneExtra(THREE, LAYOUT);
     if (extra) this.scene.add(extra);
+    this.loadClassroomModel();
+  }
+
+  loadClassroomModel() {
+    import('../vendor/GLTFLoader.js').then(({ GLTFLoader }) => {
+      const loader = new GLTFLoader();
+      loader.load('/assets/models/classroom_m1_v01.glb', (gltf) => {
+        const model = gltf.scene;
+        model.name = 'Classroom_M1_GLTF';
+        model.traverse((node) => {
+          if (!node.isMesh) return;
+          node.castShadow = false;
+          node.receiveShadow = true;
+          node.userData.noRay = true;
+        });
+        this.scene.add(model);
+        this.classroomModel = model;
+        for (const mesh of this.furnitureVisuals) {
+          mesh.visible = false;
+          // 隐藏的旧家具不能被拍照射线命中，否则会出现“看不见的桌子挡住拍摄”。
+          mesh.traverse((child) => { child.userData.noRay = true; });
+        }
+        document.body.dataset.classroomModel = 'glb';
+        document.body.dataset.furnitureHidden = String(this.furnitureVisuals.filter((m) => !m.visible).length)
+          + '/' + String(this.furnitureVisuals.length);
+        // 模型材质第一次进入视野才编译着色器，会造成一次明显卡顿（转视角时最明显）。
+        // 交给上层立刻预编译。
+        this.onSceneChanged?.();
+      }, undefined, (error) => {
+        this.classroomModelError = error;
+        document.body.dataset.classroomModel = 'fallback';
+        console.warn('教室 GLB 加载失败，继续使用程序化教室。', error);
+      });
+    }).catch((error) => {
+      this.classroomModelError = error;
+      document.body.dataset.classroomModel = 'fallback';
+      console.warn('教室 GLB 模块加载失败，继续使用程序化教室。', error);
+    });
   }
 
   reset() {
@@ -111,13 +152,17 @@ export class Level {
   }
 
   spawnUpTo(count) {
+    let added = false;
     for (let level = 1; level <= count; level += 1) {
       if (this.anomalies.some((item) => item.level === level)) continue;
       const anomaly = createAnomaly(level);
       if (anomaly.parent === 'door') this.doorPivot.add(anomaly.group);
       else this.scene.add(anomaly.group);
       this.anomalies.push(anomaly);
+      added = true;
     }
+    // 新异常带着新材质，先让渲染器编译，避免玩家第一次看到它时掉帧。
+    if (added) this.onSceneChanged?.();
   }
 
   clearAnomalies() {
@@ -150,11 +195,6 @@ export class Level {
     for (const box of this.staticColliders) out.push(box);
     for (const box of extraColliders()) out.push(box);
     if (!this.doorOpen) out.push(this.doorCollider);
-    // 同学碰撞盒（§4.4）：可见且未进门期间注入 ±0.25m
-    if (this.npc && this.npc.visible && !this.npcDone) {
-      const p = this.npc.position;
-      out.push({ minX: p.x - 0.25, maxX: p.x + 0.25, minZ: p.z - 0.25, maxZ: p.z + 0.25 });
-    }
     return out;
   }
 
@@ -303,12 +343,6 @@ export class Level {
       this.npc.position.set(LAYOUT.classmateEnd.x, 0, LAYOUT.classmateEnd.z);
       this.npc.rotation.y = Math.PI / 2;
       this.setNpcOpacity(1 - (env.classmateFade || 0));
-      // 尾声站姿：呼吸但四肢归位
-      this.npcIdlePhase += dt * 1.7;
-      const breathe = 1 + Math.sin(this.npcIdlePhase) * 0.006;
-      if (this.npcTorso) this.npcTorso.scale.y = breathe;
-      for (const leg of (this.npcLegs ?? [])) leg.rotation.x = 0;
-      for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
       return;
     }
     if (this.npcDone) return;
@@ -320,44 +354,16 @@ export class Level {
     const dx = target.x - this.npc.position.x;
     const dz = target.z - this.npc.position.z;
     const dist = Math.hypot(dx, dz);
-    const speed = 1.3 * (env.npcRate || 1);
-    const step = speed * dt;
+    const step = 1.05 * (env.npcRate || 1) * dt;
     if (dist <= step) {
       this.npc.position.set(target.x, 0, target.z);
       this.npcIndex += 1;
       if (this.npcIndex >= this.npcPath.length) this.hideNpc();
-      // 站桩/到达后四肢归零
-      for (const leg of (this.npcLegs ?? [])) leg.rotation.x = 0;
-      for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
-      if (this.npcTorso) this.npcTorso.position.y = 0;
-      this.npc.position.y = 0;
-      this.npc.rotation.x = 0; // 前倾归零
-      // 停走时锁定当前朝向
-      this.npcSmoothYaw = this.npc.rotation.y;
     } else {
       this.npc.position.x += (dx / dist) * step;
       this.npc.position.z += (dz / dist) * step;
-      // 平滑转向：目标朝向为目标方向，当前朝向逐步逼近
-      const targetYaw = Math.atan2(dx, dz);
-      const diff = targetYaw - this.npcSmoothYaw;
-      // 处理 -PI/PI 环绕
-      let wrapped = Math.atan2(Math.sin(diff), Math.cos(diff));
-      const turnRate = 3.0; // 弧度每秒，调低让转弯更平滑
-      const maxTurn = turnRate * dt;
-      if (Math.abs(wrapped) <= maxTurn) {
-        this.npcSmoothYaw = targetYaw;
-      } else {
-        this.npcSmoothYaw += Math.sign(wrapped) * maxTurn;
-      }
-      this.npc.rotation.y = this.npcSmoothYaw;
-      // 步态相位按位移推进：步幅 1.0m，自然慢速
-      this.npcPhase += step / 1.0;
-      this.swingBody(this.npcPhase);
-      // 整体上下起伏：2倍步频，幅度0.012m，模拟行走时身体弹性起伏
-      const bounceY = Math.sin(this.npcPhase * Math.PI * 4) * 0.012;
-      this.npc.position.y = bounceY;
-      // 前倾约 3°（0.05 rad），规划书 §4.3
-      this.npc.rotation.x = 0.05;
+      this.npc.rotation.y = Math.atan2(dx, dz);
+      this.swingLegs(env.time * (env.npcRate || 1));
     }
   }
 
@@ -366,36 +372,11 @@ export class Level {
     this.pickup.position.y += (0.12 - this.pickup.position.y) * Math.min(1, dt * 3);
   }
 
-  swingBody(time) {
-    const legs = this.npcLegs;
-    const arms = this.npcArms;
-    const torso = this.npcTorso;
-    // time = npcPhase，一次完整步幅(1.0m)对应 phase 增加1，即2π
-    const theta = time * Math.PI * 2;
-    const sinT = Math.sin(theta);
-    const cosT = Math.cos(theta);
-
-    // 腿：摆幅 0.42 rad，与位移同步
-    const legSwing = sinT * 0.42;
-    if (legs?.[0]) legs[0].rotation.x = legSwing;
-    if (legs?.[1]) legs[1].rotation.x = -legSwing;
-
-    // 手臂：用平滑衰减的三角函数替代纯反相，更自然
-    // 手臂摆动幅度比腿小，且有相位延迟
-    // 使用 sin^3 轮廓模拟自然拮抗摆动，肘在摆臂后段更弯曲
-    const armPhase = theta + 0.3;   // 略滞后于腿
-    const armRaw = Math.sin(armPhase);
-    // 限幅 + 软曲线，避免机械感
-    const armSwing = Math.sign(armRaw) * Math.pow(Math.abs(armRaw), 0.9) * 0.22;
-    if (arms?.[0]) arms[0].rotation.x = -armSwing;
-    if (arms?.[1]) arms[1].rotation.x = armSwing;
-
-    // 躯干：改为整体上下起伏（整个npc的位置y浮动），不单独移动torso
-    // 用 2倍步频的单位周期起伏，幅度 0.012m
-    if (torso) {
-      // 保持 torso 位置归零，起伏改为 npc.position.y
-      torso.position.y = 0;
-    }
+  swingLegs(time) {
+    if (!this.npcLegs?.[0] || !this.npcLegs[1]) return;
+    const swing = Math.sin(time * 8) * 0.45;
+    this.npcLegs[0].rotation.x = swing;
+    this.npcLegs[1].rotation.x = -swing;
   }
 
   setNpcOpacity(opacity) {
@@ -520,25 +501,134 @@ export class Level {
       this.addBox(pier, winTop - sill, t, cursor + pier / 2, (sill + winTop) / 2, northZ, wall, false);
       cursor += pier;
       const center = cursor + winW / 2;
-      this.addWindowGlass(center, (sill + winTop) / 2, winW - 0.08, winTop - sill - 0.08, northZ);
-      this.addCurtain(center);
+      this.windowIndex = (this.windowIndex || 0) + 1;
+      const broken = this.windowIndex === 2 || this.windowIndex === 5;
+      this.addWindow(center, (sill + winTop) / 2, winW, winTop - sill, northZ, sill, winTop, broken);
+      this.addCurtain(center, broken);
       cursor += winW;
     }
     this.addBox(pier, winTop - sill, t, cursor + pier / 2, (sill + winTop) / 2, northZ, wall, false);
   }
 
-  addWindowGlass(x, y, w, h, z) {
-    const glass = new THREE.Mesh(new THREE.PlaneGeometry(w, h), this.materials.glass);
-    glass.position.set(x, y, z);
+  /**
+   * 一扇窗：窗框、横竖分格、窗台、插销，其中第 2、5 扇是破的。
+   * 破窗用锯齿形黑片当缺口（外面本来就是黑的），再叠裂纹和几块挂着的碎玻璃。
+   */
+  addWindow(centerX, centerY, w, h, z, sillY, topY, broken) {
+    const innerW = w - 0.10;
+    const innerH = h - 0.10;
+    const faceZ = z - 0.06;      // 朝教室这一侧
+    const trim = this.materials.trim;
+
+    // 玻璃
+    const glass = new THREE.Mesh(new THREE.PlaneGeometry(innerW, innerH), this.materials.glass);
+    glass.position.set(centerX, centerY, z - 0.02);
     markNoRay(glass);
     this.scene.add(glass);
+
+    // 外框四条
+    const bar = 0.055;
+    const frameZ = z - 0.05;
+    this.addBox(innerW + bar * 2, bar, 0.07, centerX, topY - 0.05, frameZ, trim, false);
+    this.addBox(innerW + bar * 2, bar, 0.07, centerX, sillY + 0.05, frameZ, trim, false);
+    this.addBox(bar, innerH + bar * 2, 0.07, centerX - innerW / 2 - bar / 2, centerY, frameZ, trim, false);
+    this.addBox(bar, innerH + bar * 2, 0.07, centerX + innerW / 2 + bar / 2, centerY, frameZ, trim, false);
+    // 中竖梃 + 上横档，做出四格
+    this.addBox(0.038, innerH, 0.055, centerX, centerY, frameZ, trim, false);
+    this.addBox(innerW, 0.032, 0.055, centerX, centerY + innerH * 0.18, frameZ, trim, false);
+    // 窗台
+    this.addBox(innerW + 0.30, 0.06, 0.26, centerX, sillY - 0.02, z - 0.16, trim, false);
+    // 插销
+    this.addBox(0.05, 0.018, 0.02, centerX + 0.02, centerY - 0.02, frameZ - 0.03, trim, false);
+
+    if (!broken) return;
+
+    // 缺口：锯齿黑片
+    const holeRng = seededRandom(centerX * 13.7 + 3.1);
+    const holeW = innerW * (0.42 + holeRng() * 0.16);
+    const holeH = innerH * (0.5 + holeRng() * 0.2);
+    const cx = centerX + (holeRng() - 0.5) * (innerW - holeW) * 0.7;
+    const cy = centerY + (holeRng() - 0.5) * (innerH - holeH) * 0.6;
+    const shape = new THREE.Shape();
+    const points = 9;
+    for (let i = 0; i < points; i += 1) {
+      const angle = (i / points) * Math.PI * 2;
+      const radius = 0.5 + (holeRng() - 0.5) * 0.34;
+      const px = cx + Math.cos(angle) * (holeW / 2) * radius;
+      const py = cy + Math.sin(angle) * (holeH / 2) * radius;
+      if (i === 0) shape.moveTo(px, py);
+      else shape.lineTo(px, py);
+    }
+    shape.closePath();
+    const hole = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({
+      color: 0x000000, side: THREE.DoubleSide,
+    }));
+    hole.position.z = faceZ + 0.005;
+    markNoRay(hole);
+    this.scene.add(hole);
+
+    // 从缺口向外爬的裂纹
+    const cracks = [];
+    for (let i = 0; i < 5; i += 1) {
+      const angle = holeRng() * Math.PI * 2;
+      const len = 0.35 + holeRng() * 0.85;
+      const sx = cx + Math.cos(angle) * holeW * 0.5;
+      const sy = cy + Math.sin(angle) * holeH * 0.5;
+      let px = sx;
+      let py = sy;
+      let a = angle;
+      for (let seg = 0; seg < 3; seg += 1) {
+        a += (holeRng() - 0.5) * 0.7;
+        const step = len / 3;
+        const nx = px + Math.cos(a) * step;
+        const ny = py + Math.sin(a) * step;
+        cracks.push(px, py, 0.002, nx, ny, 0.002);
+        px = nx;
+        py = ny;
+      }
+    }
+    const crackGeo = new THREE.BufferGeometry();
+    crackGeo.setAttribute('position', new THREE.Float32BufferAttribute(cracks, 3));
+    const crackLines = new THREE.LineSegments(crackGeo, new THREE.LineBasicMaterial({
+      color: 0xbfc9c4, transparent: true, opacity: 0.45,
+    }));
+    crackLines.position.z = faceZ + 0.008;
+    markNoRay(crackLines);
+    this.scene.add(crackLines);
+
+    // 还挂着没掉的碎玻璃
+    for (let i = 0; i < 3; i += 1) {
+      const shardRng = seededRandom(i * 31.7 + centerX);
+      const wS = 0.10 + shardRng() * 0.16;
+      const hS = 0.08 + shardRng() * 0.14;
+      const tri = new THREE.Shape();
+      tri.moveTo(0, 0);
+      tri.lineTo(wS, -hS * 0.3);
+      tri.lineTo(wS * 0.35, hS);
+      tri.closePath();
+      const shard = new THREE.Mesh(new THREE.ShapeGeometry(tri), this.materials.glass);
+      shard.position.set(
+        cx + (shardRng() - 0.5) * innerW * 0.8,
+        cy + (shardRng() - 0.5) * innerH * 0.8,
+        faceZ + 0.01,
+      );
+      shard.rotation.z = shardRng() * Math.PI;
+      markNoRay(shard);
+      this.scene.add(shard);
+    }
   }
 
-  addCurtain(x) {
+  addCurtain(x, broken = false) {
     const { room } = LAYOUT;
     const z = room.maxZ - 0.05;
     for (const side of [-0.55, 0.55]) {
-      const curtain = this.addBox(0.72, 2.6, 0.04, x + side, 1.42, z, this.materials.curtain, false);
+      // 破窗那一扇的右半幅已经撕掉了，只剩贴着窗框的一小条
+      const torn = broken && side > 0;
+      const w = torn ? 0.26 : 0.72;
+      const h = torn ? 1.05 : 2.6;
+      const y = torn ? 2.42 : 1.42;
+      const offset = torn ? side * 0.72 : side;
+      const curtain = this.addBox(w, h, 0.04, x + offset, y, z, this.materials.curtain, false);
       markNoRay(curtain);
       this.curtains.push(curtain);
     }
@@ -549,10 +639,12 @@ export class Level {
     for (const x of desks.towardBoard) {
       for (const z of desks.across) this.addDesk(x, z);
     }
-    this.addBox(0.72, 0.78, 1.7, 8.2, 0.39, 0, this.materials.desk, true);
+    const teacherDesk = this.addBox(0.72, 0.78, 1.7, 8.2, 0.39, 0, this.materials.desk, true);
+    this.furnitureVisuals.push(teacherDesk);
     const boardX = room.maxX - 0.07;
     const board = this.addBox(0.08, 1.45, 4.2, boardX, 1.75, 0, this.materials.board, false);
     const frame = this.addBox(0.06, 1.7, 4.5, boardX + 0.05, 1.75, 0, this.materials.trim, false);
+    this.furnitureVisuals.push(board, frame);
     markNoRay(board);
     markNoRay(frame);
 
@@ -577,7 +669,7 @@ export class Level {
 
   addDesk(x, z) {
     const { topW, topD, topH } = LAYOUT.desks;
-    this.addBox(topD, topH, topW, x, topH / 2, z, this.materials.desk, true);
+    this.furnitureVisuals.push(this.addBox(topD, topH, topW, x, topH / 2, z, this.materials.desk, true));
     const chair = new THREE.Group();
     const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.08, 0.42), this.materials.chair);
     seat.position.y = 0.46;
@@ -588,6 +680,7 @@ export class Level {
     chair.position.set(x - 0.48, 0, z);
     markNoRay(chair);
     this.scene.add(chair);
+    this.furnitureVisuals.push(chair);
   }
 
   buildDoor() {
@@ -610,21 +703,10 @@ export class Level {
 
   buildCharacters() {
     const customMate = createClassmate(THREE);
-    const npc = customMate ? {
-      group: customMate,
-      legs: customMate.userData.legs ?? [],
-      arms: customMate.userData.arms ?? [],
-      torso: customMate.userData.torso ?? null,
-      materials: customMate.userData.materials ?? [],
-    } : makePerson(0x242833, 0xc4a48a);
+    const npc = customMate ? { group: customMate, legs: customMate.userData.legs ?? [], materials: customMate.userData.materials ?? [] } : makePerson(0x242833, 0xc4a48a);
     this.npc = npc.group;
     this.npcLegs = npc.legs;
-    this.npcArms = npc.arms;
-    this.npcTorso = npc.torso;
     this.npcMaterials = npc.materials;
-    this.npcPhase = 0;          // 步态相位，按位移推进
-    this.npcIdlePhase = 0;      // 站姿呼吸相位
-    this.npcSmoothYaw = 0;      // 平滑转向当前角度
     this.npcPath = [
       new THREE.Vector3(6.5, 0, LAYOUT.hall.z),
       new THREE.Vector3(0.15, 0, LAYOUT.hall.z),
@@ -725,7 +807,9 @@ export class Level {
     this.doorLight = new THREE.PointLight(0xffc59a, CONFIG.doorLight, 8, 2);
     this.doorLight.position.set(0, 2.15, LAYOUT.room.maxZ + 0.45);
     this.scene.add(this.doorLight);
-    for (let x = LAYOUT.hall.minX + 5; x <= LAYOUT.hall.maxX - 5; x += 5) {
+    // 走廊 106 米长，雾的可见距离只有十几米，5 米一盏等于让每帧多算一倍光照。
+    // 改成 10 米一盏，近处观感几乎不变，片元光照循环少一半。
+    for (let x = LAYOUT.hall.minX + 10; x <= LAYOUT.hall.maxX - 5; x += 10) {
       const lamp = new THREE.PointLight(0x8ea0c0, CONFIG.hallLamp, 14, 2);
       lamp.position.set(x, 2.55, LAYOUT.hall.z);
       this.scene.add(lamp);
@@ -974,6 +1058,15 @@ function markNoRay(object) {
   object.traverse((child) => {
     child.userData.noRay = true;
   });
+}
+
+/** 固定种子的伪随机，让破窗形状每次运行都一样。 */
+function seededRandom(seed) {
+  let s = Math.floor(Math.abs(seed) * 1000) >>> 0;
+  return () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
 }
 
 function flagged(object, key) {

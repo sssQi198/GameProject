@@ -1,16 +1,18 @@
-/** 手感与气氛。`?debug` 面板改的就是这些字段，每帧读取。 */
+﻿/** 手感与气氛。`?debug` 面板改的就是这些字段，每帧读取。 */
 export const CONFIG = {
   walkSpeed: 3.2,
   sprintSpeed: 5.5,
   prologueSpeed: 2.35,
   lookSensitivity: 0.00215,
+  /** 视角追随鼠标的速度（每秒收敛比例）。调大更跟手，调小更顺滑。 */
+  lookSmoothing: 55,
   playerRadius: 0.34,
   eyeHeight: 1.62,
   photoRange: 8.5,
-  exposure: 0.92,
-  ambient: 0.28,
-  hemi: 0.42,
-  roomLight: 30,
+  exposure: 0.95,
+  ambient: 0.30,
+  hemi: 0.40,
+  roomLight: 22,
   doorLight: 14,
   hallLamp: 16,
   lampDim: 0.35,
