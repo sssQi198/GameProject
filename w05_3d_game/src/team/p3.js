@@ -2,6 +2,8 @@
  * P3 杂物、灯闪、窗帘。
  * level.curtains 是走廊墙一侧的窗帘。curtainNear / curtainFar 仍指向靠门的两块。
  * 杂物不要挡拍照：网格会自动标 userData.noRay。
+ * 想被踢动：mesh.userData.physical = true，或 extraProps 里写 physical: true。
+ * 带这个标签的物品受重力，踢到时按碰撞力翻滚。
  * 监听拍照成功好做「灯稳 1 秒」：on(EVENT.photoOk, ...)
  */
 import { EVENT } from './contract.js';
@@ -12,7 +14,7 @@ export function isFlickerDark(time, mood) {
   return Math.sin(time * 13) > 0.72 && Math.sin(time * 3.7 + 2) > 0;
 }
 
-/** 返回 { mesh, x, z, r }。mesh 的原点在地面。 */
+/** 返回 { mesh, x, z, r }。也可给 hx、hy、hz、mass、pivotY、physical。mesh 原点默认在地面。 */
 export function extraProps() {
   return [];
 }

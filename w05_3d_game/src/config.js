@@ -8,6 +8,8 @@ export const CONFIG = {
   lookSmoothing: 55,
   playerRadius: 0.34,
   eyeHeight: 1.62,
+  /** 向下加速度（米/秒²）。比 9.8 大一些，离地后会很快落回地面。 */
+  gravity: 22,
   photoRange: 8.5,
   /**
    * 场景亮度。1 是当前气氛。

@@ -5,5 +5,5 @@ import './p3.js';
 import './m1.js';
 import './m2.js';
 
-export { TAG, EVENT, tagAnomaly } from './contract.js';
+export { TAG, EVENT, tagAnomaly, tagPhysical } from './contract.js';
 export { on, emit } from './bus.js';

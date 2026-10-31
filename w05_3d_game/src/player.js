@@ -7,15 +7,23 @@ import { CameraRig } from './camera-rig.js';
 const UP = new THREE.Vector3(0, 1, 0);
 const LOOK_LIMIT = 1.25;
 
+const GROUND_Y = 0;
+const TERMINAL_VELOCITY = -32;
+
 /**
  * 第一人称：WASD 移动，鼠标或方向键转向，Shift 冲刺。
- * 演示和强制注视会关掉键鼠，改由脚本或 lookTarget 驱动。
+ * 脚底高度受重力影响，落到地面后贴住。演示和强制注视会关掉键鼠，改由脚本或 lookTarget 驱动。
  */
 export class Player {
   constructor(camera) {
     this.camera = camera;
     this.x = 0;
     this.z = 0;
+    this.feetY = GROUND_Y;
+    this.vy = 0;
+    this.vx = 0;
+    this.vz = 0;
+    this.grounded = true;
     this.yaw = 0;
     this.pitch = 0;
     this.radius = CONFIG.playerRadius;
@@ -54,6 +62,11 @@ export class Player {
   reset(x, z, yaw) {
     this.x = x;
     this.z = z;
+    this.feetY = GROUND_Y;
+    this.vy = 0;
+    this.vx = 0;
+    this.vz = 0;
+    this.grounded = true;
     this.yaw = yaw;
     this.pitch = 0;
     this.course = null;
@@ -169,14 +182,20 @@ export class Player {
   /** 把视角精确对准世界坐标，演示拍照用。 */
   facePoint(x, y, z) {
     const dx = x - this.x;
-    const dy = y - CONFIG.eyeHeight;
+    const dy = y - this.eyeY();
     const dz = z - this.z;
     this.yaw = Math.atan2(-dx, -dz);
     this.pitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -LOOK_LIMIT, LOOK_LIMIT);
     this.syncCamera();
   }
 
+  eyeY() {
+    return this.feetY + CONFIG.eyeHeight;
+  }
+
   update(dt, colliders) {
+    const x0 = this.x;
+    const z0 = this.z;
     this.radius = CONFIG.playerRadius;
     if (this.lookTarget) {
       this.applyLookLock(dt);
@@ -192,12 +211,32 @@ export class Player {
       this.pendingDX = 0;
       this.pendingDY = 0;
     }
+    this.applyGravity(dt);
+    if (dt > 1e-8) {
+      this.vx = (this.x - x0) / dt;
+      this.vz = (this.z - z0) / dt;
+    } else {
+      this.vx = 0;
+      this.vz = 0;
+    }
     this.syncCamera(dt);
+  }
+
+  applyGravity(dt) {
+    this.vy = Math.max(this.vy - CONFIG.gravity * dt, TERMINAL_VELOCITY);
+    this.feetY += this.vy * dt;
+    if (this.feetY <= GROUND_Y) {
+      this.feetY = GROUND_Y;
+      this.vy = 0;
+      this.grounded = true;
+    } else {
+      this.grounded = false;
+    }
   }
 
   applyLookLock(dt) {
     const dx = this.lookTarget.x - this.x;
-    const dy = this.lookTarget.y - CONFIG.eyeHeight;
+    const dy = this.lookTarget.y - this.eyeY();
     const dz = this.lookTarget.z - this.z;
     const desiredYaw = Math.atan2(-dx, -dz);
     const desiredPitch = clamp(Math.atan2(dy, Math.hypot(dx, dz)), -LOOK_LIMIT, LOOK_LIMIT);
@@ -297,7 +336,7 @@ export class Player {
   }
 
   accumulateStep(distance) {
-    if (distance < 0.0001) return;
+    if (!this.grounded || distance < 0.0001) return;
     this.stepAccum += distance;
     const stride = this.sprinting ? 1.15 : 1.45;
     if (this.stepAccum >= stride) {
@@ -332,10 +371,11 @@ export class Player {
       : phase < 0.42
         ? -0.006 + smoothStep((phase - 0.22) / 0.2) * 0.006
         : 0;
-    const bobY = (stepDip + this.gaitPulse) * this.gaitAmount;
-    const bobX = Math.sin(phase * Math.PI * 2) * 0.0022 * this.gaitAmount;
+    const bobScale = this.grounded ? this.gaitAmount : 0;
+    const bobY = (stepDip + this.gaitPulse) * bobScale;
+    const bobX = Math.sin(phase * Math.PI * 2) * 0.0022 * bobScale;
 
-    this.camera.position.set(this.x + bobX, CONFIG.eyeHeight + bobY, this.z);
+    this.camera.position.set(this.x + bobX, this.eyeY() + bobY, this.z);
     this.camera.rotation.order = 'YXZ';
     this.camera.rotation.y = this.yaw;
     this.camera.rotation.x = this.pitch;

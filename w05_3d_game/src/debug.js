@@ -7,6 +7,7 @@ export async function attachDebug({ renderer, level }) {
   const move = gui.addFolder('移动');
   move.add(CONFIG, 'walkSpeed', 1, 8, 0.05);
   move.add(CONFIG, 'sprintSpeed', 2, 10, 0.05);
+  move.add(CONFIG, 'gravity', 4, 40, 0.5).name('重力');
   move.add(CONFIG, 'entitySpeed', 1, 8, 0.05);
   move.add(CONFIG, 'entityCatch', 0.6, 3, 0.05);
   const look = gui.addFolder('画面');

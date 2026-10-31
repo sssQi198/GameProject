@@ -267,7 +267,7 @@ export class Game {
     }
     this.updateZones();
     this.updateFlow(dt);
-    this.level.bumpProps(this.player.x, this.player.z, this.player.radius);
+    this.level.stepItems(dt, this.player);
     this.level.update(dt, this.env());
     this.updatePresentation();
     this.hud.setTime(this.time);

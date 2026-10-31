@@ -1,10 +1,10 @@
 import * as THREE from '../vendor/three.module.js';
 import { CONFIG } from './config.js';
 import { LAYOUT } from './layout.js';
-import { moveCircle, pushOut } from './collision.js';
+import { moveCircle, stepDynamicBodies } from './collision.js';
 import { cameraModel, createAnomaly } from './anomalies.js';
 import { emit } from './team/bus.js';
-import { EVENT } from './team/contract.js';
+import { EVENT, tagPhysical } from './team/contract.js';
 import { extraColliders, createSceneExtra } from './team/m1.js';
 import { createClassmate, createEyes } from './team/m2.js';
 import { extraProps, isFlickerDark, tick as tickRoom } from './team/p3.js';
@@ -24,6 +24,24 @@ export class Level {
     this.colliders = [];
     this.anomalies = [];
     this.props = [];
+    this.supportColliders = [
+      {
+        minX: LAYOUT.hall.minX - 2,
+        maxX: LAYOUT.hall.maxX + 2,
+        minY: -4,
+        maxY: 0,
+        minZ: -12,
+        maxZ: LAYOUT.alcove.backZ + 2,
+      },
+      {
+        minX: LAYOUT.room.minX,
+        maxX: LAYOUT.room.maxX,
+        minY: -4,
+        maxY: 0.03,
+        minZ: LAYOUT.room.minZ,
+        maxZ: LAYOUT.room.maxZ,
+      },
+    ];
     this.hallLamps = [];
     this.npcDone = false;
     this.npcIndex = 1;
@@ -113,12 +131,7 @@ export class Level {
     this.exitLight.intensity = 0;
     this.pickup.visible = false;
     this.pickupLight.intensity = 0;
-    for (const prop of this.props) {
-      prop.x = prop.homeX;
-      prop.z = prop.homeZ;
-      prop.mesh.position.x = prop.x;
-      prop.mesh.position.z = prop.z;
-    }
+    for (const prop of this.props) this.resetItem(prop);
   }
 
   beginPrologue() {
@@ -388,30 +401,45 @@ export class Level {
     return { kind: 'none', distance: Infinity };
   }
 
-  bumpProps(x, z, radius) {
+  /** 带 physical 标签的物品：三个受力点都受重力，被脚踢到时按接触点的碰撞力运动。 */
+  stepItems(dt, player) {
+    const bodies = [];
     for (const prop of this.props) {
-      let dx = prop.x - x;
-      let dz = prop.z - z;
-      let dist = Math.hypot(dx, dz);
-      const min = radius + prop.r;
-      if (dist >= min) continue;
-      if (dist < 1e-5) {
-        dx = 1;
-        dz = 0;
-        dist = 1;
-      }
-      const push = min - dist;
-      prop.x += (dx / dist) * push;
-      prop.z += (dz / dist) * push;
-      const room = LAYOUT.room;
-      prop.x = clamp(prop.x, room.minX + 0.6, room.maxX - 0.6);
-      prop.z = clamp(prop.z, room.minZ + 0.6, room.maxZ - 0.85);
-      const solved = pushOut(prop.x, prop.z, prop.r, this.staticColliders);
-      prop.x = solved.x;
-      prop.z = solved.z;
-      prop.mesh.position.x = prop.x;
-      prop.mesh.position.z = prop.z;
+      if (prop.physical) bodies.push(prop);
     }
+    const speed = Math.hypot(player.vx, player.vz);
+    let ox = 0;
+    let oz = 0;
+    if (speed > 0.15) {
+      ox = (player.vx / speed) * 0.1;
+      oz = (player.vz / speed) * 0.1;
+    }
+    const foot = 0.24;
+    const kinematic = {
+      minX: player.x - player.radius + ox,
+      maxX: player.x + player.radius + ox,
+      minY: player.feetY,
+      maxY: player.feetY + foot,
+      minZ: player.z - player.radius + oz,
+      maxZ: player.z + player.radius + oz,
+      vx: player.vx,
+      vy: player.vy,
+      vz: player.vz,
+      kick: true,
+    };
+    stepDynamicBodies(bodies, this.getColliders(), this.supportColliders, kinematic, dt);
+    for (const prop of this.props) this.placeItemMesh(prop);
+  }
+
+  placeItemMesh(prop) {
+    const rot = prop.rot;
+    const pivot = prop.pivotY;
+    prop.mesh.position.set(
+      prop.x - rot[1] * pivot,
+      prop.y - rot[4] * pivot,
+      prop.z - rot[7] * pivot,
+    );
+    prop.mesh.quaternion.set(prop.qx, prop.qy, prop.qz, prop.qw);
   }
 
   placeEntity(x, z) {
@@ -722,6 +750,8 @@ export class Level {
     this.doorCollider = {
       minX: -doorHalf,
       maxX: doorHalf,
+      minY: 0,
+      maxY: LAYOUT.door.height,
       minZ: room.maxZ,
       maxZ: room.maxZ + t,
     };
@@ -765,17 +795,14 @@ export class Level {
     const t = LAYOUT.wall;
     const z = room.maxZ + LAYOUT.wall / 2;
     const outer = door.half + jambW;
-    const leftW = -outer - room.minX;
-    const rightW = room.maxX - outer;
-    this.addBox(leftW, h, t, (room.minX - outer) / 2, h / 2, z, this.materials.wall, true);
-    this.addBox(rightW, h, t, (outer + room.maxX) / 2, h / 2, z, this.materials.wall, true);
     const lintelTop = door.height + headH;
     const lintelH = h - lintelTop;
     this.addBox(outer * 2, lintelH, t, 0, lintelTop + lintelH / 2, z, this.materials.wall, false);
     this.curtains = [];
     this.windowIndex = 0;
-    this.addWindowRun(room.minX, -door.half, z, t, h);
-    this.addWindowRun(door.half, room.maxX, z, t, h);
+    // 窗洞不再铺实墙，只留窗台、窗间墙和过梁
+    this.addWindowRun(room.minX, -outer, z, t, h);
+    this.addWindowRun(outer, room.maxX, z, t, h);
     this.curtainFar = this.curtains[5] ?? null;
     this.curtainNear = this.curtains[6] ?? null;
   }
@@ -789,7 +816,7 @@ export class Level {
     const pier = (span - count * winW) / (count + 1);
     const mid = (x0 + x1) / 2;
     const wall = this.materials.wall;
-    this.addBox(span, sill, t, mid, sill / 2, northZ, wall, false);
+    this.addBox(span, sill, t, mid, sill / 2, northZ, wall, true);
     this.addBox(span, h - winTop, t, mid, winTop + (h - winTop) / 2, northZ, wall, false);
     let cursor = x0;
     for (let i = 0; i < count; i += 1) {
@@ -799,7 +826,7 @@ export class Level {
       this.windowIndex = (this.windowIndex || 0) + 1;
       const broken = this.windowIndex === 2 || this.windowIndex === 5;
       this.addWindow(center, (sill + winTop) / 2, winW, winTop - sill, northZ, sill, winTop, broken);
-      this.addCurtain(center, broken);
+      this.addCurtain(center, broken, sill);
       cursor += winW;
     }
     this.addBox(pier, winTop - sill, t, cursor + pier / 2, (sill + winTop) / 2, northZ, wall, false);
@@ -913,15 +940,17 @@ export class Level {
     }
   }
 
-  addCurtain(x, broken = false) {
+  addCurtain(x, broken = false, sill = 0.95) {
     const { room } = LAYOUT;
     const z = room.maxZ - 0.05;
+    const hem = sill + 0.05;
+    const top = 2.72;
     for (const side of [-0.55, 0.55]) {
       // 破窗那一扇的右半幅已经撕掉了，只剩贴着窗框的一小条
       const torn = broken && side > 0;
       const w = torn ? 0.26 : 0.72;
-      const h = torn ? 1.05 : 2.6;
-      const y = torn ? 2.42 : 1.42;
+      const h = torn ? 1.05 : top - hem;
+      const y = torn ? 2.42 : (top + hem) / 2;
       const offset = torn ? side * 0.72 : side;
       const curtain = this.addBox(w, h, 0.04, x + offset, y, z, this.materials.curtain, false);
       markNoRay(curtain);
@@ -1100,26 +1129,140 @@ export class Level {
 
   buildProps() {
     const specs = [
-      { mesh: bottleMesh(), x: 7.4, z: 2.75, r: 0.18 },
-      { mesh: paperMesh(), x: -8.6, z: 0, r: 0.22 },
-      { mesh: bookMesh(), x: 3.2, z: -2.75, r: 0.2 },
-      { mesh: mopMesh(), x: -8.5, z: 4.7, r: 0.16 },
+      { mesh: bottleMesh(), x: 7.4, z: 2.75, hx: 0.07, hy: 0.16, hz: 0.07, pivotY: 0.16, mass: 0.45, physical: true },
+      { mesh: paperMesh(), x: -8.6, z: 0, hx: 0.14, hy: 0.016, hz: 0.11, pivotY: 0, mass: 0.12, physical: true },
+      { mesh: bookMesh(), x: 3.2, z: -2.75, hx: 0.11, hy: 0.025, hz: 0.15, pivotY: 0, mass: 0.55, physical: true },
+      { mesh: mopMesh(), x: -8.5, z: 4.7, hx: 0.14, hy: 0.66, hz: 0.06, pivotY: 0.66, mass: 1.1, physical: true },
     ];
-    specs.push(...extraProps());
+    for (const extra of extraProps()) {
+      const radius = extra.r ?? 0.2;
+      specs.push({
+        mesh: extra.mesh,
+        x: extra.x,
+        z: extra.z,
+        hx: extra.hx ?? radius,
+        hy: extra.hy ?? radius,
+        hz: extra.hz ?? radius,
+        pivotY: extra.pivotY ?? (extra.hy ?? radius),
+        mass: extra.mass ?? 0.4,
+        physical: Boolean(extra.physical) || flagged(extra.mesh, 'physical'),
+      });
+    }
     for (const spec of specs) {
-      spec.mesh.position.set(spec.x, 0, spec.z);
       markNoRay(spec.mesh);
       this.scene.add(spec.mesh);
-      this.props.push({ mesh: spec.mesh, x: spec.x, z: spec.z, homeX: spec.x, homeZ: spec.z, r: spec.r });
+      this.addItem(spec);
     }
     const trash = new THREE.Mesh(
       new THREE.SphereGeometry(0.28, 12, 10),
       new THREE.MeshStandardMaterial({ color: 0x1d2420, roughness: 1 }),
     );
     trash.scale.y = 0.75;
-    trash.position.set(-8.8, 0.18, -5.15);
     trash.userData.fakeAnomaly = true;
     this.scene.add(trash);
+    this.addItem({
+      mesh: trash,
+      x: -8.8,
+      z: -5.15,
+      hx: 0.28,
+      hy: 0.21,
+      hz: 0.28,
+      pivotY: 0,
+      mass: 0.8,
+      physical: true,
+    });
+  }
+
+  floorTop(x, z) {
+    const room = LAYOUT.room;
+    if (x >= room.minX && x <= room.maxX && z >= room.minZ && z <= room.maxZ) return 0.03;
+    return 0;
+  }
+
+  /** 中心受力点在碰撞框中心。中心轴是最长的那条棱，两端受力点贴在轴的两头。 */
+  addItem(spec) {
+    if (spec.physical) tagPhysical(spec.mesh);
+    const mass = spec.mass ?? 0.4;
+    const hx = spec.hx;
+    const hy = spec.hy;
+    const hz = spec.hz;
+    const axis = hy >= hx && hy >= hz ? 1 : (hx >= hz ? 0 : 2);
+    const extent = [hx, hy, hz][axis];
+    const end = [0, 0, 0];
+    end[axis] = extent;
+    const inertia = Math.max(mass * (hx * hx + hy * hy + hz * hz) / 3, 1e-4);
+    const item = {
+      mesh: spec.mesh,
+      hx,
+      hy,
+      hz,
+      pivotY: spec.pivotY,
+      mass,
+      invMass: 1 / mass,
+      invI: 1 / inertia,
+      endX: end[0],
+      endY: end[1],
+      endZ: end[2],
+      x: spec.x,
+      y: this.floorTop(spec.x, spec.z) + hy,
+      z: spec.z,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      wx: 0,
+      wy: 0,
+      wz: 0,
+      qx: 0,
+      qy: 0,
+      qz: 0,
+      qw: 1,
+      rot: [1, 0, 0, 0, 1, 0, 0, 0, 1],
+      forceX: 0,
+      forceY: 0,
+      forceZ: 0,
+      end0X: 0,
+      end0Y: 0,
+      end0Z: 0,
+      end1X: 0,
+      end1Y: 0,
+      end1Z: 0,
+      grounded: true,
+      physical: flagged(spec.mesh, 'physical'),
+      homeX: spec.x,
+      homeZ: spec.z,
+    };
+    item.homeY = item.y;
+    this.resetItem(item);
+    this.props.push(item);
+    return item;
+  }
+
+  resetItem(item) {
+    item.x = item.homeX;
+    item.y = item.homeY;
+    item.z = item.homeZ;
+    item.vx = 0;
+    item.vy = 0;
+    item.vz = 0;
+    item.wx = 0;
+    item.wy = 0;
+    item.wz = 0;
+    item.qx = 0;
+    item.qy = 0;
+    item.qz = 0;
+    item.qw = 1;
+    item.rot = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+    item.forceX = 0;
+    item.forceY = 0;
+    item.forceZ = 0;
+    item.end0X = 0;
+    item.end0Y = 0;
+    item.end0Z = 0;
+    item.end1X = 0;
+    item.end1Y = 0;
+    item.end1Z = 0;
+    item.grounded = true;
+    this.placeItemMesh(item);
   }
 
   buildLights() {
@@ -1172,6 +1315,8 @@ export class Level {
       this.staticColliders.push({
         minX: x - w / 2,
         maxX: x + w / 2,
+        minY: y - h / 2,
+        maxY: y + h / 2,
         minZ: z - d / 2,
         maxZ: z + d / 2,
       });
