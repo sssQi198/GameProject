@@ -87,6 +87,9 @@ export class Game {
     this.introIndex = 0;
     this.introPhase = 0;
     this.introWait = 0;
+    this.shakeX = 0;
+    this.shakeY = 0;
+    this.shakeT = 0;
     this.controlHints = [];
     this.level.reset();
     this.player.setScripted(asDemo);
@@ -257,6 +260,11 @@ export class Game {
     if (this.demoActive) this.demo.update(dt);
     this.player.speedScale = this.phase === 'prologue' ? CONFIG.prologueSpeed / CONFIG.walkSpeed : 1;
     this.player.update(dt, this.level.getColliders());
+    // 摄像机抖动叠加偏移（序章出事时）
+    if (this.shakeX !== 0 || this.shakeY !== 0) {
+      this.camera.position.x += this.shakeX;
+      this.camera.position.y += this.shakeY;
+    }
     this.updateZones();
     this.updateFlow(dt);
     this.level.bumpProps(this.player.x, this.player.z, this.player.radius);
@@ -364,7 +372,7 @@ export class Game {
       this.introWait -= dt;
       if (this.introWait <= 0) {
         this.introPhase = 3;
-        this.introWait = 3.5; // aftermath文字显示时长
+        this.introWait = 0.9; // 闪光+抖动持续时间，结束后显示文字
         // 出事！闪光 + 多层次的物品倒地/撞击声
         this.level.triggerFlash(0.6);
         // 第一声：重物掉落（低频闷响）
@@ -379,7 +387,28 @@ export class Game {
         setTimeout(() => {
           try { this.audio.burst({ duration: 0.55, gain: 0.44, type: 'lowpass', freq: 260, q: 0.8 }); } catch (e) {}
         }, 450);
-        // 显示"发生什么了！我得去看看……" 并同时解锁玩家控制
+        // 开始摄像机抖动
+        this.shakeT = 0.6;  // 抖动持续 0.6 秒
+      }
+      return;
+    }
+
+    if (this.introPhase === 3) {
+      this.introWait -= dt;
+      // 抖动衰减
+      if (this.shakeT > 0) {
+        this.shakeT = Math.max(0, this.shakeT - dt);
+        // 生成随机偏移，随剩余时间衰减
+        const intensity = this.shakeT / 0.6 * 0.04; // 最大偏移 0.04 单位，约 4 厘米
+        this.shakeX = (Math.random() - 0.5) * 2 * intensity;
+        this.shakeY = (Math.random() - 0.5) * 2 * intensity;
+      } else {
+        this.shakeX = 0;
+        this.shakeY = 0;
+      }
+      if (this.introWait <= 0) {
+        this.introPhase = 4;
+        // 抖动结束后显示"发生什么了" 并同时解锁玩家控制
         this.say(introAftermath, 3.5);
         this.hud.setPrompt('');
         this.player.setControl(true);
@@ -388,10 +417,9 @@ export class Game {
       return;
     }
 
-    if (this.introPhase === 3) {
-      this.introWait -= dt;
-      if (this.introWait <= 0) {
-        this.introPhase = 4;
+    if (this.introPhase === 4) {
+      // 文字对话结束后，进入 prologue
+      if (this.lineT <= 0) {
         this.hud.setSubtitle('');
         // 进入 prologue
         this.phase = 'prologue';
