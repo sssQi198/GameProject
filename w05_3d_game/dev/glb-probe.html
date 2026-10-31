@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>GLB material probe</title>
+    <style>
+      body { margin: 0; background: #000; color: #ccc; font: 13px monospace; }
+      canvas { display: block; }
+      pre { position: fixed; top: 0; left: 0; margin: 0; padding: 8px; background: #000c; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="480" height="320"></canvas>
+    <pre id="out">loading…</pre>
+    <script type="module">
+      const out = document.querySelector('#out');
+      const lines = [];
+      try {
+        const THREE = await import('../vendor/three.module.js');
+        const { GLTFLoader } = await import('../vendor/GLTFLoader.js');
+
+        const renderer = new THREE.WebGLRenderer({
+          canvas: document.querySelector('#c'),
+          antialias: false,
+          preserveDrawingBuffer: true,
+        });
+        renderer.setPixelRatio(1);
+        renderer.setSize(480, 320, false);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        renderer.toneMapping = THREE.NoToneMapping;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000);
+        // 纯白环境光，方便直接看 albedo
+        scene.add(new THREE.AmbientLight(0xffffff, Math.PI));
+
+        const gltf = await new GLTFLoader().loadAsync('/assets/models/classroom_m1_v01.glb');
+        scene.add(gltf.scene);
+
+        let materialInfo = [];
+        gltf.scene.traverse((n) => {
+          if (!n.isMesh) return;
+          const m = n.material;
+          materialInfo.push(`${m.name || '?'}=rgb(${m.color.r.toFixed(3)},${m.color.g.toFixed(3)},${m.color.b.toFixed(3)}) type=${m.type}`);
+        });
+        lines.push(...materialInfo.slice(0, 6));
+
+        // 俯视看桌面
+        const camera = new THREE.PerspectiveCamera(45, 480 / 320, 0.1, 100);
+        camera.position.set(-2, 3.2, 4.5);
+        camera.lookAt(-3, 0.7, 1.5);
+        renderer.render(scene, camera);
+
+        const gl = renderer.getContext();
+        const px = new Uint8Array(4);
+        // 取画面中心偏下的一点，应该落在桌面上
+        gl.readPixels(240, 110, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        const rgb = [px[0], px[1], px[2]];
+        lines.push(`center pixel = ${rgb.join(',')}`);
+
+        const bright = Math.max(...rgb);
+        document.body.dataset.probe = bright > 90 ? 'bright' : 'dark';
+        lines.push(bright > 90 ? 'RESULT: furniture renders BRIGHT' : 'RESULT: furniture renders DARK');
+      } catch (error) {
+        document.body.dataset.probe = 'error';
+        lines.push('ERROR: ' + error.message);
+      }
+      out.textContent = lines.join('\n');
+    </script>
+  </body>
+</html>

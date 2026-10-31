@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Wrong Floor — anomaly smoke test</title>
+    <style>
+      body { background: #0b0d10; color: #d8d3c6; font: 14px/1.6 "Consolas", monospace; padding: 20px; }
+      .ok { color: #6ee7a8; }
+      .bad { color: #ff8b7a; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>anomaly smoke test</h1>
+    <pre id="out">running…</pre>
+    <script type="module">
+      const out = document.querySelector('#out');
+      const lines = [];
+      let failed = 0;
+
+      try {
+        const THREE = await import('../vendor/three.module.js');
+        const { createAnomaly } = await import('../src/anomalies.js');
+        const scene = new THREE.Scene();
+        const env = { time: 0, flickerDark: false, audio: { scratch() {} } };
+
+        for (let level = 1; level <= 5; level += 1) {
+          try {
+            const anomaly = createAnomaly(level);
+            if (!anomaly?.group) throw new Error('no group returned');
+            scene.add(anomaly.group);
+
+            let meshes = 0;
+            anomaly.group.traverse((node) => { if (node.isMesh) meshes += 1; });
+
+            // 跑几帧，覆盖 update 里的动画分支
+            for (let frame = 0; frame < 6; frame += 1) {
+              env.time = frame * 0.4;
+              env.flickerDark = frame % 2 === 0;
+              anomaly.update(0.016, env);
+            }
+
+            const tagged = anomaly.group.userData.anomalyLevel === level;
+            if (!tagged) throw new Error('anomalyLevel tag missing');
+            lines.push(`<span class="ok">level ${level} ${anomaly.id}: ok, ${meshes} meshes, tag=${level}</span>`);
+          } catch (error) {
+            failed += 1;
+            lines.push(`<span class="bad">level ${level}: FAIL — ${error.message}</span>`);
+          }
+        }
+
+        // 顺带验证相机模型
+        try {
+          const { cameraModel } = await import('../src/anomalies.js');
+          const cam = cameraModel(0xcccccc);
+          let n = 0;
+          cam.traverse((node) => { if (node.isMesh) n += 1; });
+          lines.push(`<span class="ok">cameraModel: ok, ${n} meshes</span>`);
+        } catch (error) {
+          failed += 1;
+          lines.push(`<span class="bad">cameraModel: FAIL — ${error.message}</span>`);
+        }
+      } catch (error) {
+        failed += 1;
+        lines.push(`<span class="bad">module load failed: ${error.message}</span>`);
+      }
+
+      document.body.dataset.smoke = failed === 0 ? 'pass' : `fail:${failed}`;
+      lines.push(failed === 0 ? '<span class="ok">SMOKE PASS</span>' : `<span class="bad">SMOKE FAIL (${failed})</span>`);
+      out.innerHTML = lines.join('\n');
+    </script>
+  </body>
+</html>

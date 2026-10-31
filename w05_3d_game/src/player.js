@@ -1,4 +1,4 @@
-import * as THREE from '../vendor/three.module.js';
+﻿import * as THREE from '../vendor/three.module.js';
 import { CONFIG } from './config.js';
 import { moveCircle } from './collision.js';
 import { lookResponsiveness } from './team/p2.js';
@@ -101,8 +101,20 @@ export class Player {
 
   pointerLook(dx, dy) {
     if (this.scripted || this.lookTarget || !this.controlEnabled) return;
-    this.pendingDX += dx;
-    this.pendingDY += dy;
+    // 指针锁定切换、浏览器丢帧时会出现几百像素的异常 movementX。
+    // 单次事件截断 + 累计总量封顶，避免一帧之内甩出几十度。
+    const limit = 140;
+    this.pendingDX += Math.max(-limit, Math.min(limit, dx));
+    this.pendingDY += Math.max(-limit, Math.min(limit, dy));
+    const cap = 200;
+    this.pendingDX = Math.max(-cap, Math.min(cap, this.pendingDX));
+    this.pendingDY = Math.max(-cap, Math.min(cap, this.pendingDY));
+  }
+
+  /** 重新锁定指针时丢弃残留的鼠标增量，避免恢复瞬间甩视角。 */
+  clearPendingLook() {
+    this.pendingDX = 0;
+    this.pendingDY = 0;
   }
 
   queueInteract() {
@@ -224,11 +236,16 @@ export class Player {
   }
 
   applyInput(dt, colliders) {
-    this.yaw -= this.pendingDX * CONFIG.lookSensitivity;
-    this.pitch -= this.pendingDY * CONFIG.lookSensitivity;
+    // 鼠标增量不一次性吃完，按时间常数收敛：即使某一帧卡住，
+    // 累计的位移也会分摊到后面几帧，而不是瞬间转到目标角度。
+    const k = 1 - Math.exp(-CONFIG.lookSmoothing * dt);
+    const stepX = this.pendingDX * k;
+    const stepY = this.pendingDY * k;
+    this.yaw -= stepX * CONFIG.lookSensitivity;
+    this.pitch -= stepY * CONFIG.lookSensitivity;
+    this.pendingDX -= stepX;
+    this.pendingDY -= stepY;
     this.pitch = clamp(this.pitch, -LOOK_LIMIT, LOOK_LIMIT);
-    this.pendingDX = 0;
-    this.pendingDY = 0;
 
     const keys = heldKeys;
     if (keys.has('ArrowLeft')) this.yaw += 1.5 * dt;
@@ -370,6 +387,10 @@ export function bindPlayerInput(player, canvas) {
   });
   window.addEventListener('pointerup', () => {
     dragLook = false;
+  });
+  // 锁定状态切换时浏览器可能补发一大段 movement，先清空再继续。
+  document.addEventListener('pointerlockchange', () => {
+    player.clearPendingLook();
   });
   canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 }
