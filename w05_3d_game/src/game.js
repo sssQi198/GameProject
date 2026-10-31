@@ -3,7 +3,7 @@ import { CONFIG } from './config.js';
 import { LAYOUT } from './layout.js';
 import { anomalyHint, anomalyLine } from './anomalies.js';
 import { DemoDirector } from './demo.js';
-import { copy } from './team/p1.js';
+import { copy, introDialog, skipHint, introAftermath } from './team/p1.js';
 import { lookHoldSeconds } from './team/p2.js';
 import { emit } from './team/bus.js';
 import { EVENT } from './team/contract.js';
@@ -47,6 +47,7 @@ export class Game {
     this.endingFade = 0;
     this.saidEnd = false;
     this.notedNpc = false;
+    this.saidWait = false;
     this.prepareShoot = false;
     this.menuNote = '';
     this.pointerLocked = false;
@@ -79,17 +80,33 @@ export class Game {
     this.endingFade = 0;
     this.saidEnd = false;
     this.notedNpc = false;
+    this.saidWait = false;
     this.prepareShoot = false;
     this.menuNote = '';
+    this.introCooldown = 0;
+    this.introIndex = 0;
+    this.introPhase = 0;
+    this.introWait = 0;
+    this.controlHints = [];
     this.level.reset();
     this.player.setScripted(asDemo);
     this.player.reset(LAYOUT.spawn.x, LAYOUT.spawn.z, LAYOUT.spawn.yaw);
     this.player.speedScale = 1;
-    this.player.setControl(!asDemo);
     this.player.setLamp(CONFIG.lampDim);
     this.level.beginPrologue();
-    this.level.setDoorOpen(true, true);
-    this.phase = 'prologue';
+    if (asDemo) {
+      // 演示模式直接跳过 intro，全开门
+      this.level.setDoorOpen(true, true);
+      this.phase = 'prologue';
+      this.player.setControl(false);
+      this.demo.start();
+    } else {
+      // 正常模式：先播放intro对话，门虚掩，NPC 站桩
+      this.level.setDoorAjar(true);
+      this.phase = 'intro';
+      this.player.setControl(false);
+      this.requestLock();
+    }
     this.hud.showPlay();
     this.hud.setDemo(asDemo);
     this.hud.hidePanel();
@@ -103,9 +120,6 @@ export class Game {
     this.audio.unlock();
     this.audio.setMood('play');
     this.audio.stopHeartbeat();
-    this.say(copy.wait, 2.2);
-    if (asDemo) this.demo.start();
-    else this.requestLock();
   }
 
   startDemo() {
@@ -180,7 +194,7 @@ export class Game {
     if (!this.paused) return;
     this.paused = false;
     this.hud.hidePanel();
-    if (!this.demoActive && this.phase !== 'finaleLook') this.player.setControl(true);
+    if (!this.demoActive && this.phase !== 'finaleLook' && this.phase !== 'intro') this.player.setControl(true);
     this.requestLock();
   }
 
@@ -278,6 +292,7 @@ export class Game {
 
   mood() {
     if (this.phase === 'menu') return 'menu';
+    if (this.phase === 'intro') return 'hall';
     if (this.phase === 'finaleLook' || this.phase === 'finaleChase' || this.phase === 'lose') return 'chase';
     if (this.phase === 'epilogue' || this.phase === 'win') return 'calm';
     if (this.phase === 'level' || this.phase === 'entering') return 'play';
@@ -285,6 +300,7 @@ export class Game {
   }
 
   npcMode() {
+    if (this.phase === 'intro') return 'idle';
     if (this.phase === 'epilogue' || this.phase === 'win') return 'ending';
     if ((this.phase === 'prologue' || (this.phase === 'entering' && this.levelIndex === 0)) && !this.level.npcDone) {
       return 'walk';
@@ -311,7 +327,95 @@ export class Game {
     if (this.phase === 'level' && this.cleared) this.phase = 'leaving';
   }
 
+  updateIntro(dt) {
+    // introPhase: 0=对话, 1=npc走进教室, 2=等待后出事(flash/声), 3=显示"发生什么了"并解锁玩家, 4=进入prologue
+    if (this.introPhase === 0) {
+      // 对话序列
+      if (this.introCooldown > 0) {
+        this.introCooldown -= dt;
+        return;
+      }
+      if (this.introIndex < introDialog.length) {
+        this.say(introDialog[this.introIndex], 2.4);
+        this.introIndex += 1;
+        this.introCooldown = 2.7;
+        this.hud.setPrompt(skipHint);
+      }
+      if (this.player.consumeInteract() || this.introIndex >= introDialog.length) {
+        // E 跳过或全部播完 → NPC 直接走进教室，玩家仍不可操作
+        this.introPhase = 1;
+        this.hud.setPrompt('');
+        this.level.setDoorOpen(true); // NPC 开始走时开门，以免被门阻挡
+        this.level.setNpcState('walking');
+      }
+      return;
+    }
+
+    if (this.introPhase === 1) {
+      // 等待 NPC 走完 (npcDone)
+      if (this.level.npcDone) {
+        this.introPhase = 2;
+        this.introWait = 1.8; // NPC 进门后再等一会才出事
+      }
+      return;
+    }
+
+    if (this.introPhase === 2) {
+      this.introWait -= dt;
+      if (this.introWait <= 0) {
+        this.introPhase = 3;
+        this.introWait = 3.5; // aftermath文字显示时长
+        // 出事！闪光 + 多层次的物品倒地/撞击声
+        this.level.triggerFlash(0.6);
+        // 第一声：重物掉落（低频闷响）
+        this.audio.burst({ duration: 0.9, gain: 0.70, type: 'lowpass', freq: 350, q: 0.4 });
+        // 第二声：金属/器皿撞击（中高频）
+        this.audio.burst({ duration: 0.6, gain: 0.56, type: 'bandpass', freq: 180, q: 0.5 });
+        // 200ms后：连串物品倒地的细碎声
+        setTimeout(() => {
+          try { this.audio.burst({ duration: 0.4, gain: 0.6, type: 'highpass', freq: 900, q: 0.6 }); } catch (e) {}
+        }, 200);
+        // 450ms后：一声较远的撞击（回声感）
+        setTimeout(() => {
+          try { this.audio.burst({ duration: 0.55, gain: 0.44, type: 'lowpass', freq: 260, q: 0.8 }); } catch (e) {}
+        }, 450);
+        // 显示"发生什么了！我得去看看……" 并同时解锁玩家控制
+        this.say(introAftermath, 3.5);
+        this.hud.setPrompt('');
+        this.player.setControl(true);
+        this.level.setNpcState('idle');
+      }
+      return;
+    }
+
+    if (this.introPhase === 3) {
+      this.introWait -= dt;
+      if (this.introWait <= 0) {
+        this.introPhase = 4;
+        this.hud.setSubtitle('');
+        // 进入 prologue
+        this.phase = 'prologue';
+        this.requestLock();
+      }
+      return;
+    }
+  }
+
+  beginProloguePhase() {
+    // 已被新的 introPhase 流程取代，但保留引用以防外部调用
+    this.phase = 'prologue';
+    this.hud.setPrompt('');
+    this.hud.setSubtitle('');
+    this.level.setNpcState('walking');
+    this.player.setControl(true);
+    this.requestLock();
+  }
+
   updateFlow(dt) {
+    if (this.phase === 'intro') {
+      this.updateIntro(dt);
+      return;
+    }
     if (this.phase === 'entering' && this.player.z < LAYOUT.room.maxZ - 2.1) this.beginLevel(this.levelIndex + 1);
     if (this.phase === 'leaving' && this.level.isInsideRoom(this.player.x, this.player.z)) this.phase = 'level';
     if (this.phase === 'leaving' && this.player.z > 7.35) {
@@ -319,6 +423,7 @@ export class Game {
       else this.enterCorridor();
     }
     this.wrapCorridor();
+    // 序章不再有等待/推门 NPC 逻辑 — NPC 已先进教室出事，玩家追赶
     if (this.phase === 'prologue' && this.level.npcDone && !this.notedNpc) {
       this.notedNpc = true;
       this.say(copy.doorStillOpen, 2.2);

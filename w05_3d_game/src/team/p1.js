@@ -19,6 +19,18 @@ export const successLines = {
   5: '教室外面还是教室。',
 };
 
+export const introDialog = [
+  '到了，就是前面那间。',
+  '……真的要半夜进去？',
+  '传闻要是真的，拍到东西我们就走。',
+  '我还是有点怕……我在这等你吧，转一圈赶紧出来。',
+  '瞧你那熊样，那就在这等着吧。',
+];
+
+export const introAftermath = '发生什么了！我得去看看……';
+
+export const skipHint = 'E 跳过剧情';
+
 export const copy = {
   follow: '跟着前面的人',
   wait: '等等我。',

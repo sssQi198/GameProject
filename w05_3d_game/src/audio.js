@@ -215,6 +215,14 @@ export class AudioBus {
     o.stop(t + duration + 0.02);
   }
 
+  npcStep(distance) {
+    const maxDist = 14;
+    const factor = Math.max(0, 1 - distance / maxDist);
+    const vol = factor * 0.09;
+    if (vol <= 0.001) return;
+    this.burst({ duration: 0.09, gain: vol, type: 'bandpass', freq: 180, q: 0.7 });
+  }
+
   burst({ duration, gain, type, freq, q, delay = 0 }) {
     if (!this.ctx || !this.noise) return;
     const t = this.ctx.currentTime + delay;

@@ -25,6 +25,7 @@ export class Level {
     this.hallLamps = [];
     this.npcDone = false;
     this.npcIndex = 1;
+    this._doorLightReveal = false;
     this.doorOpen = false;
     this.doorAngle = 0;
     this.loopEnabled = false;
@@ -56,6 +57,11 @@ export class Level {
     this.doorPivot.rotation.y = 0;
     this.loopEnabled = false;
     this.npcDone = false;
+    this.npcState = 'idle';
+    this.npcWaitReached = false;
+    this.npcSaidWait = false;
+    this.npcTurnTarget = null;
+    this.npcDoorReopen = false;
     this.npc.visible = false;
     this.setNpcOpacity(1);
     this.entity.visible = false;
@@ -74,15 +80,29 @@ export class Level {
 
   beginPrologue() {
     this.npcDone = false;
+    this.npcState = 'idle';
+    this.npcWaitReached = false;
+    this.npcSaidWait = false;
+    this.npcTurnTarget = null;
+    this.npcDoorReopen = false;
     this.npcIndex = 1;
+    this.npcSmoothYaw = Math.PI / 2; // 对齐初始朝向
     this.npc.visible = true;
+    this.npc.position.copy(this.npcStandPos);
+    this.npc.rotation.y = Math.PI / 2;
     this.setNpcOpacity(1);
-    this.npc.position.copy(this.npcPath[0]);
   }
 
+  /**
+   * NPC隐藏 + 走廊透光开启
+   * – npcDone = true 后 game.js 的 introPhase 会推进到 phase 2（出事前的等待）
+   * – _doorLightReveal = true 后走廊 doorLight 才会亮起（见 updateLights）
+   * – 走廊透光的颜色/强度可调 CONFIG.doorLight（config._lighting）
+   */
   hideNpc() {
     this.npc.visible = false;
     this.npcDone = true;
+    this._doorLightReveal = true; // NPC进教室后走廊透光，直到门关闭
   }
 
   revealPickup() {
@@ -101,6 +121,12 @@ export class Level {
     return Math.hypot(x - LAYOUT.pickup.x, z - LAYOUT.pickup.z) < 1.65;
   }
 
+  /**
+   * 开/关门。snap=true 立刻到位（不参与平滑），false 由 update() 每帧平滑过渡。
+   * 门平滑由 update()→doorAngle = (target - doorAngle)*min(1, dt*4) 驱动。
+   * 关门前 emit(EVENT.door) 发出事件（谁关心谁自己听）。
+   * 后续AI接管者不用改这个函数，改门旋转角度或速度调 doorAngle target 和 dt*4。
+   */
   setDoorOpen(open, snap = false) {
     this.doorOpen = open;
     if (snap) {
@@ -108,6 +134,149 @@ export class Level {
       this.doorPivot.rotation.y = this.doorAngle;
     }
     emit(EVENT.door, { open });
+  }
+
+  /** 从 game.js 控制 NPC 状态切换 */
+  setNpcState(state) {
+    this.npcState = state;
+    if (state === 'walking') {
+      this.npc.visible = true;
+      this.npc.position.copy(this.npcStandPos);
+      this.npcIndex = 1;
+      this.npcSmoothYaw = Math.PI / 2; // 对齐朝向，避免闪一下
+      this.npcWaitReached = false;
+      this.npcSaidWait = false;
+      this.npcDoorReopen = false;
+    }
+  }
+
+  /** 每帧由 game.js 调用来检测等待释放条件 */
+  checkNpcWait(playerX, playerZ) {
+    if (this.npcState !== 'waiting') return;
+    const toDoor = Math.hypot(playerX, playerZ - (LAYOUT.room.maxZ + LAYOUT.wall / 2));
+    const inside = playerZ <= LAYOUT.room.maxZ;
+    // 释放条件：玩家距门<3.5m，或已进房间，或15s倒计时由game.js处理
+    // 这里只负责状态切换
+    if (toDoor < 3.5 || inside) {
+      this.npcState = 'walking';
+      this.npcIndex = 1; // 从当前位置走到door-side waypoint (index 1)
+      this.npcWaitReached = false; // 继续走完全程
+      this.setDoorOpen(true, false);
+    }
+  }
+
+  /** 玩家距离门 <1.5m 时触发门推开 */
+  checkNpcDoorPush(playerX, playerZ) {
+    if (this.doorOpen) return;
+    const dist = Math.hypot(playerX, playerZ - (LAYOUT.room.maxZ + LAYOUT.wall / 2));
+    if (dist < 1.5 && !this.npcDoorReopen) {
+      this.npcDoorReopen = true;
+      this.setDoorOpen(true, false);
+    }
+  }
+
+  /** 玩家距NPC小于某个距离时触发"等等我"提示 */
+  checkNpcWaitHint(playerX, playerZ) {
+    if (this.npcSaidWait || this.npcState !== 'waiting') return;
+    const dx = playerX - this.npc.position.x;
+    const dz = playerZ - this.npc.position.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist > 6) return 'triggerWait';
+    return null;
+  }
+
+  /** NPC脚步声，由update在行走时调用 */
+  npcFootstep(dt, env) {
+    if (this.npcState !== 'walking' || this.npcDone) return;
+    if (!this._npcFootstepAcc) this._npcFootstepAcc = 0;
+    // 步幅1.0m，每个完整步幅约0.77s @1.3m/s；每步触发一次
+    const stepInterval = 0.48; // 秒，约2步每秒
+    this._npcFootstepAcc += dt;
+    if (this._npcFootstepAcc >= stepInterval) {
+      this._npcFootstepAcc = 0;
+      const dx = this.npc.position.x - this.audioX;
+      const dz = this.npc.position.z - this.audioZ;
+      const listenerDist = Math.hypot(dx, dz);
+      env.audio?.npcStep(listenerDist);
+      this.audioX = this.npc.position.x;
+      this.audioZ = this.npc.position.z;
+    }
+  }
+
+  /** 门缓缓虚掩：序章初始状态门开0.55 rad */
+  setDoorAjar(snap = false) {
+    this.doorOpen = false;
+    if (snap) {
+      this.doorAngle = 0.55;
+      this.doorPivot.rotation.y = this.doorAngle;
+    }
+  }
+
+  /**
+   * 爆闪/惨绿闪烁 —— 后续AI接管者注意：
+   * – 只有调用 triggerFlash(duration) 才激活，每帧由 update()→this.lightFlash(dt) 驱动
+   * – 不要直接在 update() 或 updateLights() 里无条件调 lightFlash()，否则会永久闪
+   * – 亮度曲线: flashFactor 从 20 快速衰减到 2 再到 1，峰值时 brightness ≈ 20× 正常
+   * – 闪光色调: 惨绿色 (flashColor)，亮度越高绿色越浓
+   * – 走廊灯 (hallLamps) 同步闪烁，幅度为房间灯的 40%
+   * - 恢复后房间灯和走廊灯回到原始亮度和颜色(0xffffff / 0x8ea0c0)
+   * – 如需调整闪光强度: 改 flashFactor 起始值和衰减率; 持续时长: triggerFlash(duration) 的参数
+   */
+  lightFlash(dt) {
+    if ((this._flashT ?? -1) < 0) return;
+    this._flashT += dt;
+    const duration = this._flashDuration ?? 0.45;
+    if (this._flashT > duration) {
+      // 完全恢复：还原到正常光照
+      const base = CONFIG.roomLight;
+      const scaled = base * 0.46;
+      for (const light of this.roomLights) {
+        light.intensity = scaled;
+        if (light.color) light.color.setHex(0xffffff);
+      }
+      this.fixtureMat.emissiveIntensity = 0.05;
+      for (const light of this.hallLamps) {
+        light.intensity = CONFIG.hallLamp;
+        if (light.color) light.color.setHex(0x8ea0c0);
+      }
+      this._flashT = -1;
+      return;
+    }
+    const progress = this._flashT / duration;
+    // 亮度曲线：极强闪光 → 快速回落
+    let flashFactor;
+    if (progress < 0.10) {
+      flashFactor = 20 - 12 * (progress / 0.10);
+    } else if (progress < 0.35) {
+      flashFactor = 8 - 6 * ((progress - 0.10) / 0.25);
+    } else {
+      flashFactor = 2 - 1.0 * ((progress - 0.35) / 0.65);
+    }
+    // 惨绿调色：闪光越强绿色越浓
+    const greenMix = Math.min(1, flashFactor / 8);
+    const r = Math.round(0xcc * (1 - greenMix * 0.55));
+    const g = Math.round(0xff);
+    const b = Math.round(0xa0 * (1 - greenMix * 0.7));
+    const flashColor = (r << 16) | (g << 8) | b;
+    const base = CONFIG.roomLight;
+    const scaled = base * 0.46;
+    for (const light of this.roomLights) {
+      light.intensity = scaled * flashFactor;
+      if (light.color) light.color.setHex(flashColor);
+    }
+    this.fixtureMat.emissiveIntensity = flashFactor > 10 ? 5.0 : (flashFactor > 3 ? 3.0 : 0.05);
+    // 走廊灯同步闪烁（走廊灯保持淡绿，亮度也放大但幅度小一些）
+    const hallFactor = 1 + (flashFactor - 1) * 0.4;
+    for (const light of this.hallLamps) {
+      light.intensity = CONFIG.hallLamp * Math.max(1, hallFactor);
+      if (light.color) light.color.setHex(flashColor);
+    }
+  }
+
+  /** 触发一次闪光（重置定时器） */
+  triggerFlash(duration) {
+    this._flashT = 0;
+    this._flashDuration = duration || 0.4;
   }
 
   spawnUpTo(count) {
@@ -252,6 +421,8 @@ export class Level {
     this.updateLights(env);
     tickRoom(this, dt, env);
     this.updateNpc(dt, env);
+    this.npcFootstep(dt, env);
+    this.lightFlash(dt); // 每帧驱动爆闪，只有 triggerFlash() 激活后才真的闪；不额外判断以保持时序统一
     this.updatePickup(dt);
     for (const anomaly of this.anomalies) anomaly.update(dt, { ...env, flickerDark: this.flickerDark });
 
@@ -277,6 +448,12 @@ export class Level {
     camera.lookAt(8.6, 1.5, 0.2);
   }
 
+  /**
+   * 灯光调节 —— 后续AI接管者注意：
+   * – 走廊灯颜色/亮度：调 `CONFIG.hallLamp`（config._lighting）或下方 `this.hallLamps`
+   * – 走廊透光（doorLight）：受 `_doorLightReveal` 控制，在 hideNpc() 设为 true
+   * - 环境光/雾：调 `CONFIG.ambient` 和 scene.fog.density
+   */
   updateLights(env) {
     const menu = env.mood === 'menu';
     const chase = env.mood === 'chase';
@@ -287,7 +464,8 @@ export class Level {
     const intensity = menu ? CONFIG.roomLight * 0.42 : this.flickerDark ? scaled * 0.04 : scaled;
     for (const light of this.roomLights) light.intensity = intensity;
     this.fixtureMat.emissiveIntensity = intensity > 4 ? 0.75 : 0.05;
-    this.doorLight.intensity = env.phase === 'prologue' || env.phase === 'entering' ? CONFIG.doorLight : chase ? 0 : 6;
+    // doorLight 走廊透光：_doorLightReveal=true(NPC进教室后)才亮，避免出事前走廊突然亮起
+    this.doorLight.intensity = this._doorLightReveal ? CONFIG.doorLight : (chase ? 0 : 6);
     const lamp = chase ? 0 : calm ? CONFIG.hallLamp * 1.6 : CONFIG.hallLamp;
     for (const light of this.hallLamps) light.intensity = lamp;
     this.ambient.intensity = calm ? CONFIG.ambient * 2.4 : CONFIG.ambient;
@@ -312,7 +490,44 @@ export class Level {
       return;
     }
     if (this.npcDone) return;
+    const speed = 1.3 * (env.npcRate || 1);
+
+    // ===== 空闲状态 — 序章NPC刚出现，站在位置面向玩家 =====
+    if (this.npcState === 'idle') {
+      this.npc.visible = true;
+      // 呼吸动画
+      this.npcIdlePhase += dt * 1.7;
+      const breathe = 1 + Math.sin(this.npcIdlePhase) * 0.006;
+      if (this.npcTorso) this.npcTorso.scale.y = breathe;
+      for (const leg of (this.npcLegs ?? [])) leg.rotation.x = 0;
+      for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
+      this.npc.position.y = 0;
+      // 面向玩家方向 (Z正方向)
+      const faceYaw = Math.PI / 2;
+      this.npcSmoothYaw += (faceYaw - this.npcSmoothYaw) * Math.min(1, dt * 3);
+      this.npc.rotation.y = this.npcSmoothYaw;
+      return;
+    }
+
     const target = this.npcPath[this.npcIndex];
+
+    // ===== 等待状态 — 第一次到达门口时等待玩家 =====
+    if (this.npcState === 'waiting') {
+      this.npc.visible = true;
+      // 站姿呼吸
+      this.npcIdlePhase += dt * 1.7;
+      const breathe = 1 + Math.sin(this.npcIdlePhase) * 0.006;
+      if (this.npcTorso) this.npcTorso.scale.y = breathe;
+      for (const leg of (this.npcLegs ?? [])) leg.rotation.x = 0;
+      for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
+      this.npc.position.y = 0;
+      // 面向房间内
+      this.npcSmoothYaw += (Math.PI / 2 - this.npcSmoothYaw) * Math.min(1, dt * 3);
+      this.npc.rotation.y = this.npcSmoothYaw;
+      return;
+    }
+
+    // ===== 行走状态 — 向目标点移动 =====
     if (!target) {
       this.hideNpc();
       return;
@@ -320,29 +535,31 @@ export class Level {
     const dx = target.x - this.npc.position.x;
     const dz = target.z - this.npc.position.z;
     const dist = Math.hypot(dx, dz);
-    const speed = 1.3 * (env.npcRate || 1);
     const step = speed * dt;
     if (dist <= step) {
       this.npc.position.set(target.x, 0, target.z);
       this.npcIndex += 1;
+
+      // 判断是否到达门口（waypoint 0→1之后，坐标接近 door side）
+      if (this.npcIndex === 2 && !this.npcWaitReached) {
+        this.npcWaitReached = true;
+        this.setDoorOpen(true); // NPC到达门口后推开门，走廊透光
+      }
       if (this.npcIndex >= this.npcPath.length) this.hideNpc();
       // 站桩/到达后四肢归零
       for (const leg of (this.npcLegs ?? [])) leg.rotation.x = 0;
       for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
       if (this.npcTorso) this.npcTorso.position.y = 0;
       this.npc.position.y = 0;
-      this.npc.rotation.x = 0; // 前倾归零
-      // 停走时锁定当前朝向
+      this.npc.rotation.x = 0;
       this.npcSmoothYaw = this.npc.rotation.y;
     } else {
       this.npc.position.x += (dx / dist) * step;
       this.npc.position.z += (dz / dist) * step;
-      // 平滑转向：目标朝向为目标方向，当前朝向逐步逼近
       const targetYaw = Math.atan2(dx, dz);
       const diff = targetYaw - this.npcSmoothYaw;
-      // 处理 -PI/PI 环绕
       let wrapped = Math.atan2(Math.sin(diff), Math.cos(diff));
-      const turnRate = 3.0; // 弧度每秒，调低让转弯更平滑
+      const turnRate = 3.0;
       const maxTurn = turnRate * dt;
       if (Math.abs(wrapped) <= maxTurn) {
         this.npcSmoothYaw = targetYaw;
@@ -350,13 +567,10 @@ export class Level {
         this.npcSmoothYaw += Math.sign(wrapped) * maxTurn;
       }
       this.npc.rotation.y = this.npcSmoothYaw;
-      // 步态相位按位移推进：步幅 1.0m，自然慢速
       this.npcPhase += step / 1.0;
       this.swingBody(this.npcPhase);
-      // 整体上下起伏：2倍步频，幅度0.012m，模拟行走时身体弹性起伏
       const bounceY = Math.sin(this.npcPhase * Math.PI * 4) * 0.012;
       this.npc.position.y = bounceY;
-      // 前倾约 3°（0.05 rad），规划书 §4.3
       this.npc.rotation.x = 0.05;
     }
   }
@@ -624,12 +838,21 @@ export class Level {
     this.npcMaterials = npc.materials;
     this.npcPhase = 0;          // 步态相位，按位移推进
     this.npcIdlePhase = 0;      // 站姿呼吸相位
-    this.npcSmoothYaw = 0;      // 平滑转向当前角度
+    this.npcSmoothYaw = 0;      // 平滑转向当前角度，会在idle/walking首次时自动对齐
+    this.npcState = 'idle';     // 'idle' | 'walking' | 'waiting'
+    this.npcWaitReached = false; // 是否第一次到达门口进入等待
+    this.npcSaidWait = false;   // 是否已经说过"等等我"
+    this.npcTurnTarget = null;  // 等待时面向玩家的目标角度
+    this.npcDoorReopen = false; // 玩家1.5m推门标志
+    this._npcFootstepAcc = 0;
+    this.audioX = 0;
+    this.audioZ = 0;
     this.npcPath = [
-      new THREE.Vector3(6.5, 0, LAYOUT.hall.z),
+      new THREE.Vector3(-6.7, 0, LAYOUT.hall.z),
       new THREE.Vector3(0.15, 0, LAYOUT.hall.z),
       new THREE.Vector3(0.15, 0, LAYOUT.room.maxZ - 0.85),
     ];
+    this.npcStandPos = new THREE.Vector3(-6.7, 0, LAYOUT.hall.z);
     markNoRay(this.npc);
     this.npc.visible = false;
     this.scene.add(this.npc);
