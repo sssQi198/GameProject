@@ -32,6 +32,8 @@ export class Hud {
     this.panelVolume = byId('panel-volume');
     this.menuVolume.value = String(audio.volume);
     this.panelVolume.value = String(audio.volume);
+    syncSliderFill(this.menuVolume);
+    syncSliderFill(this.panelVolume);
     this.syncMute(audio.muted);
 
     const pushVolume = (value) => {
@@ -39,6 +41,8 @@ export class Hud {
       audio.setVolume(value);
       this.menuVolume.value = String(value);
       this.panelVolume.value = String(value);
+      syncSliderFill(this.menuVolume);
+      syncSliderFill(this.panelVolume);
       audio.blip();
     };
     this.menuVolume.addEventListener('input', () => pushVolume(this.menuVolume.value));
@@ -164,7 +168,14 @@ export class Hud {
 
   syncMute(muted) {
     const label = muted ? 'Unmute  恢复声音' : 'Mute  静音';
-    for (const button of this.muteButtons) button.textContent = label;
+    for (const button of this.muteButtons) {
+      if (button.classList.contains('mute-toggle')) {
+        // 主菜单静音钮是设计稿图片，只切换方框里的红色勾选块
+        button.classList.toggle('muted', muted);
+      } else {
+        button.textContent = label;
+      }
+    }
   }
 
   /**
@@ -183,6 +194,12 @@ function byId(id) {
   const el = document.getElementById(id);
   if (!el) throw new Error(`缺少界面节点 #${id}`);
   return el;
+}
+
+/** 音量条的红色填充段由 --fill 控制，值变化时同步。 */
+function syncSliderFill(slider) {
+  const percent = Math.round(Number(slider.value) * 1000) / 10;
+  slider.style.setProperty('--fill', `${percent}%`);
 }
 
 /** pointerup 和 click 都接。嵌入预览里经常只有其中一个能送到按钮。 */

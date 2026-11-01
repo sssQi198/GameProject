@@ -1,17 +1,15 @@
 import * as THREE from '../vendor/three.module.js';
 import { CONFIG } from './config.js';
 import { LAYOUT } from './layout.js';
-import { moveCircle, stepDynamicBodies } from './collision.js';
+import { moveCircle, pushOut } from './collision.js';
 import { cameraModel, createAnomaly } from './anomalies.js';
 import { emit } from './team/bus.js';
-import { EVENT, tagPhysical } from './team/contract.js';
+import { EVENT } from './team/contract.js';
 import { extraColliders, createSceneExtra } from './team/m1.js';
 import { createClassmate, createEyes } from './team/m2.js';
 import { extraProps, isFlickerDark, tick as tickRoom } from './team/p3.js';
 
 const FOG = 0x07080c;
-/** 门框进深 0.18。所有墙厚用 LAYOUT.wall（0.15），收到门框和相邻墙的外沿，只相接、不穿插。 */
-const DOOR_FRAME = { jambW: 0.12, jambD: 0.18, headH: 0.14 };
 
 /**
  * 教室 + 循环走廊。几何体是程序生成的，建模组以后可以把同名网格换成 GLB。
@@ -24,24 +22,6 @@ export class Level {
     this.colliders = [];
     this.anomalies = [];
     this.props = [];
-    this.supportColliders = [
-      {
-        minX: LAYOUT.hall.minX - 2,
-        maxX: LAYOUT.hall.maxX + 2,
-        minY: -4,
-        maxY: 0,
-        minZ: -12,
-        maxZ: LAYOUT.alcove.backZ + 2,
-      },
-      {
-        minX: LAYOUT.room.minX,
-        maxX: LAYOUT.room.maxX,
-        minY: -4,
-        maxY: 0.03,
-        minZ: LAYOUT.room.minZ,
-        maxZ: LAYOUT.room.maxZ,
-      },
-    ];
     this.hallLamps = [];
     this.npcDone = false;
     this.npcIndex = 1;
@@ -131,7 +111,12 @@ export class Level {
     this.exitLight.intensity = 0;
     this.pickup.visible = false;
     this.pickupLight.intensity = 0;
-    for (const prop of this.props) this.resetItem(prop);
+    for (const prop of this.props) {
+      prop.x = prop.homeX;
+      prop.z = prop.homeZ;
+      prop.mesh.position.x = prop.x;
+      prop.mesh.position.z = prop.z;
+    }
   }
 
   beginPrologue() {
@@ -401,45 +386,30 @@ export class Level {
     return { kind: 'none', distance: Infinity };
   }
 
-  /** 带 physical 标签的物品：三个受力点都受重力，被脚踢到时按接触点的碰撞力运动。 */
-  stepItems(dt, player) {
-    const bodies = [];
+  bumpProps(x, z, radius) {
     for (const prop of this.props) {
-      if (prop.physical) bodies.push(prop);
+      let dx = prop.x - x;
+      let dz = prop.z - z;
+      let dist = Math.hypot(dx, dz);
+      const min = radius + prop.r;
+      if (dist >= min) continue;
+      if (dist < 1e-5) {
+        dx = 1;
+        dz = 0;
+        dist = 1;
+      }
+      const push = min - dist;
+      prop.x += (dx / dist) * push;
+      prop.z += (dz / dist) * push;
+      const room = LAYOUT.room;
+      prop.x = clamp(prop.x, room.minX + 0.6, room.maxX - 0.6);
+      prop.z = clamp(prop.z, room.minZ + 0.6, room.maxZ - 0.85);
+      const solved = pushOut(prop.x, prop.z, prop.r, this.staticColliders);
+      prop.x = solved.x;
+      prop.z = solved.z;
+      prop.mesh.position.x = prop.x;
+      prop.mesh.position.z = prop.z;
     }
-    const speed = Math.hypot(player.vx, player.vz);
-    let ox = 0;
-    let oz = 0;
-    if (speed > 0.15) {
-      ox = (player.vx / speed) * 0.1;
-      oz = (player.vz / speed) * 0.1;
-    }
-    const foot = 0.24;
-    const kinematic = {
-      minX: player.x - player.radius + ox,
-      maxX: player.x + player.radius + ox,
-      minY: player.feetY,
-      maxY: player.feetY + foot,
-      minZ: player.z - player.radius + oz,
-      maxZ: player.z + player.radius + oz,
-      vx: player.vx,
-      vy: player.vy,
-      vz: player.vz,
-      kick: true,
-    };
-    stepDynamicBodies(bodies, this.getColliders(), this.supportColliders, kinematic, dt);
-    for (const prop of this.props) this.placeItemMesh(prop);
-  }
-
-  placeItemMesh(prop) {
-    const rot = prop.rot;
-    const pivot = prop.pivotY;
-    prop.mesh.position.set(
-      prop.x - rot[1] * pivot,
-      prop.y - rot[4] * pivot,
-      prop.z - rot[7] * pivot,
-    );
-    prop.mesh.quaternion.set(prop.qx, prop.qy, prop.qz, prop.qw);
   }
 
   placeEntity(x, z) {
@@ -508,7 +478,7 @@ export class Level {
       chase: CONFIG.fogChase,
       calm: CONFIG.fogCalm,
     }[env.mood] ?? CONFIG.fogRoom;
-    this.scene.fog.density = density / Math.max(CONFIG.brightness, 0.05);
+    this.scene.fog.density = density;
 
     if (this.debugColliders && this._debugDoor !== this.doorOpen) this.setColliderDebug(true);
   }
@@ -520,7 +490,6 @@ export class Level {
 
   /**
    * 灯光调节 —— 后续AI接管者注意：
-   * – 整体亮度：只改 `CONFIG.brightness`（1 = 原版暗光）
    * – 走廊灯颜色/亮度：调 `CONFIG.hallLamp`（config._lighting）或下方 `this.hallLamps`
    * – 走廊透光（doorLight）：受 `_doorLightReveal` 控制，在 hideNpc() 设为 true
    * - 环境光/雾：调 `CONFIG.ambient` 和 scene.fog.density
@@ -529,23 +498,17 @@ export class Level {
     const menu = env.mood === 'menu';
     const chase = env.mood === 'chase';
     const calm = env.mood === 'calm';
-    const bright = Math.max(CONFIG.brightness, 0);
     this.flickerDark = isFlickerDark(env.time, env.mood);
     const base = calm ? CONFIG.roomLight * 0.3 : chase ? 1.2 : CONFIG.roomLight;
     const scaled = base * 0.46;
-    const flickerCut = bright > 1 ? 1 : 0.04;
-    const raw = menu ? CONFIG.roomLight * 0.42 : this.flickerDark ? scaled * flickerCut : scaled;
-    const intensity = raw * bright;
+    const intensity = menu ? CONFIG.roomLight * 0.42 : this.flickerDark ? scaled * 0.04 : scaled;
     for (const light of this.roomLights) light.intensity = intensity;
     this.fixtureMat.emissiveIntensity = intensity > 4 ? 0.75 : 0.05;
     // doorLight 走廊透光：_doorLightReveal=true(NPC进教室后)才亮，避免出事前走廊突然亮起
-    const door = this._doorLightReveal ? CONFIG.doorLight : (chase ? 0 : 6);
-    this.doorLight.intensity = door * bright;
+    this.doorLight.intensity = this._doorLightReveal ? CONFIG.doorLight : (chase ? 0 : 6);
     const lamp = chase ? 0 : calm ? CONFIG.hallLamp * 1.6 : CONFIG.hallLamp;
-    for (const light of this.hallLamps) light.intensity = lamp * bright;
-    const ambient = calm ? CONFIG.ambient * 2.4 : CONFIG.ambient;
-    this.ambient.intensity = ambient * bright;
-    if (this.hemi) this.hemi.intensity = CONFIG.hemi * bright;
+    for (const light of this.hallLamps) light.intensity = lamp;
+    this.ambient.intensity = calm ? CONFIG.ambient * 2.4 : CONFIG.ambient;
   }
 
   updateNpc(dt, env) {
@@ -735,74 +698,63 @@ export class Level {
 
     const h = room.height;
     const t = wall;
-    const hh = hall.height;
-    // 沿 X 的墙包住转角，沿 Z 的墙收到它的内侧面。
-    const span = (x0, x1, z0, z1, height, material) => {
-      this.addBox(x1 - x0, height, z1 - z0, (x0 + x1) / 2, height / 2, (z0 + z1) / 2, material, true);
-    };
-
-    span(room.minX - t, room.maxX + t, room.minZ - t, room.minZ, h, this.materials.wall);
-    span(room.maxX, room.maxX + t, room.minZ, room.maxZ + t, h, this.materials.wall);
-    span(room.minX - t, room.minX, room.minZ, room.maxZ + t, h, this.materials.wall);
+    this.addBox(t, h, room.maxZ - room.minZ + t, room.maxX + t / 2, h / 2, 0, this.materials.wall, true);
+    this.addBox(t, h, room.maxZ - room.minZ + t, room.minX - t / 2, h / 2, 0, this.materials.wall, true);
+    this.addBox(room.maxX - room.minX + t * 2, h, t, 0, h / 2, room.minZ - t / 2, this.materials.wall, true);
 
     const doorHalf = LAYOUT.door.half;
-    this.buildCorridorWall();
+    this.buildCorridorWall(h, t, doorHalf);
     this.doorCollider = {
       minX: -doorHalf,
       maxX: doorHalf,
-      minY: 0,
-      maxY: LAYOUT.door.height,
       minZ: room.maxZ,
       maxZ: room.maxZ + t,
     };
 
-    const faceZ = room.maxZ + t;
-    const northOuter = hall.maxZ + t;
-    span(hall.minX - t, room.minX - t, room.maxZ, faceZ, hh, this.materials.hall);
-    span(room.maxX + t, hall.maxX + t, room.maxZ, faceZ, hh, this.materials.hall);
-    span(hall.minX - t, alcove.minX, hall.maxZ, northOuter, hh, this.materials.hall);
-    span(alcove.maxX, hall.maxX + t, hall.maxZ, northOuter, hh, this.materials.hall);
-    span(hall.minX - t, hall.minX, faceZ, hall.maxZ, hh, this.materials.hall);
-    span(hall.maxX, hall.maxX + t, faceZ, hall.maxZ, hh, this.materials.hall);
+    this.addBox(0.34, hall.height, hall.minZ - (room.maxZ + t) + 0.2, -doorHalf - 0.17, hall.height / 2, (room.maxZ + t + hall.minZ) / 2, this.materials.hall, true);
+    this.addBox(0.34, hall.height, hall.minZ - (room.maxZ + t) + 0.2, doorHalf + 0.17, hall.height / 2, (room.maxZ + t + hall.minZ) / 2, this.materials.hall, true);
+
+    const hallT = 0.42;
+    const hallSouthZ = hall.minZ - hallT / 2;
+    const hallNorthZ = hall.maxZ + hallT / 2;
+    this.addBox(-hall.minX - doorHalf, hall.height, hallT, (hall.minX + -doorHalf) / 2, hall.height / 2, hallSouthZ, this.materials.hall, true);
+    this.addBox(hall.maxX - doorHalf, hall.height, hallT, (doorHalf + hall.maxX) / 2, hall.height / 2, hallSouthZ, this.materials.hall, true);
+    this.addBox(alcove.minX - hall.minX, hall.height, hallT, (hall.minX + alcove.minX) / 2, hall.height / 2, hallNorthZ, this.materials.hall, true);
+    this.addBox(hall.maxX - alcove.maxX, hall.height, hallT, (alcove.maxX + hall.maxX) / 2, hall.height / 2, hallNorthZ, this.materials.hall, true);
+    this.addBox(hallT, hall.height, hall.maxZ - hall.minZ + hallT, hall.minX - hallT / 2, hall.height / 2, hall.z, this.materials.hall, true);
+    this.addBox(hallT, hall.height, hall.maxZ - hall.minZ + hallT, hall.maxX + hallT / 2, hall.height / 2, hall.z, this.materials.hall, true);
 
     const alcoveDepth = alcove.backZ - hall.maxZ;
-    span(alcove.minX - t, alcove.minX, northOuter, alcove.backZ, hh, this.materials.hall);
-    span(alcove.maxX, alcove.maxX + t, northOuter, alcove.backZ, hh, this.materials.hall);
-    span(alcove.minX - t, alcove.maxX + t, alcove.backZ, alcove.backZ + t, hh, this.materials.hall);
+    this.addBox(hallT, hall.height, alcoveDepth, alcove.minX - hallT / 2, hall.height / 2, (hall.maxZ + alcove.backZ) / 2, this.materials.hall, true);
+    this.addBox(hallT, hall.height, alcoveDepth, alcove.maxX + hallT / 2, hall.height / 2, (hall.maxZ + alcove.backZ) / 2, this.materials.hall, true);
+    this.addBox(alcove.maxX - alcove.minX + hallT, hall.height, hallT, (alcove.minX + alcove.maxX) / 2, hall.height / 2, alcove.backZ + hallT / 2, this.materials.hall, true);
     this.addPlane(alcove.maxX - alcove.minX, alcoveDepth, (alcove.minX + alcove.maxX) / 2, 0.02, (hall.maxZ + alcove.backZ) / 2, floorMat);
 
     this.addBox(room.maxX - room.minX + 1, 0.16, room.maxZ - room.minZ + 1, 0, room.height + 0.08, 0, this.materials.ceiling, false);
-    const ceilZ0 = room.maxZ + t;
-    const ceilZ1 = hall.maxZ;
-    this.addBox(hall.maxX - hall.minX, 0.14, ceilZ1 - ceilZ0, (hall.minX + hall.maxX) / 2, hall.height + 0.05, (ceilZ0 + ceilZ1) / 2, this.materials.ceiling, false);
+    this.addBox(hall.maxX - hall.minX, 0.14, hall.maxZ - hall.minZ, (hall.minX + hall.maxX) / 2, hall.height + 0.05, hall.z, this.materials.ceiling, false);
 
     // 墙面线脚每 4 米一条，±20 米对调后仍然对齐
     for (let x = hall.minX + 4; x < hall.maxX; x += 4) {
       if (Math.abs(x) < 1.4) continue;
-      if (x <= room.minX - t || x >= room.maxX + t) {
-        this.addBox(0.08, 1.2, 0.06, x, 1.5, faceZ + 0.04, this.materials.trim, false);
-      }
+      this.addBox(0.08, 1.2, 0.06, x, 1.5, hall.minZ + 0.04, this.materials.trim, false);
       if (x < alcove.minX - 0.5 || x > alcove.maxX + 0.5) {
         this.addBox(0.08, 1.2, 0.06, x, 1.5, hall.maxZ - 0.04, this.materials.trim, false);
       }
     }
   }
 
-  buildCorridorWall() {
-    const { room, door } = LAYOUT;
-    const h = room.height;
-    const { jambW, headH } = DOOR_FRAME;
-    const t = LAYOUT.wall;
-    const z = room.maxZ + LAYOUT.wall / 2;
-    const outer = door.half + jambW;
-    const lintelTop = door.height + headH;
-    const lintelH = h - lintelTop;
-    this.addBox(outer * 2, lintelH, t, 0, lintelTop + lintelH / 2, z, this.materials.wall, false);
+  buildCorridorWall(h, t, doorHalf) {
+    const { room } = LAYOUT;
+    const northZ = room.maxZ + t / 2;
+    this.staticColliders.push(
+      { minX: room.minX, maxX: -doorHalf, minZ: room.maxZ, maxZ: room.maxZ + t },
+      { minX: doorHalf, maxX: room.maxX, minZ: room.maxZ, maxZ: room.maxZ + t },
+    );
+    const lintel = h - LAYOUT.door.height;
+    this.addBox(doorHalf * 2, lintel, t, 0, LAYOUT.door.height + lintel / 2, northZ, this.materials.wall, false);
     this.curtains = [];
-    this.windowIndex = 0;
-    // 窗洞不再铺实墙，只留窗台、窗间墙和过梁
-    this.addWindowRun(room.minX, -outer, z, t, h);
-    this.addWindowRun(outer, room.maxX, z, t, h);
+    this.addWindowRun(room.minX, -doorHalf, northZ, t, h);
+    this.addWindowRun(doorHalf, room.maxX, northZ, t, h);
     this.curtainFar = this.curtains[5] ?? null;
     this.curtainNear = this.curtains[6] ?? null;
   }
@@ -816,7 +768,7 @@ export class Level {
     const pier = (span - count * winW) / (count + 1);
     const mid = (x0 + x1) / 2;
     const wall = this.materials.wall;
-    this.addBox(span, sill, t, mid, sill / 2, northZ, wall, true);
+    this.addBox(span, sill, t, mid, sill / 2, northZ, wall, false);
     this.addBox(span, h - winTop, t, mid, winTop + (h - winTop) / 2, northZ, wall, false);
     let cursor = x0;
     for (let i = 0; i < count; i += 1) {
@@ -826,7 +778,7 @@ export class Level {
       this.windowIndex = (this.windowIndex || 0) + 1;
       const broken = this.windowIndex === 2 || this.windowIndex === 5;
       this.addWindow(center, (sill + winTop) / 2, winW, winTop - sill, northZ, sill, winTop, broken);
-      this.addCurtain(center, broken, sill);
+      this.addCurtain(center, broken);
       cursor += winW;
     }
     this.addBox(pier, winTop - sill, t, cursor + pier / 2, (sill + winTop) / 2, northZ, wall, false);
@@ -940,17 +892,15 @@ export class Level {
     }
   }
 
-  addCurtain(x, broken = false, sill = 0.95) {
+  addCurtain(x, broken = false) {
     const { room } = LAYOUT;
     const z = room.maxZ - 0.05;
-    const hem = sill + 0.05;
-    const top = 2.72;
     for (const side of [-0.55, 0.55]) {
       // 破窗那一扇的右半幅已经撕掉了，只剩贴着窗框的一小条
       const torn = broken && side > 0;
       const w = torn ? 0.26 : 0.72;
-      const h = torn ? 1.05 : top - hem;
-      const y = torn ? 2.42 : (top + hem) / 2;
+      const h = torn ? 1.05 : 2.6;
+      const y = torn ? 2.42 : 1.42;
       const offset = torn ? side * 0.72 : side;
       const curtain = this.addBox(w, h, 0.04, x + offset, y, z, this.materials.curtain, false);
       markNoRay(curtain);
@@ -1023,19 +973,6 @@ export class Level {
     handle.position.set(LAYOUT.door.half * 2 - 0.16, 1.15, -0.06);
     this.doorPivot.add(door, handle);
     this.scene.add(this.doorPivot);
-    this.buildDoorFrame();
-  }
-
-  buildDoorFrame() {
-    const { door, room, wall } = LAYOUT;
-    const { jambW, jambD, headH } = DOOR_FRAME;
-    const z = room.maxZ + wall / 2;
-    const leftX = -door.half - jambW / 2;
-    const rightX = door.half + jambW / 2;
-    this.addBox(jambW, door.height, jambD, leftX, door.height / 2, z, this.materials.door, true);
-    this.addBox(jambW, door.height, jambD, rightX, door.height / 2, z, this.materials.door, true);
-    const span = door.half * 2 + jambW * 2;
-    this.addBox(span, headH, jambD, 0, door.height + headH / 2, z, this.materials.door, false);
   }
 
   buildCharacters() {
@@ -1129,147 +1066,32 @@ export class Level {
 
   buildProps() {
     const specs = [
-      { mesh: bottleMesh(), x: 7.4, z: 2.75, hx: 0.07, hy: 0.16, hz: 0.07, pivotY: 0.16, mass: 0.45, physical: true },
-      { mesh: paperMesh(), x: -8.6, z: 0, hx: 0.14, hy: 0.016, hz: 0.11, pivotY: 0, mass: 0.12, physical: true },
-      { mesh: bookMesh(), x: 3.2, z: -2.75, hx: 0.11, hy: 0.025, hz: 0.15, pivotY: 0, mass: 0.55, physical: true },
-      { mesh: mopMesh(), x: -8.5, z: 4.7, hx: 0.14, hy: 0.66, hz: 0.06, pivotY: 0.66, mass: 1.1, physical: true },
+      { mesh: bottleMesh(), x: 7.4, z: 2.75, r: 0.18 },
+      { mesh: paperMesh(), x: -8.6, z: 0, r: 0.22 },
+      { mesh: bookMesh(), x: 3.2, z: -2.75, r: 0.2 },
+      { mesh: mopMesh(), x: -8.5, z: 4.7, r: 0.16 },
     ];
-    for (const extra of extraProps()) {
-      const radius = extra.r ?? 0.2;
-      specs.push({
-        mesh: extra.mesh,
-        x: extra.x,
-        z: extra.z,
-        hx: extra.hx ?? radius,
-        hy: extra.hy ?? radius,
-        hz: extra.hz ?? radius,
-        pivotY: extra.pivotY ?? (extra.hy ?? radius),
-        mass: extra.mass ?? 0.4,
-        physical: Boolean(extra.physical) || flagged(extra.mesh, 'physical'),
-      });
-    }
+    specs.push(...extraProps());
     for (const spec of specs) {
+      spec.mesh.position.set(spec.x, 0, spec.z);
       markNoRay(spec.mesh);
       this.scene.add(spec.mesh);
-      this.addItem(spec);
+      this.props.push({ mesh: spec.mesh, x: spec.x, z: spec.z, homeX: spec.x, homeZ: spec.z, r: spec.r });
     }
     const trash = new THREE.Mesh(
       new THREE.SphereGeometry(0.28, 12, 10),
       new THREE.MeshStandardMaterial({ color: 0x1d2420, roughness: 1 }),
     );
     trash.scale.y = 0.75;
+    trash.position.set(-8.8, 0.18, -5.15);
     trash.userData.fakeAnomaly = true;
     this.scene.add(trash);
-    this.addItem({
-      mesh: trash,
-      x: -8.8,
-      z: -5.15,
-      hx: 0.28,
-      hy: 0.21,
-      hz: 0.28,
-      pivotY: 0,
-      mass: 0.8,
-      physical: true,
-    });
-  }
-
-  floorTop(x, z) {
-    const room = LAYOUT.room;
-    if (x >= room.minX && x <= room.maxX && z >= room.minZ && z <= room.maxZ) return 0.03;
-    return 0;
-  }
-
-  /** 中心受力点在碰撞框中心。中心轴是最长的那条棱，两端受力点贴在轴的两头。 */
-  addItem(spec) {
-    if (spec.physical) tagPhysical(spec.mesh);
-    const mass = spec.mass ?? 0.4;
-    const hx = spec.hx;
-    const hy = spec.hy;
-    const hz = spec.hz;
-    const axis = hy >= hx && hy >= hz ? 1 : (hx >= hz ? 0 : 2);
-    const extent = [hx, hy, hz][axis];
-    const end = [0, 0, 0];
-    end[axis] = extent;
-    const inertia = Math.max(mass * (hx * hx + hy * hy + hz * hz) / 3, 1e-4);
-    const item = {
-      mesh: spec.mesh,
-      hx,
-      hy,
-      hz,
-      pivotY: spec.pivotY,
-      mass,
-      invMass: 1 / mass,
-      invI: 1 / inertia,
-      endX: end[0],
-      endY: end[1],
-      endZ: end[2],
-      x: spec.x,
-      y: this.floorTop(spec.x, spec.z) + hy,
-      z: spec.z,
-      vx: 0,
-      vy: 0,
-      vz: 0,
-      wx: 0,
-      wy: 0,
-      wz: 0,
-      qx: 0,
-      qy: 0,
-      qz: 0,
-      qw: 1,
-      rot: [1, 0, 0, 0, 1, 0, 0, 0, 1],
-      forceX: 0,
-      forceY: 0,
-      forceZ: 0,
-      end0X: 0,
-      end0Y: 0,
-      end0Z: 0,
-      end1X: 0,
-      end1Y: 0,
-      end1Z: 0,
-      grounded: true,
-      physical: flagged(spec.mesh, 'physical'),
-      homeX: spec.x,
-      homeZ: spec.z,
-    };
-    item.homeY = item.y;
-    this.resetItem(item);
-    this.props.push(item);
-    return item;
-  }
-
-  resetItem(item) {
-    item.x = item.homeX;
-    item.y = item.homeY;
-    item.z = item.homeZ;
-    item.vx = 0;
-    item.vy = 0;
-    item.vz = 0;
-    item.wx = 0;
-    item.wy = 0;
-    item.wz = 0;
-    item.qx = 0;
-    item.qy = 0;
-    item.qz = 0;
-    item.qw = 1;
-    item.rot = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-    item.forceX = 0;
-    item.forceY = 0;
-    item.forceZ = 0;
-    item.end0X = 0;
-    item.end0Y = 0;
-    item.end0Z = 0;
-    item.end1X = 0;
-    item.end1Y = 0;
-    item.end1Z = 0;
-    item.grounded = true;
-    this.placeItemMesh(item);
   }
 
   buildLights() {
     this.ambient = new THREE.AmbientLight(0x93a0b4, CONFIG.ambient);
     this.scene.add(this.ambient);
-    this.hemi = new THREE.HemisphereLight(0x1b2433, 0x1a120c, CONFIG.hemi);
-    this.scene.add(this.hemi);
+    this.scene.add(new THREE.HemisphereLight(0x1b2433, 0x1a120c, CONFIG.hemi));
     this.roomLights = [];
     this.fixtureMat = new THREE.MeshStandardMaterial({ color: 0x2a2a28, emissive: 0xffc89a, emissiveIntensity: 0.8 });
     for (const x of [-6, -2, 2, 6]) {
@@ -1315,8 +1137,6 @@ export class Level {
       this.staticColliders.push({
         minX: x - w / 2,
         maxX: x + w / 2,
-        minY: y - h / 2,
-        maxY: y + h / 2,
         minZ: z - d / 2,
         maxZ: z + d / 2,
       });
@@ -1337,12 +1157,11 @@ export class Level {
 function makeMaterials() {
   const wood = new THREE.MeshStandardMaterial({ map: woodTexture(), roughness: 0.86, metalness: 0 });
   wood.map.repeat.set(6, 5);
-  const wall = new THREE.MeshStandardMaterial({ map: grainTexture('#3c433c'), color: 0xffffff, roughness: 0.92 });
   return {
     ground: new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.95 }),
     wood,
-    wall,
-    hall: wall,
+    wall: new THREE.MeshStandardMaterial({ map: grainTexture('#3c433c'), color: 0xffffff, roughness: 0.92 }),
+    hall: new THREE.MeshStandardMaterial({ map: grainTexture('#2a2e33'), color: 0xffffff, roughness: 0.9 }),
     ceiling: new THREE.MeshStandardMaterial({ color: 0x121418, roughness: 1 }),
     desk: new THREE.MeshStandardMaterial({ color: 0x4a3828, roughness: 0.78 }),
     chair: new THREE.MeshStandardMaterial({ color: 0x3a2e24, roughness: 0.8 }),
