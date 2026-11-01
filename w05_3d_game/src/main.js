@@ -7,6 +7,7 @@ import { Level } from './level.js';
 import { Game } from './game.js';
 import { attachDebug } from './debug.js';
 import './team/index.js';
+import { setupDevTools } from './devtools.js';
 
 const canvas = document.querySelector('#game-canvas');
 const bootError = document.querySelector('#boot-error');
@@ -53,7 +54,7 @@ try {
     renderer.setSize(window.innerWidth, window.innerHeight, false);
   });
 
-  const dev = import.meta.env == null || import.meta.env.DEV;
+  const dev = true;
   if (dev) {
     window.__game = {
       game,
@@ -74,6 +75,37 @@ try {
     };
     if (new URLSearchParams(location.search).has('debug')) {
       attachDebug({ renderer, level }).catch((error) => console.warn(error));
+    }
+    setupDevTools({ game, player, level });
+    const searchParams = new URLSearchParams(location.search);
+    if (searchParams.has('devLevel')) {
+      const val = searchParams.get('devLevel');
+      // 延迟一帧等绑定完成后再跳转
+      requestAnimationFrame(() => {
+        const mappings = {
+          'intro': 'intro',
+          'prologue': 'prologue',
+          '1': 'level1',
+          '2': 'level2',
+          '3': 'level3',
+          '4': 'level4',
+          '5': 'level5',
+          'finale': 'finalelook',
+          'finalelook': 'finalelook',
+          'finalechase': 'finalechase',
+          'epilogue': 'epilogue',
+          'win': 'win',
+        };
+        const target = mappings[val];
+        if (target) {
+          // 模拟点击对应的跳转按钮
+          const btn = document.querySelector(`[data-dev-go="${target}"]`);
+          if (btn) btn.click();
+          console.log(`[devtools] URL: ?devLevel=${val} → ${target}`);
+        } else {
+          console.warn(`[devtools] unknown devLevel value: ${val}`);
+        }
+      });
     }
   }
 

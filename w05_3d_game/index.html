@@ -5,6 +5,63 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>错层 Wrong Floor</title>
     <link rel="stylesheet" href="./styles/main.css" />
+    <style>
+/* devtools start */
+#dev-panel {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 9999; width: 420px; max-height: 80vh; overflow-y: auto;
+  background: rgba(8,10,16,0.92); backdrop-filter: blur(8px);
+  border: 1px solid rgba(160,180,255,0.25); border-radius: 12px;
+  color: #c8d0e8; font-family: system-ui, sans-serif; font-size: 13px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+#dev-panel.hidden { display: none; }
+#dev-panel .dev-card { display: flex; flex-direction: column; gap: 4px; }
+#dev-panel header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 14px; background: rgba(40,60,160,0.25);
+  border-bottom: 1px solid rgba(160,180,255,0.2); border-radius: 12px 12px 0 0;
+}
+#dev-panel header h3 { margin: 0; font-size: 14px; color: #90b0ff; }
+#dev-close {
+  background: none; border: none; color: #889;
+  cursor: pointer; font-size: 18px; padding: 0 4px;
+}
+#dev-close:hover { color: #f88; }
+#dev-panel .dev-body { padding: 8px 14px; }
+#dev-panel .dev-section {
+  margin: 8px 0 4px; font-size: 11px; color: #7090c0; text-transform: uppercase; letter-spacing: 0.5px;
+}
+#dev-panel .dev-grid {
+  display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 4px;
+}
+#dev-panel .dev-grid button, #dev-panel .dev-actions button {
+  background: rgba(60,80,180,0.3); border: 1px solid rgba(100,130,220,0.25);
+  color: #c0d0f0; border-radius: 5px; padding: 4px 10px; cursor: pointer;
+  font-size: 12px; white-space: nowrap;
+}
+#dev-panel .dev-grid button:hover { background: rgba(80,110,220,0.45); }
+#dev-panel .dev-grid button.active { background: rgba(80,200,80,0.35); border-color: #4c4; }
+#dev-panel footer {
+  padding: 6px 14px; font-size: 11px; color: #567; border-top: 1px solid rgba(160,180,255,0.12);
+  display: flex; justify-content: space-between;
+}
+#dev-hint {
+  margin: 6px 0 0; padding: 5px 8px; background: rgba(80,200,80,0.12);
+  border: 1px solid rgba(80,200,80,0.25); border-radius: 4px; color: #8d8; font-size: 12px;
+}
+#dev-hint.hidden { display: none; }
+.dev-esc-row {
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08);
+}
+#btn-dev-panel {
+  background: rgba(80,110,220,0.3); border: 1px solid rgba(100,130,220,0.35);
+  color: #a0c0ff; border-radius: 5px; padding: 5px 12px; cursor: pointer; font-size: 13px; width: 100%;
+}
+#btn-dev-panel:hover { background: rgba(80,110,220,0.5); }
+#btn-dev-panel span { display: inline-block; margin-left: 6px; font-size: 11px; color: #7a8; }
+/* devtools end */
+    </style>
   </head>
   <body>
     <div id="app" class="screen-open">
@@ -87,6 +144,49 @@
             Volume  音量
             <input id="panel-volume" type="range" min="0" max="1" step="0.01" value="0.4" />
           </label>
+          <!-- devtools start -->
+          <div class="dev-esc-row">
+            <button id="btn-dev-panel" type="button">Dev Panel<span>开发者</span></button>
+          </div>
+          <!-- devtools end -->
+        </div>
+      </section>
+
+      <section id="dev-panel" class="hidden">
+        <div class="dev-card">
+          <header>
+            <h3>Dev Mode</h3>
+            <button id="dev-close" type="button">×</button>
+          </header>
+          <div class="dev-body">
+            <p class="dev-section">关卡跳转</p>
+            <div class="dev-grid">
+              <button data-dev-go="intro" type="button">序章·对话</button>
+              <button data-dev-go="prologue" type="button">序章·探索</button>
+              <button data-dev-go="level1" type="button">第1关</button>
+              <button data-dev-go="level2" type="button">第2关</button>
+              <button data-dev-go="level3" type="button">第3关</button>
+              <button data-dev-go="level4" type="button">第4关</button>
+              <button data-dev-go="level5" type="button">第5关</button>
+              <button data-dev-go="finalelook" type="button">终局·注视</button>
+              <button data-dev-go="finalechase" type="button">终局·追逐</button>
+              <button data-dev-go="epilogue" type="button">尾声</button>
+              <button data-dev-go="win" type="button">胜利</button>
+            </div>
+            <p class="dev-section">辅助</p>
+            <div class="dev-grid dev-actions">
+              <button id="dev-give-camera" type="button">给予相机</button>
+              <button id="dev-force-clear" type="button">强制通关</button>
+              <button id="dev-colliders" type="button">碰撞框</button>
+              <button id="dev-no-enemy" type="button">隐藏敌人</button>
+              <button id="dev-noclip" type="button">穿墙</button>
+            </div>
+            <p id="dev-hint" class="hidden"></p>
+          </div>
+          <footer>
+            <span>Ctrl+Shift+D 切换</span>
+            <span>移除: 删 devtools.js + 3行 main.js + 本面板</span>
+          </footer>
         </div>
       </section>
 

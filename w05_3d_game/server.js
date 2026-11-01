@@ -17,6 +17,7 @@ const types = {
   '.mp3': 'audio/mpeg',
   '.mp4': 'video/mp4',
   '.wav': 'audio/wav',
+  '.ico': 'image/x-icon',
 };
 
 const server = http.createServer((req, res) => {
