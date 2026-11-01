@@ -12,6 +12,27 @@ import { extraProps, isFlickerDark, tick as tickRoom } from './team/p3.js';
 const FOG = 0x07080c;
 /** 门框进深 0.18。所有墙厚用 LAYOUT.wall（0.15），收到门框和相邻墙的外沿，只相接、不穿插。 */
 const DOOR_FRAME = { jambW: 0.12, jambD: 0.18, headH: 0.14 };
+/** 窗帘：宽 0.72，从 2.72 垂到窗台上方 5 cm。几何原点在顶边中点。 */
+const CURTAIN_W = 0.72;
+const CURTAIN_TOP = 2.72;
+const CURTAIN_HEM = 1.0;
+const CURTAIN_H = CURTAIN_TOP - CURTAIN_HEM;
+/** 与 generate_furniture_glb.py 同一套偏移。第一关那套桌椅（−7.4, 4）保持原位。 */
+const SHOVED_DESK_YAW = [
+  { x: -7.4, z: -4, yaw: 0.3 },
+  { x: 4.6, z: -1.5, yaw: -0.26 },
+  { x: -1.8, z: 1.5, yaw: 0.19 },
+  { x: 6.8, z: -4, yaw: 0.14 },
+];
+const TURNED_CHAIR_YAW = [
+  { x: -4.6, z: 4, yaw: 3.05 },
+  { x: 1.8, z: -4, yaw: -1.9 },
+  { x: 6.8, z: 1.5, yaw: 2.2 },
+  { x: -1.8, z: -4, yaw: 0.9 },
+];
+/** 座面金属框 0.45 见方。转过角度后，轴对齐盒子要包住四个角。 */
+const CHAIR_HALF = 0.225;
+const CHAIR_HEIGHT = 0.96;
 
 /**
  * 教室 + 循环走廊。几何体是程序生成的，建模组以后可以把同名网格换成 GLB。
@@ -826,7 +847,7 @@ export class Level {
       this.windowIndex = (this.windowIndex || 0) + 1;
       const broken = this.windowIndex === 2 || this.windowIndex === 5;
       this.addWindow(center, (sill + winTop) / 2, winW, winTop - sill, northZ, sill, winTop, broken);
-      this.addCurtain(center, broken, sill);
+      this.addCurtain(center, sill);
       cursor += winW;
     }
     this.addBox(pier, winTop - sill, t, cursor + pier / 2, (sill + winTop) / 2, northZ, wall, false);
@@ -940,20 +961,41 @@ export class Level {
     }
   }
 
-  addCurtain(x, broken = false, sill = 0.95) {
+  addCurtain(x, sill = 0.95) {
     const { room } = LAYOUT;
     const z = room.maxZ - 0.05;
     const hem = sill + 0.05;
-    const top = 2.72;
+    const top = CURTAIN_TOP;
+    const h = top - hem;
+    if (!this.curtainGeometry) {
+      const geo = new THREE.PlaneGeometry(CURTAIN_W, h, 12, 22);
+      geo.translate(0, -h / 2, 0);
+      this.curtainGeometry = geo;
+    }
+    // 从讲台（+X）往后每扇都是软布。脸上那一块布在着色器里按住，避免五官和布对穿。
     for (const side of [-0.55, 0.55]) {
-      // 破窗那一扇的右半幅已经撕掉了，只剩贴着窗框的一小条
-      const torn = broken && side > 0;
-      const w = torn ? 0.26 : 0.72;
-      const h = torn ? 1.05 : top - hem;
-      const y = torn ? 2.42 : (top + hem) / 2;
-      const offset = torn ? side * 0.72 : side;
-      const curtain = this.addBox(w, h, 0.04, x + offset, y, z, this.materials.curtain, false);
+      const outer = side < 0 ? 0 : 1;
+      const material = outer === 0 ? this.materials.curtainSoft : this.materials.curtainSoftRight;
+      const curtain = new THREE.Mesh(this.curtainGeometry, material);
+      curtain.position.set(x + side, top, z);
+      const gust = makeCurtainGust(outer);
+      curtain.userData.gust = gust;
+      curtain.onBeforeRender = () => {
+        const data = curtain.material.userData;
+        const buf = data.uNodeX?.value;
+        if (buf) {
+          let i = 0;
+          for (const strip of gust.nodes) {
+            for (const node of strip) {
+              buf[i] = node.x;
+              i += 1;
+            }
+          }
+        }
+        if (data.uPull) data.uPull.value = gust.pull;
+      };
       markNoRay(curtain);
+      this.scene.add(curtain);
       this.curtains.push(curtain);
     }
   }
@@ -994,6 +1036,7 @@ export class Level {
   addDesk(x, z) {
     const { topW, topD, topH } = LAYOUT.desks;
     this.furnitureVisuals.push(this.addBox(topD, topH, topW, x, topH / 2, z, this.materials.desk, true));
+    const pose = chairPose(x, z);
     const chair = new THREE.Group();
     const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.08, 0.42), this.materials.chair);
     seat.position.y = 0.46;
@@ -1001,10 +1044,19 @@ export class Level {
     back.position.set(0, 0.7, 0.18);
     chair.add(seat, back);
     chair.rotation.y = -Math.PI / 2;
-    chair.position.set(x - 0.48, 0, z);
+    chair.position.set(pose.x, 0, pose.z);
     markNoRay(chair);
     this.scene.add(chair);
     this.furnitureVisuals.push(chair);
+    const reach = CHAIR_HALF * (Math.abs(Math.cos(pose.yaw)) + Math.abs(Math.sin(pose.yaw)));
+    this.staticColliders.push({
+      minX: pose.x - reach,
+      maxX: pose.x + reach,
+      minY: 0,
+      maxY: CHAIR_HEIGHT,
+      minZ: pose.z - reach,
+      maxZ: pose.z + reach,
+    });
   }
 
   buildDoor() {
@@ -1334,10 +1386,162 @@ export class Level {
   }
 }
 
+/** 4 条竖条，每条上段、中段、下摆。靠墙的一侧 outer 为 0 或 1。 */
+function makeCurtainGust(outer) {
+  const nodes = [];
+  for (let strip = 0; strip < 4; strip += 1) {
+    nodes.push([
+      { x: 0, v: 0 },
+      { x: 0, v: 0 },
+      { x: 0, v: 0 },
+    ]);
+  }
+  return {
+    outer,
+    nodes,
+    drive: 0,
+    amp: 3.8 + Math.random() * 1.6,
+    speed: 0.45 + Math.random() * 0.4,
+    phase: Math.random() * Math.PI * 2,
+    pull: 0.18 + Math.random() * 0.22,
+  };
+}
+
+/**
+ * 软布：顶边钉死，下摆做竖褶，只往房间（局部 −Z）鼓。
+ * 靠窗间墙的那条边不横移，避免摆进墙和窗框。
+ * 12 个质点位移和 uPull 由每块窗帘在绘制前写入。
+ * 脸上的一块区域位移为 0。
+ * outer 为 0 时左缘贴墙，为 1 时右缘贴墙。
+ */
+function attachCurtainSway(material, outer, sway) {
+  const uOuter = { value: outer };
+  material.userData.uTime = sway.uTime;
+  material.userData.uAmp = sway.uAmp;
+  material.userData.uNodeX = sway.uNodeX;
+  material.userData.uPull = sway.uPull;
+  material.userData.uFace = sway.uFace;
+  material.userData.uOuter = uOuter;
+  material.customProgramCacheKey = () => 'curtain-flex-lattice';
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = sway.uTime;
+    shader.uniforms.uAmp = sway.uAmp;
+    shader.uniforms.uNodeX = sway.uNodeX;
+    shader.uniforms.uPull = sway.uPull;
+    shader.uniforms.uFace = sway.uFace;
+    shader.uniforms.uOuter = uOuter;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>\n${CURTAIN_SWAY_PARS}`)
+      .replace('#include <beginnormal_vertex>', CURTAIN_SWAY_NORMAL)
+      .replace('#include <begin_vertex>', CURTAIN_SWAY_VERTEX);
+  };
+}
+
+const CURTAIN_SWAY_PARS = /* glsl */ `
+uniform float uTime;
+uniform float uAmp;
+uniform float uNodeX[12];
+uniform float uPull;
+uniform vec2 uFace;
+uniform float uOuter;
+const float CURTAIN_W = ${CURTAIN_W.toFixed(4)};
+const float CURTAIN_H = ${CURTAIN_H.toFixed(4)};
+
+float curtainFade(float t) {
+  return t * t * (3.0 - 2.0 * t);
+}
+
+float curtainNode(int strip, int row) {
+  if (row < 0) return 0.0;
+  return uNodeX[strip * 3 + row];
+}
+
+float curtainLattice(float vx, float drop) {
+  float s = clamp(vx, 0.0, 1.0) * 3.0;
+  float s0 = min(floor(s), 2.0);
+  float sf = curtainFade(clamp(s - s0, 0.0, 1.0));
+  float h = clamp(drop, 0.0, 1.0) * 3.0;
+  float h0 = min(floor(min(h, 2.999)), 2.0);
+  float hf = curtainFade(clamp(h - h0, 0.0, 1.0));
+  int sa = int(s0);
+  int ra = int(h0) - 1;
+  float left = mix(curtainNode(sa, ra), curtainNode(sa, ra + 1), hf);
+  float right = mix(curtainNode(sa + 1, ra), curtainNode(sa + 1, ra + 1), hf);
+  return mix(left, right, sf);
+}
+
+vec3 curtainOff(vec3 pos) {
+  float vx = clamp(pos.x / CURTAIN_W + 0.5, 0.0, 1.0);
+  float vy = pos.y / CURTAIN_H + 1.0;
+  float phase = modelMatrix[3].x;
+  float drop = max(1.0 - vy, 0.0);
+  float hang = drop <= 0.0 ? 0.0 : pow(drop, 1.2);
+
+  float fold = sin(9.0 * vy + phase * 1.7) * 0.040 + sin(3.2 * vy + phase * 0.4) * 0.024;
+  float windX = sin(6.0 * vy + uTime * 0.85 + phase) * 0.008 * uAmp;
+  float windZ = (sin(uTime * 0.65 + phase) * 0.5 + 0.5) * 0.010 * uAmp
+    + (sin(8.0 * vx + uTime * 0.4 + phase) * 0.5 + 0.5) * 0.004 * uAmp;
+
+  float fromOuter = abs(vx - uOuter);
+  float edgeT = clamp(fromOuter / 0.55, 0.0, 1.0);
+  float skirt = edgeT * edgeT * (3.0 - 2.0 * edgeT);
+
+  float ang = vx * 6.0 * PI;
+  float pleatAmt = (1.0 - sin(ang)) * 0.5;
+  float gather = cos(ang) * 0.012 * hang;
+  float swayX = curtainLattice(vx, drop);
+  float neighbor = curtainLattice(clamp(vx + 0.33, 0.0, 1.0), drop);
+  float shear = min(abs(neighbor - swayX), 0.08);
+  float pleatDepth = pleatAmt * (0.035 * hang + shear * 0.15);
+  float hem = pleatAmt * 0.020 * hang;
+
+  float xRaw = (fold + windX) * hang + gather + swayX;
+  float yRaw = -hem;
+  float zRaw = windZ * hang + pleatDepth + abs(swayX) * uPull;
+
+  float wx = modelMatrix[3].x + pos.x;
+  float wy = modelMatrix[3].y + pos.y;
+  float faceU = (wx - uFace.x) / 0.32;
+  float faceV = (wy - uFace.y) / 0.38;
+  float hold = smoothstep(1.0, 2.2, faceU * faceU + faceV * faceV);
+  return vec3(xRaw * skirt, yRaw * skirt, -(zRaw * skirt)) * hold;
+}
+`;
+
+const CURTAIN_SWAY_NORMAL = /* glsl */ `
+vec3 curtainHere = curtainOff(position);
+vec3 curtainTx = vec3(0.025, 0.0, 0.0) + curtainOff(position + vec3(0.025, 0.0, 0.0)) - curtainHere;
+vec3 curtainTy = vec3(0.0, 0.025, 0.0) + curtainOff(position + vec3(0.0, 0.025, 0.0)) - curtainHere;
+vec3 objectNormal = normalize(cross(curtainTx, curtainTy));
+#ifdef USE_TANGENT
+	vec3 objectTangent = vec3(tangent.xyz);
+#endif
+`;
+
+const CURTAIN_SWAY_VERTEX = /* glsl */ `
+vec3 transformed = vec3(position);
+transformed += curtainOff(position);
+#ifdef USE_ALPHAHASH
+	vPosition = vec3(position);
+#endif
+`;
+
 function makeMaterials() {
   const wood = new THREE.MeshStandardMaterial({ map: woodTexture(), roughness: 0.86, metalness: 0 });
   wood.map.repeat.set(6, 5);
   const wall = new THREE.MeshStandardMaterial({ map: grainTexture('#3c433c'), color: 0xffffff, roughness: 0.92 });
+  const curtain = new THREE.MeshStandardMaterial({ color: 0x6e3438, roughness: 0.95, side: THREE.DoubleSide });
+  const sway = {
+    uTime: { value: 0 },
+    uAmp: { value: 1 },
+    uNodeX: { value: new Float32Array(12) },
+    uPull: { value: 0.35 },
+    uFace: { value: new THREE.Vector2(LAYOUT.curtainFace.x, LAYOUT.curtainFace.y) },
+  };
+  const curtainSoft = curtain.clone();
+  const curtainSoftRight = curtain.clone();
+  attachCurtainSway(curtainSoft, 0, sway);
+  attachCurtainSway(curtainSoftRight, 1, sway);
   return {
     ground: new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.95 }),
     wood,
@@ -1348,7 +1552,9 @@ function makeMaterials() {
     chair: new THREE.MeshStandardMaterial({ color: 0x3a2e24, roughness: 0.8 }),
     board: new THREE.MeshStandardMaterial({ color: 0x1c2420, roughness: 0.55 }),
     trim: new THREE.MeshStandardMaterial({ color: 0x1a1c1a, roughness: 0.7 }),
-    curtain: new THREE.MeshStandardMaterial({ color: 0x6e3438, roughness: 0.95, side: THREE.DoubleSide }),
+    curtain,
+    curtainSoft,
+    curtainSoftRight,
     glass: new THREE.MeshStandardMaterial({
       color: 0x9bb7c9,
       transparent: true,
@@ -1527,6 +1733,40 @@ function canvasTexture(canvas, repeat) {
     texture.wrapT = THREE.RepeatWrapping;
   }
   return texture;
+}
+
+function sameSpot(spot, x, z) {
+  return Math.abs(spot.x - x) < 0.001 && Math.abs(spot.z - z) < 0.001;
+}
+
+/** 与 generate_furniture_glb.py 的 jitter 同一条线性同余。 */
+function furnitureJitter(seed, amount) {
+  let s = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+  s = (Math.imul(s, 1103515245) + 12345) >>> 0;
+  return ((s / 0xFFFFFFFF) * 2 - 1) * amount;
+}
+
+function chairPose(dx, dz) {
+  const seed = Math.trunc((dx + 20) * 97 + (dz + 10) * 13);
+  const shiftX = furnitureJitter(seed, 0.035);
+  const shiftZ = furnitureJitter(seed + 1, 0.045);
+  const shoved = SHOVED_DESK_YAW.find((spot) => sameSpot(spot, dx, dz));
+  const deskYaw = shoved ? shoved.yaw : furnitureJitter(seed + 2, 0.035);
+  const originX = dx + shiftX;
+  const originZ = dz + shiftZ;
+  const turned = TURNED_CHAIR_YAW.find((spot) => sameSpot(spot, dx, dz));
+  if (turned) {
+    return {
+      x: originX - 0.72,
+      z: originZ + furnitureJitter(seed + 4, 0.22),
+      yaw: turned.yaw,
+    };
+  }
+  return {
+    x: originX - 0.48,
+    z: originZ,
+    yaw: deskYaw + furnitureJitter(seed + 3, 0.06),
+  };
 }
 
 function markNoRay(object) {
