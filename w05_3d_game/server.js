@@ -15,6 +15,7 @@ const types = {
   '.png': 'image/png',
   '.glb': 'model/gltf-binary',
   '.mp3': 'audio/mpeg',
+  '.mp4': 'video/mp4',
   '.wav': 'audio/wav',
 };
 
