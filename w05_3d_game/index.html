@@ -47,25 +47,29 @@
       <p id="demo-badge" class="hidden">DEMO</p>
 
       <section id="menu">
-        <div class="menu-card">
-          <p class="eyebrow">Wrong Floor</p>
-          <h1>错层</h1>
-          <p class="logline">拍下教室里不该存在的东西。看见那双眼睛之后，跑。</p>
-          <div class="menu-actions">
-            <button id="btn-start" type="button">Start<span>开始游戏</span></button>
-            <button id="btn-demo" type="button">Watch Demo<span>观看演示</span></button>
+        <!-- 设计稿舞台：1744x901 逻辑坐标，元素按原图位置/尺寸摆放，纯 CSS 等比缩放 -->
+        <div class="menu-stage">
+          <img class="ui-el ui-eyebrow" src="./assets/ui/eyebrow.png" alt="Wrong Floor" draggable="false" />
+          <h1 class="ui-el ui-title title-img">
+            <img src="./assets/ui/title.png" alt="错层" draggable="false" />
+          </h1>
+          <img class="ui-el ui-logline" src="./assets/ui/logline.png" alt="拍下教室里不存在的东西。看见那双眼睛之后，跑。" draggable="false" />
+          <button id="btn-start" class="ui-el ui-btn" type="button" aria-label="Start 开始游戏">
+            <img src="./assets/ui/btn-start.png" alt="" draggable="false" />
+          </button>
+          <button id="btn-demo" class="ui-el ui-btn" type="button" aria-label="Watch Demo 观看演示">
+            <img src="./assets/ui/btn-demo.png" alt="" draggable="false" />
+          </button>
+          <img class="ui-el ui-volume-label" src="./assets/ui/volume-label.png" alt="Volume 音量" draggable="false" />
+          <div class="ui-el ui-volume">
+            <input id="menu-volume" type="range" min="0" max="1" step="0.01" value="0.4" aria-label="Volume 音量" />
           </div>
-          <label class="volume">
-            Volume  音量
-            <input id="menu-volume" type="range" min="0" max="1" step="0.01" value="0.8" />
-          </label>
-          <button id="btn-mute-menu" type="button" data-mute>Mute  静音</button>
-          <ul class="controls">
-            <li>WASD 移动 · Mouse 环顾 · Shift 冲刺</li>
-            <li>E：拾起 / 拿出 / 收起相机 · F：拍摄</li>
-            <li>M 静音 · Esc 暂停 · 方向键也能转向</li>
-          </ul>
-          <p id="menu-note"></p>
+          <button id="btn-mute-menu" class="ui-el ui-mute mute-toggle" type="button" data-mute aria-label="Mute 静音">
+            <img src="./assets/ui/mute.png" alt="" draggable="false" />
+            <i class="mute-check" aria-hidden="true"></i>
+          </button>
+          <img class="ui-el ui-controls" src="./assets/ui/controls.png" alt="WASD 移动 · Mouse 环顾 · Shift 冲刺；E: 拾起 / 拿出 / 收起相机 · F: 拍摄；M 静音 · Esc 暂停 · 方向键切换标向" draggable="false" />
+          <p id="menu-note" class="ui-el"></p>
         </div>
       </section>
 
@@ -81,7 +85,7 @@
           </div>
           <label class="volume">
             Volume  音量
-            <input id="panel-volume" type="range" min="0" max="1" step="0.01" value="0.8" />
+            <input id="panel-volume" type="range" min="0" max="1" step="0.01" value="0.4" />
           </label>
         </div>
       </section>

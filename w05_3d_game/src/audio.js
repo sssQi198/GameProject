@@ -1,5 +1,5 @@
 /**
- * 全部音效用 Web Audio 实时合成，不依赖外部音频文件。
+ * 音效用 Web Audio 实时合成，背景音乐从 assets/audio 加载。
  * 浏览器会拦住自动播放，所以要等玩家点「开始」或「观看演示」再 unlock。
  */
 const STORAGE_VOL = 'wf-volume';
@@ -10,8 +10,11 @@ export class AudioBus {
     this.ctx = null;
     this.master = null;
     this.ambientGain = null;
+    this.musicGain = null;
+    this.music = null;
+    this.musicSource = null;
     this.noise = null;
-    this.volume = readNumber(STORAGE_VOL, 0.8);
+    this.volume = readNumber(STORAGE_VOL, 0.4);
     this.muted = localStorageSafe(STORAGE_MUTE) === '1';
     this.heartOn = false;
     this.heartT = 0;
@@ -28,11 +31,16 @@ export class AudioBus {
       this.ambientGain = this.ctx.createGain();
       this.ambientGain.gain.value = 0.0001;
       this.ambientGain.connect(this.master);
+      this.musicGain = this.ctx.createGain();
+      this.musicGain.gain.value = 0.18;
+      this.musicGain.connect(this.master);
       this.noise = makeNoise(this.ctx);
       this.startDrone();
+      this.startMusic();
     }
     this.applyVolume();
     if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.music?.paused) this.music.play().catch(() => {});
   }
 
   applyVolume() {
@@ -66,6 +74,26 @@ export class AudioBus {
       this.droneA.frequency.setTargetAtTime(f, now, 0.5);
       this.droneB.frequency.setTargetAtTime(f * 1.5, now, 0.5);
     }
+    if (this.musicGain) {
+      const musicTarget = mood === 'menu' ? 0.12 : mood === 'chase' ? 0.23 : 0.18;
+      this.musicGain.gain.setTargetAtTime(musicTarget, now, 0.5);
+    }
+  }
+
+  startMusic() {
+    if (!this.ctx || this.music || !this.musicGain) return;
+    this.music = new Audio('./assets/audio/horror-music.mp4');
+    this.music.loop = true;
+    this.music.preload = 'auto';
+    this.music.setAttribute('aria-hidden', 'true');
+    this.musicSource = this.ctx.createMediaElementSource(this.music);
+    this.musicSource.connect(this.musicGain);
+    this.music.addEventListener('error', () => {
+      console.warn('背景音乐加载失败:', this.music?.src);
+    });
+    this.music.play().catch(() => {
+      // 若浏览器仍拦截播放，下一次用户交互时 unlock 会再次尝试。
+    });
   }
 
   startDrone() {
@@ -132,9 +160,10 @@ export class AudioBus {
   }
 
   footstep(indoors) {
+    // 提高脚步声的瞬态增益，让它在背景音乐播放时仍然清晰可辨。
     this.burst({
-      duration: 0.09,
-      gain: indoors ? 0.16 : 0.1,
+      duration: 0.11,
+      gain: indoors ? 0.34 : 0.24,
       type: 'bandpass',
       freq: indoors ? 280 : 180,
       q: 0.7,
@@ -173,7 +202,9 @@ export class AudioBus {
   }
 
   door() {
-    this.burst({ duration: 0.45, gain: 0.18, type: 'bandpass', freq: 220, q: 0.6 });
+    // 关门声提高增益并略微延长尾音，避免被音乐低频掩盖。
+    this.burst({ duration: 0.55, gain: 0.42, type: 'bandpass', freq: 220, q: 0.6 });
+    this.burst({ duration: 0.18, gain: 0.16, type: 'highpass', freq: 1200, q: 0.8, delay: 0.04 });
   }
 
   scratch() {
@@ -218,9 +249,10 @@ export class AudioBus {
   npcStep(distance) {
     const maxDist = 14;
     const factor = Math.max(0, 1 - distance / maxDist);
-    const vol = factor * 0.09;
+    // NPC 脚步也保持与玩家脚步相近的存在感，避免被背景音乐掩盖。
+    const vol = factor * 0.2;
     if (vol <= 0.001) return;
-    this.burst({ duration: 0.09, gain: vol, type: 'bandpass', freq: 180, q: 0.7 });
+    this.burst({ duration: 0.11, gain: vol, type: 'bandpass', freq: 180, q: 0.7 });
   }
 
   burst({ duration, gain, type, freq, q, delay = 0 }) {
@@ -265,6 +297,7 @@ function makeNoise(ctx) {
 
 function readNumber(key, fallback) {
   const raw = localStorageSafe(key);
+  if (raw === null || raw === '') return fallback;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
 }

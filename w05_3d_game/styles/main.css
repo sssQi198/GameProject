@@ -129,10 +129,12 @@ body { min-width: 320px; }
   left: 50%;
   bottom: 16%;
   transform: translateX(-50%);
-  width: min(40rem, 90vw);
+  width: min(48rem, 90vw);
   text-align: center;
   color: var(--ink);
-  font-size: 1.25rem;
+  /* 以视口为基准，避免大画布/浏览器缩放时字幕被显示得过小 */
+  font-size: clamp(1.35rem, 2.1vw, 2.1rem);
+  line-height: 1.45;
   letter-spacing: 0.06em;
 }
 
@@ -150,46 +152,145 @@ body { min-width: 320px; }
   pointer-events: auto;
 }
 
-#menu, #screen-panel {
+#menu {
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  background: linear-gradient(90deg, rgba(5, 6, 9, 0.96) 0%, rgba(5, 6, 9, 0.88) 34%, rgba(5, 6, 9, 0.45) 62%, rgba(5, 6, 9, 0.12) 82%, rgba(5, 6, 9, 0.3) 100%);
+}
+
+/* ===== 主菜单：设计稿舞台 =====
+   所有元素均为 游戏界面.png 的原样裁剪图，按 1744x901 逻辑坐标摆放；
+   舞台用 aspect-ratio 等比缩放，任何窗口下布局与设计稿一致。 */
+.menu-stage {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: min(100%, calc(100vh * 1744 / 901));
+  aspect-ratio: 1744 / 901;
+}
+
+.ui-el { position: absolute; }
+
+.menu-stage img {
+  user-select: none;
+  -webkit-user-drag: none;
+  /* screen 混合：裁剪图的黑底融入暗色菜单，字形/血渍全部保留 */
+  mix-blend-mode: screen;
+}
+
+/* 坐标 = 设计稿像素 / 1744（left、width）与 / 901（top），单位 % */
+.ui-eyebrow       { left: 2.58%;  top: 4.22%;  width: 21.50%; }
+.ui-title         { left: 5.73%;  top: 9.99%;  width: 25.52%; margin: 0; line-height: 0; }
+.ui-title img     { width: 100%; display: block; }
+.ui-logline       { left: 8.03%;  top: 35.74%; width: 22.36%; }
+.ui-volume-label  { left: 2.87%;  top: 61.71%; width: 12.61%; }
+.ui-controls      { left: 2.58%;  top: 81.35%; width: 29.82%; }
+
+#menu-note {
+  left: 2.58%;
+  top: 93%;
+  margin: 0;
+  color: #f0d7a8;
+  font-size: min(1rem, 2.6vh);
+}
+
+/* 图片按钮：Start / Watch Demo / Mute */
+.ui-btn, .ui-mute {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  line-height: 0;
+}
+
+.ui-btn img, .ui-mute img {
+  width: 100%;
+  display: block;
+  transition: filter 0.15s ease;
+}
+
+.ui-btn:hover, .ui-mute:hover { border: none; }
+.ui-btn:hover img, .ui-btn:focus-visible img,
+.ui-mute:hover img, .ui-mute:focus-visible img { filter: brightness(1.28); }
+
+#btn-start { left: 1.61%;  top: 46.39%; width: 15.71%; }
+#btn-demo  { left: 22.08%; top: 46.39%; width: 13.76%; }
+.ui-mute   { left: 2.41%;  top: 69.70%; width: 17.37%; }
+
+/* 静音勾选块：盖在图片内方框的位置，静音时填红 */
+.mute-check {
+  position: absolute;
+  left: 84.5%;
+  top: 24.3%;
+  width: 8.9%;
+  aspect-ratio: 1;
+  background: #a02318;
+  box-shadow: 0 0 8px rgba(160, 35, 24, 0.85);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.mute-toggle.muted .mute-check { opacity: 1; }
+
+/* 音量条：盖在标签右侧，红色填充 + 暗灰底槽 + 红圆头 */
+.ui-volume {
+  left: 16.35%;
+  top: 64.82%;
+  width: 15.48%;
+  aspect-ratio: 270 / 14;
   display: flex;
   align-items: center;
-  padding: clamp(1.25rem, 6vh, 4.5rem) clamp(1.2rem, 8vw, 8rem);
+  /* 1em ≈ 设计稿 17px，随舞台等比缩放 */
+  font-size: min(0.975vw, 1.887vh);
+}
+
+.ui-volume input[type="range"] {
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.ui-volume input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.05em;
+  height: 1.05em;
+  border: none;
+  border-radius: 50%;
+  background: #d94833;
+  box-shadow: 0 0 8px rgba(217, 72, 51, 0.8), 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.ui-volume input[type="range"]::-moz-range-thumb {
+  width: 1.05em;
+  height: 1.05em;
+  border: none;
+  border-radius: 50%;
+  background: #d94833;
+  box-shadow: 0 0 8px rgba(217, 72, 51, 0.8), 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+/* ===== 暂停 / 胜负面板（保留原有风格） ===== */
+#screen-panel {
+  display: flex;
+  background: rgba(7, 8, 12, 0.72);
+  justify-content: center;
+  align-items: center;
+  padding: clamp(1.5rem, 4.5vh, 3rem) clamp(1.4rem, 3.2vw, 3.6rem);
   overflow-y: auto;
 }
 
-#menu {
-  background: linear-gradient(90deg, rgba(7, 8, 12, 0.94) 0%, rgba(7, 8, 12, 0.82) 38%, rgba(7, 8, 12, 0.18) 68%, rgba(7, 8, 12, 0.4) 100%);
-}
-
-#screen-panel {
-  background: rgba(7, 8, 12, 0.72);
-  justify-content: center;
-}
-
 .menu-card {
-  width: min(34rem, 100%);
+  display: flex;
+  flex-direction: column;
+  width: min(38rem, 100%);
   color: var(--ink);
-}
-
-.eyebrow {
-  margin: 0 0 0.4rem;
-  letter-spacing: 0.42em;
-  text-transform: uppercase;
-  color: var(--muted);
-  font-size: 0.78rem;
 }
 
 h1, h2 {
   font-family: "Songti SC", "STSong", "SimSun", Palatino, serif;
   font-weight: 500;
-}
-
-h1 {
-  margin: 0;
-  font-size: clamp(4.5rem, 10vw, 7.5rem);
-  letter-spacing: 0.38em;
-  text-indent: 0.38em;
-  line-height: 0.95;
 }
 
 h2 {
@@ -198,16 +299,15 @@ h2 {
   letter-spacing: 0.18em;
 }
 
-.logline, #panel-text, #menu-note {
+#panel-text {
   color: var(--muted);
   line-height: 1.7;
 }
 
-.logline { max-width: 28rem; }
-
 .menu-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 0.75rem;
   margin: 1.4rem 0 1rem;
 }
@@ -222,17 +322,9 @@ button {
   cursor: pointer;
 }
 
-button span {
-  display: block;
-  margin-top: 0.2rem;
-  letter-spacing: 0.22em;
-  font-size: 0.78rem;
-  color: var(--muted);
-}
-
 button:hover { border-color: #e07a6a; }
 
-#btn-start, #btn-resume, #btn-retry {
+#btn-resume, #btn-retry {
   background: var(--blood);
   border-color: var(--blood);
 }
@@ -240,24 +332,58 @@ button:hover { border-color: #e07a6a; }
 .volume {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  color: var(--muted);
+  gap: 1.1rem;
+  margin-top: clamp(0.4rem, 1.5vh, 0.9rem);
+  font-size: 0.95rem;
   letter-spacing: 0.12em;
-  font-size: 0.85rem;
-}
-
-input[type="range"] { width: min(16rem, 50vw); accent-color: var(--blood); }
-
-.controls {
-  margin: 1rem 0 0;
-  padding: 0;
-  list-style: none;
   color: var(--muted);
-  line-height: 1.8;
-  font-size: 0.92rem;
 }
 
-#menu-note { min-height: 1.4em; color: #f0d7a8; }
+/* 音量条基础样式（面板与主菜单共用；主菜单由 .ui-volume 覆盖定位） */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: min(15.5rem, 42vw);
+  height: 0.62rem;
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+  background:
+    linear-gradient(to right, #c0392b 0%, #c0392b var(--fill, 40%), rgba(243, 239, 230, 0.16) var(--fill, 40%), rgba(243, 239, 230, 0.16) 100%);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.05rem;
+  height: 1.05rem;
+  border: none;
+  border-radius: 50%;
+  background: #d94833;
+  box-shadow: 0 0 8px rgba(217, 72, 51, 0.8), 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 1.05rem;
+  height: 1.05rem;
+  border: none;
+  border-radius: 50%;
+  background: #d94833;
+  box-shadow: 0 0 8px rgba(217, 72, 51, 0.8), 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 0.62rem;
+  border-radius: 3px;
+  background: rgba(243, 239, 230, 0.16);
+}
+
+input[type="range"]::-moz-range-progress {
+  height: 0.62rem;
+  border-radius: 3px;
+  background: #c0392b;
+}
 
 #btn-exit-demo {
   position: absolute;
@@ -300,15 +426,13 @@ input[type="range"] { width: min(16rem, 50vw); accent-color: var(--blood); }
 .hidden { display: none !important; }
 
 @media (max-height: 720px) {
-  #menu, #screen-panel { align-items: flex-start; }
+  #screen-panel { align-items: flex-start; }
   .menu-card { margin-block: 1rem; }
-  h1 { font-size: clamp(3.4rem, 12vh, 5.8rem); }
   .menu-actions { margin-block: 0.8rem; }
-  .controls { margin-top: 0.8rem; }
 }
 
-  #menu, #screen-panel { padding: 4vh 1.2rem; }
-  h1 { letter-spacing: 0.2em; text-indent: 0.2em; }
+@media (max-width: 720px) {
+  #screen-panel { padding: 4vh 1.2rem; }
 }
 
 /* ===== 取景器（节点 3） ===== */
@@ -490,7 +614,338 @@ input[type="range"] { width: min(16rem, 50vw); accent-color: var(--blood); }
   100% { transform: scale(0.72); opacity: 0; }
 }
 
+/* ===== 恐怖悬疑视觉重构：仅覆盖视觉层，不改变 DOM / 交互逻辑 ===== */
+:root {
+  --ink: #e8e2d7;
+  --muted: #9b958d;
+  --blood: #721d22;
+  --blood-bright: #a83235;
+  --blood-dark: #350c12;
+  --ash: #161517;
+  --line: rgba(198, 184, 165, 0.28);
+  --paper: #c8bfb0;
+  --bg: #050507;
+  font-family: "Arial Narrow", "Bahnschrift SemiCondensed", "Microsoft YaHei", sans-serif;
+}
+
+html, body, #app { background: #050507; }
+body { letter-spacing: 0.045em; }
+
+#menu {
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 18% 40%, rgba(105, 18, 24, 0.14), transparent 34%),
+    linear-gradient(90deg, rgba(3, 3, 5, 0.98) 0%, rgba(6, 6, 8, 0.93) 40%, rgba(6, 6, 8, 0.62) 72%, rgba(6, 6, 8, 0.22) 100%);
+}
+
+/* 墙面暗纹、裂痕和老电视噪点，使用 CSS 绘制，避免新增资源并保持加载逻辑不变。 */
+#menu::before,
+#menu::after,
+#screen-panel::before,
+#hud::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#menu::before,
+#screen-panel::before {
+  z-index: -1;
+  opacity: 0.42;
+  background:
+    repeating-linear-gradient(117deg, transparent 0 95px, rgba(175, 160, 143, 0.045) 96px, transparent 98px 170px),
+    repeating-linear-gradient(74deg, transparent 0 140px, rgba(0, 0, 0, 0.22) 141px, transparent 144px 230px),
+    radial-gradient(ellipse at 24% 70%, rgba(125, 22, 28, 0.12), transparent 38%);
+  mix-blend-mode: screen;
+}
+
+#menu::after,
+#hud::after {
+  z-index: 8;
+  opacity: 0.16;
+  background-image:
+    repeating-radial-gradient(circle at 0 0, rgba(255,255,255,0.28) 0 0.7px, transparent 0.9px 4px),
+    repeating-linear-gradient(0deg, rgba(255,255,255,0.035) 0 1px, transparent 1px 3px);
+  background-size: 7px 7px, 100% 4px;
+  mix-blend-mode: soft-light;
+  animation: old-noise 0.18s steps(2) infinite;
+}
+
+@keyframes old-noise {
+  0% { transform: translate(0, 0); }
+  50% { transform: translate(-1%, 1%); }
+  100% { transform: translate(1%, -1%); }
+}
+
+.menu-stage { filter: contrast(1.08) saturate(0.78); }
+.menu-stage::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 46%;
+  height: 100%;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(0,0,0,0.35), transparent 92%);
+}
+
+.ui-eyebrow,
+.ui-logline,
+.ui-volume-label,
+.ui-controls { opacity: 0.82; filter: grayscale(0.45) sepia(0.16) contrast(1.16); }
+.ui-title { filter: grayscale(0.3) sepia(0.2) contrast(1.3) drop-shadow(0 0 12px rgba(100, 17, 23, 0.3)); }
+
+.ui-btn, .ui-mute {
+  border: 1px solid rgba(125, 34, 37, 0.44);
+  background: linear-gradient(90deg, rgba(56, 10, 15, 0.76), rgba(111, 23, 29, 0.36));
+  box-shadow: inset 0 0 0 1px rgba(8, 5, 6, 0.65), 0 0 18px rgba(86, 12, 18, 0.18);
+  clip-path: polygon(0 4%, 97% 0, 100% 92%, 4% 100%);
+  transition: filter 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+.ui-btn::after, .ui-mute::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  pointer-events: none;
+  border: 1px solid rgba(213, 177, 153, 0.14);
+  clip-path: polygon(0 8%, 100% 0, 96% 90%, 4% 100%);
+}
+.ui-btn:hover, .ui-btn:focus-visible, .ui-mute:hover, .ui-mute:focus-visible {
+  transform: translateX(4px);
+  filter: brightness(1.3) saturate(1.2);
+  box-shadow: inset 0 0 0 1px rgba(234, 185, 159, 0.25), 0 0 22px rgba(145, 26, 32, 0.46);
+}
+.ui-btn img, .ui-mute img { filter: grayscale(0.28) sepia(0.18) contrast(1.16); }
+
+#btn-start { background: linear-gradient(90deg, rgba(113, 20, 27, 0.92), rgba(52, 8, 13, 0.64)); }
+#btn-start::before {
+  content: "";
+  position: absolute;
+  left: 3%; right: 3%; bottom: -3px;
+  height: 2px;
+  background: var(--blood-bright);
+  box-shadow: 0 0 12px rgba(168, 50, 53, 0.8);
+}
+
+.ui-volume input[type="range"], input[type="range"] {
+  background: linear-gradient(to right, #8f252b 0%, #8f252b var(--fill, 40%), rgba(224, 211, 194, 0.14) var(--fill, 40%), rgba(224, 211, 194, 0.14) 100%);
+  border: 1px solid rgba(155, 118, 104, 0.24);
+}
+.ui-volume input[type="range"]::-webkit-slider-thumb,
+input[type="range"]::-webkit-slider-thumb,
+.ui-volume input[type="range"]::-moz-range-thumb,
+input[type="range"]::-moz-range-thumb { background: #a83235; box-shadow: 0 0 12px rgba(168, 50, 53, 0.85); }
+
+#screen-panel {
+  background: rgba(3, 3, 5, 0.88);
+}
+.menu-card {
+  position: relative;
+  padding: clamp(1.5rem, 4vw, 3rem);
+  border: 1px solid rgba(154, 54, 56, 0.34);
+  background: linear-gradient(135deg, rgba(20, 16, 17, 0.96), rgba(5, 5, 7, 0.92));
+  box-shadow: 0 20px 70px rgba(0,0,0,0.7), inset 0 0 40px rgba(104, 18, 24, 0.08);
+}
+.menu-card::before, .menu-card::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  border-color: rgba(164, 56, 58, 0.52);
+}
+.menu-card::before { inset: 10px; border-top: 1px solid; border-left: 1px solid; }
+.menu-card::after { right: 10px; bottom: 10px; width: 25%; height: 25%; border-right: 1px solid; border-bottom: 1px solid; }
+
+h1, h2 {
+  font-family: "Arial Black", "Microsoft YaHei", sans-serif;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  text-shadow: 2px 0 rgba(145, 28, 35, 0.34), -1px 0 rgba(235, 220, 198, 0.12), 0 8px 18px #000;
+}
+#panel-title { color: #d5c9bb; }
+#panel-text, .volume { color: #9e958a; }
+.menu-actions button, #btn-exit-demo, #btn-mute-hud {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(168, 50, 53, 0.5);
+  background: linear-gradient(135deg, rgba(28, 22, 23, 0.95), rgba(73, 14, 19, 0.88));
+  box-shadow: inset 0 0 16px rgba(152, 29, 35, 0.12), 0 5px 16px rgba(0,0,0,0.32);
+}
+#btn-resume, #btn-retry { background: linear-gradient(135deg, #8e282e, #481015); }
+button:hover { border-color: #c45c58; color: #fff4e7; }
+
+#record, #timer, #objective, #chase, #prompt, #subtitle { text-shadow: 0 2px 10px #000, 0 0 5px rgba(129, 27, 32, 0.35); }
+#record { color: #c9bdb0; }
+#chase { color: #d77b72; }
+#prompt { color: #c5a493; }
+#crosshair.hot::before, #crosshair.hot::after { background: #bd3638; box-shadow: 0 0 8px rgba(189, 54, 56, 0.9); }
+
+/* ===== 游戏内文字与 Esc 暂停菜单：保持清晰的可读尺寸 =====
+   这些元素不属于主菜单 1744x901 舞台，不能跟随主菜单图片缩放。 */
+#hud,
+#screen-panel {
+  font-size: 16px;
+}
+
+#subtitle {
+  font-size: clamp(1.35rem, 2.1vw, 2.1rem);
+  line-height: 1.45;
+  min-height: 1.45em;
+}
+
+#screen-panel .menu-card {
+  width: min(44rem, 92vw);
+  padding: clamp(2rem, 5vh, 4rem) clamp(2rem, 5vw, 4.5rem);
+}
+
+#screen-panel h2 {
+  margin-bottom: 0.9rem;
+  font-size: clamp(2.6rem, 5vw, 4rem);
+  line-height: 1.15;
+}
+
+#screen-panel #panel-text {
+  margin: 0;
+  font-size: clamp(1.05rem, 1.7vw, 1.35rem);
+  line-height: 1.8;
+}
+
+#screen-panel .menu-actions {
+  gap: 0.9rem;
+  margin: 1.8rem 0 1.3rem;
+}
+
+#screen-panel .menu-actions button {
+  min-height: 3rem;
+  padding: 0.8rem 1.25rem;
+  font-size: clamp(1rem, 1.35vw, 1.2rem);
+}
+
+#screen-panel .volume {
+  gap: 1.2rem;
+  font-size: clamp(1rem, 1.35vw, 1.2rem);
+}
+
+/* ===== 原始界面背景：按 1744x901 原比例完整铺设，不裁切、不滤镜、不叠加纹理 ===== */
+#menu {
+  background-color: #050507;
+  background-image: url("../assets/ui/menu-background.jpg");
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: cover;
+}
+#menu::before {
+  display: block;
+  content: "";
+  position: absolute;
+  z-index: 1;
+  inset: 0 auto 0 0;
+  width: 42%;
+  pointer-events: none;
+  background: #000;
+}
+#menu::after,
+#screen-panel::before { display: none; }
+.menu-stage {
+  z-index: 2;
+  filter: none;
+}
+
+/* ===== 游戏内 HUD 二次放大：字幕/暂停内容翻倍，顶部信息统一字号 ===== */
+#hud,
+#screen-panel {
+  font-size: 32px;
+}
+
+.hud-top {
+  padding: 2.5rem 2.8rem;
+  gap: 2rem;
+}
+
+#record,
+#timer,
+#objective,
+#btn-mute-hud {
+  font-size: 2rem;
+  line-height: 1.35;
+}
+
+#record,
+#timer,
+#objective {
+  letter-spacing: 0.08em;
+}
+
+#objective { margin-top: 0.7rem; }
+
+#btn-mute-hud {
+  padding: 1.5rem 2.2rem;
+  letter-spacing: 0.08em;
+}
+
+#chase,
+#prompt {
+  font-size: 2rem;
+  line-height: 1.35;
+}
+
+#chase { top: 9.2rem; }
+#prompt { right: 6%; bottom: 10%; }
+
+#subtitle {
+  font-size: clamp(2.7rem, 4.2vw, 4.2rem);
+  line-height: 1.45;
+  min-height: 1.45em;
+  width: min(64rem, 92vw);
+}
+
+#screen-panel .menu-card {
+  width: min(60rem, 92vw);
+  padding: clamp(4rem, 10vh, 8rem) clamp(4rem, 10vw, 9rem);
+}
+
+#screen-panel h2 {
+  margin-bottom: 1.8rem;
+  font-size: clamp(5.2rem, 10vw, 8rem);
+  line-height: 1.15;
+}
+
+#screen-panel #panel-text {
+  font-size: clamp(2.1rem, 3.4vw, 2.7rem);
+  line-height: 1.8;
+}
+
+#screen-panel .menu-actions {
+  gap: 1.8rem;
+  margin: 3.6rem 0 2.6rem;
+}
+
+#screen-panel .menu-actions button {
+  min-height: 6rem;
+  padding: 1.6rem 2.5rem;
+  font-size: clamp(2rem, 2.7vw, 2.4rem);
+}
+
+#screen-panel .volume {
+  gap: 2.4rem;
+  font-size: clamp(2rem, 2.7vw, 2.4rem);
+}
+
+@media (max-width: 720px) {
+  .hud-top { padding: 1.5rem; }
+  #record, #timer, #objective, #btn-mute-hud,
+  #chase, #prompt { font-size: 1.35rem; }
+  #subtitle { font-size: clamp(1.8rem, 7vw, 2.7rem); }
+  #screen-panel .menu-card { padding: 2.4rem 1.6rem; }
+  #screen-panel h2 { font-size: clamp(3rem, 12vw, 5.2rem); }
+  #screen-panel #panel-text { font-size: clamp(1.2rem, 5vw, 2rem); }
+  #screen-panel .menu-actions button,
+  #screen-panel .volume { font-size: clamp(1.2rem, 5vw, 1.8rem); }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  #menu::after, #hud::after { animation: none; }
   #viewfinder.opening #vf-screen {
     animation: vf-open-reduced 0.45s ease-out forwards;
   }
