@@ -295,6 +295,9 @@ export class Game {
       npcMode: this.npcMode(),
       npcRate: this.demoActive ? 1.65 : 1,
       classmateFade: this.endingFade,
+      playerX: this.player.x,
+      playerZ: this.player.z,
+      playerYaw: this.player.yaw,
     };
   }
 

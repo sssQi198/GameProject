@@ -1,4 +1,4 @@
-﻿import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.js';
 import { LAYOUT } from './layout.js';
 import { hints, successLines } from './team/p1.js';
 import { anomalyFactory } from './team/m2.js';
@@ -23,7 +23,7 @@ export function createAnomaly(level) {
     case 1: return createSeat();
     case 2: return createBoard();
     case 3: return createCurtain();
-    case 4: return createEcho();
+    case 4: return createRedDoll();
     case 5: return createDoorVision();
     default: throw new Error(`没有第 ${level} 关异常`);
   }
@@ -604,55 +604,416 @@ function createCurtain() {
 
 /* ---------------------------------------------------------------- 第 4 关 */
 
-/** 地上第二台相机，以及一串走到一半就断掉的鞋印。 */
-function createEcho() {
+/**
+ * 红色人偶瞬移惊吓异常 —— 基于序章同学建模改造。
+ * - 复用序章同学的几何结构（躯干/四肢），材质改为干涸深红（0x5a0a14）
+ * - 眼部高度 1.62m 与玩家平视，脚底落地在 Y=0
+ * - 面部：纯黑两点（眼睛）+ 一条弧线（笑脸）+ 墨水下流线条
+ * - 每 4 次灯灭触发一次瞬移（间隔为原 2 次的两倍）
+ * - 第 3/6/9… 次瞬移为"冲刺贴脸"：从玩家视野前方约 2m 处以 4.5m/s 冲向玩家面前急停
+ * - 冲刺时播放渐强音效 + 腿部摆动动画（参考序章 NPC 行走）
+ * - 其余瞬移瞬移到角落，每帧保持面向玩家（不仅瞬移时）
+ */
+function createRedDoll() {
+  const EYE_H = 1.62;  // 玩家平视高度
   const group = new THREE.Group();
-  group.position.set(LAYOUT.echo.x, 0, LAYOUT.echo.z);
 
-  const second = cameraModel(0xe8e2d4);
-  second.position.set(-0.08, 0, 0.1);
-  second.rotation.y = 0.7;
-  group.add(second);
+  // ── 材质：干涸血液深红，比之前更深 ──
+  const clothMat = new THREE.MeshStandardMaterial({ color: 0x5a0a14, roughness: 0.92 });
+  const darkMat  = new THREE.MeshStandardMaterial({ color: 0x3d060e, roughness: 0.95 });
+  const inkMat   = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
+  const inkMatThick = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
 
-  const printMat = new THREE.MeshBasicMaterial({ color: 0x1d1714, transparent: true, opacity: 0.72 });
-  const prints = [];
-  for (let i = 0; i < 5; i += 1) {
-    const step = new THREE.Group();
-    const sole = new THREE.Mesh(new THREE.CircleGeometry(0.075, 14), printMat);
-    sole.rotation.x = -Math.PI / 2;
-    sole.scale.set(1, 0.62, 1);
-    sole.position.set(0, 0, 0.055);
-    const heel = new THREE.Mesh(new THREE.CircleGeometry(0.045, 12), printMat);
-    heel.rotation.x = -Math.PI / 2;
-    heel.scale.set(1, 0.7, 1);
-    heel.position.set(0, 0, -0.075);
-    step.add(sole, heel);
-    step.position.set((i % 2 === 0 ? -1 : 1) * 0.09, 0.032 + i * 0.001, 0.5 + i * 0.34);
-    group.add(step);
-    prints.push(step);
+  // ── 头部（球体） ──
+  const headR = 0.165;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 20, 16), clothMat);
+  head.position.y = EYE_H;
+  group.add(head);
+
+  // ── 颈 ──
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.07, 0.1, 10), clothMat);
+  neck.position.y = EYE_H - headR - 0.05;
+  group.add(neck);
+
+  // ── 躯干（4 段圆柱锥化，更瘦高） ──
+  // 肩部 Y = EYE_H - headR - 0.1 = 1.355
+  const torso = new THREE.Group();
+  const segCount = 4;
+  const segH = 0.17;
+  const shoulderY = EYE_H - headR - 0.1;
+  for (let i = 0; i < segCount; i++) {
+    const t = i / (segCount - 1);
+    const radius = 0.16 - t * 0.06; // 更瘦：0.16→0.10
+    const seg = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius - 0.02, segH, 10),
+      clothMat,
+    );
+    seg.scale.z = 0.7;
+    seg.position.y = shoulderY - i * segH;
+    torso.add(seg);
+  }
+  group.add(torso);
+
+  // ── 胯 ──
+  const hipY = shoulderY - 3 * segH - 0.0; // 躯干底部
+  const hip = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.10, 0.14), darkMat); // 更窄
+  hip.position.y = hipY;
+  group.add(hip);
+
+  // ── 腿（与序章同学布局一致，pivot 在髋部下方） ──
+  const legLen = 0.72;
+  const legGeo = new THREE.BoxGeometry(0.09, legLen, 0.10); // 更细
+  legGeo.translate(0, -legLen / 2, 0);
+  const legL = new THREE.Mesh(legGeo, darkMat);
+  const legR = new THREE.Mesh(legGeo, darkMat);
+  const legPivotY = hipY - 0.06;
+  legL.position.set(-0.09, legPivotY, 0);
+  legR.position.set(0.09, legPivotY, 0);
+  group.add(legL, legR);
+
+  // ── 鞋 ──
+  const shoeH = 0.06;
+  const shoeGeo = new THREE.BoxGeometry(0.07, shoeH, 0.13); // 更窄
+  const shoeL = new THREE.Mesh(shoeGeo, darkMat);
+  const shoeR = new THREE.Mesh(shoeGeo, darkMat);
+  const shoeY = legPivotY - legLen - 0.035; // 微调使脚底刚好贴地
+  shoeL.position.set(-0.09, shoeY, 0.025);
+  shoeR.position.set(0.09, shoeY, 0.025);
+  group.add(shoeL, shoeR);
+
+  // 脚底位置 = shoeY - shoeH/2
+  const feetBottom = shoeY - shoeH / 2; // ≈ 0.865 - 0.06 - 0.62 - 0.03 = 0.155
+  // group.position.y 调整使脚底 = 0
+  const groundY = -feetBottom;
+
+  // ── 上臂 ──
+  const armGeo = new THREE.CylinderGeometry(0.04, 0.036, 0.30, 8); // 更细
+  armGeo.translate(0, -0.13, 0);
+  const armL = new THREE.Mesh(armGeo, clothMat);
+  const armR = new THREE.Mesh(armGeo, clothMat);
+  armL.position.set(-0.26, shoulderY, 0);
+  armR.position.set(0.26, shoulderY, 0);
+  group.add(armL, armR);
+
+  // ── 前臂 ──
+  const foreGeo = new THREE.CylinderGeometry(0.03, 0.024, 0.28, 8); // 更细
+  foreGeo.translate(0, -0.12, 0);
+  const foreL = new THREE.Mesh(foreGeo, clothMat);
+  const foreR = new THREE.Mesh(foreGeo, clothMat);
+  foreL.position.y = -0.26;
+  foreL.rotation.x = 0.21;
+  foreR.position.y = -0.26;
+  foreR.rotation.x = 0.21;
+  armL.add(foreL);
+  armR.add(foreR);
+
+  // ── 手 ──
+  const handGeo = new THREE.SphereGeometry(0.03, 8, 6);
+  const handL = new THREE.Mesh(handGeo, darkMat);
+  const handR = new THREE.Mesh(handGeo, darkMat);
+  handL.position.set(0, -0.49, 0);
+  handR.position.set(0, -0.49, 0);
+  armL.add(handL);
+  armR.add(handR);
+
+  // ===== 脸部：纯黑两点 + 一条弧线 + 墨水下流 =====
+  const faceZ = headR + 0.003;
+
+  // 左眼
+  const eyeL = new THREE.Mesh(new THREE.CircleGeometry(0.030, 10), inkMat);
+  eyeL.position.set(-0.048, EYE_H + 0.025, faceZ);
+  group.add(eyeL);
+
+  // 右眼
+  const eyeRdot = new THREE.Mesh(new THREE.CircleGeometry(0.030, 10), inkMat);
+  eyeRdot.position.set(0.048, EYE_H + 0.025, faceZ);
+  group.add(eyeRdot);
+
+  // 墨水下流辅助函数
+  function addDrip(x, startY, length, width) {
+    const drip = new THREE.Mesh(
+      new THREE.BoxGeometry(width, length, 0.004),
+      inkMatThick,
+    );
+    drip.position.set(x, startY - length / 2, faceZ);
+    group.add(drip);
   }
 
-  const drag = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 1.9), new THREE.MeshBasicMaterial({
-    color: 0x0d0a09, transparent: true, opacity: 0.35,
-  }));
-  drag.rotation.x = -Math.PI / 2;
-  drag.position.set(0.12, 0.028, 1.2);
-  group.add(drag);
+  // 左眼泪墨下流
+  addDrip(-0.048, EYE_H + 0.025 - 0.030, 0.040, 0.005);
+  addDrip(-0.054, EYE_H + 0.025 - 0.030 - 0.035, 0.022, 0.003);
 
-  tag(group, 4, 'echo');
+  // 右眼泪墨下流
+  addDrip(0.048, EYE_H + 0.025 - 0.030, 0.032, 0.005);
+  addDrip(0.055, EYE_H + 0.025 - 0.030 - 0.028, 0.015, 0.003);
+
+  // 嘴：笑脸弧线（细分段拼成）
+  const mouthPts = 8;
+  const mouthW = 0.090;
+  const mouthH = 0.030;
+  const mouthY = EYE_H - 0.050;
+  for (let i = 0; i < mouthPts; i++) {
+    const t = i / (mouthPts - 1);
+    const angle = -Math.PI * t + Math.PI;
+    const x = (t - 0.5) * mouthW * 2;
+    const y = -Math.sin(angle) * mouthH;
+    const seg = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.007, 0.005), inkMat);
+    seg.position.set(x, mouthY + y, faceZ);
+    const nt = Math.min(1, (i + 1) / (mouthPts - 1));
+    const na = -Math.PI * nt + Math.PI;
+    const nx = (nt - 0.5) * mouthW * 2;
+    const ny = -Math.sin(na) * mouthH;
+    const dy = ny - y;
+    const dx2 = nx - x;
+    if (Math.abs(dx2) > 0.001 || Math.abs(dy) > 0.001) {
+      seg.rotation.z = -Math.atan2(dy, dx2);
+    }
+    group.add(seg);
+  }
+
+  // 嘴角墨水下流
+  addDrip(-0.090, mouthY - 0.030, 0.035, 0.005);
+  addDrip(0.090, mouthY - 0.030, 0.025, 0.004);
+  // 左嘴角长泪痕（向下延伸到嘴角墨水线更下方）
+  addDrip(-0.085, mouthY - 0.030 - 0.035 - 0.012, 0.020, 0.003);
+
+  // ── 全部标记为异常 ──
+  tagAnomaly(group, 4, 'doll');
+
+  // ── 预定义安全角落位置 ──
+  const CORNERS = [
+    { x: 0, z: -5.4 },
+    { x: -9.4, z: 2.5 },
+    { x: 9.4, z: -5.4 },
+    { x: -9.4, z: -4.5 },
+    { x: 5.0, z: 5.4 },
+  ];
+
+  // ── 状态 ──
+  let flickerCount = 0;
+  let lastFlicker = false;
+  let teleportPhase = 0;          // 瞬移阶段，%3==2 为冲刺贴脸
+  let cornerIndex = 0;
+  let firstFlicker = true;
+
+  // 冲刺状态
+  let charging = false;           // 是否正在冲刺中
+  let chargeFromX = 0;
+  let chargeFromZ = 0;
+  let chargeTargetX = 0;
+  let chargeTargetZ = 0;
+  let chargeProgress = 0;         // 0..1 归一化进度
+  let chargeMaxDist = 0;          // 总距离
+  let lastDollRotation = 0;
+  const CHARGE_SPEED = 4.5;       // m/s 冲刺速度
+  const LAUNCH_DIST = 1.8;        // 出现距离玩家多远
+
+  group.visible = false;
+  group.scale.setScalar(1.0);
+  group.position.set(CORNERS[0].x, groundY, CORNERS[0].z);
+  group.rotation.y = 0;
 
   return {
     level: 4,
-    id: 'echo',
+    id: 'doll',
     group,
-    stand: { x: -1.05, z: LAYOUT.echo.z },
-    aimY: 0.16,
+    stand: { x: -1, z: 2.5 },
+    aimY: EYE_H,
     update(dt, env) {
-      prints.forEach((print, i) => {
-        print.position.y = 0.032 + i * 0.001 + Math.sin(env.time * 1.6 + i * 0.8) * 0.004;
-        print.rotation.y = Math.sin(env.time * 0.8 + i) * 0.04;
-      });
-      drag.material.opacity = 0.28 + Math.sin(env.time * 0.7) * 0.06;
+      const px = env.playerX ?? 0;
+      const pz = env.playerZ ?? 0;
+      const audio = env.audio;
+
+      // ===== 1. 冲刺动画播放（每帧执行，优先级最高） =====
+      if (charging) {
+        const step = CHARGE_SPEED * dt;
+        const remaining = chargeMaxDist * (1 - chargeProgress);
+        if (step >= remaining) {
+          // 到达目标（玩家脸前）
+          group.position.set(chargeTargetX, groundY, chargeTargetZ);
+          // 到达后仍然面向玩家
+          group.rotation.y = Math.atan2(px - chargeTargetX, pz - chargeTargetZ);
+          lastDollRotation = group.rotation.y;
+          charging = false;
+          chargeProgress = 1;
+        } else {
+          chargeProgress += step / chargeMaxDist;
+          const t = chargeProgress;
+          // 缓入缓出：前快后慢，在到达时平滑停止
+          const easedT = t < 0.7 ? t / 0.7 * 0.85 : 0.85 + (t - 0.7) / 0.3 * 0.15;
+          const cx = chargeFromX + (chargeTargetX - chargeFromX) * easedT;
+          const cz = chargeFromZ + (chargeTargetZ - chargeFromZ) * easedT;
+          group.position.set(cx, groundY, cz);
+          // 始终面向目标方向（玩家）
+          group.rotation.y = Math.atan2(px - cx, pz - cz);
+          lastDollRotation = group.rotation.y;
+
+          // 腿部摆动（参考序章 NPC 行走：sin(t*8)*0.45）
+          const swing = Math.sin(chargeProgress * chargeMaxDist * 10) * 0.45;
+          legL.rotation.x = swing;
+          legR.rotation.x = -swing;
+          // 手臂跟着摆
+          armL.rotation.x = -swing * 0.5;
+          armR.rotation.x = swing * 0.5;
+          // 身体上下微弹
+          const bounce = Math.sin(chargeProgress * chargeMaxDist * Math.PI * 4) * 0.012;
+          group.position.y = groundY + bounce;
+        }
+        // 冲刺中仍然持续面向玩家
+        return;
+      }
+
+      // 不是冲刺状态，恢复静止姿态
+      legL.rotation.x = 0;
+      legR.rotation.x = 0;
+      armL.rotation.x = 0;
+      armR.rotation.x = 0;
+      group.position.y = groundY;
+      // 静止时仍然面向玩家
+      group.rotation.y = Math.atan2(px - group.position.x, pz - group.position.z);
+      lastDollRotation = group.rotation.y;
+
+      // ===== 2. 灯灭上升沿检测 =====
+      const flickerRise = env.flickerDark && !lastFlicker;
+      lastFlicker = env.flickerDark;
+
+      if (flickerRise) {
+        flickerCount++;
+
+        if (firstFlicker) {
+          firstFlicker = false;
+          group.visible = true;
+          cornerIndex = 0;
+          group.position.set(CORNERS[cornerIndex].x, groundY, CORNERS[cornerIndex].z);
+          group.rotation.y = Math.atan2(px - CORNERS[cornerIndex].x, pz - CORNERS[cornerIndex].z);
+          lastDollRotation = group.rotation.y;
+          return;
+        }
+
+        // 每 4 次灯灭触发一次瞬移
+        if (flickerCount % 4 === 0) {
+          const isClosePhase = teleportPhase % 3 === 2;
+
+          if (isClosePhase) {
+            // ── 冲刺贴脸（基于玩家视角方向） ──
+            let launchX = px;
+            let launchZ = pz;
+            let faceX = px;
+            let faceZ = pz;
+            let foundClose = false;
+
+            // 获取玩家视角朝向的 yaw 角度（弧度）
+            const playerYaw = env.playerYaw ?? 0;
+
+            const FINAL_DISTANCES = [0.55, 0.65, 0.75, 0.85, 1.0, 1.2, 1.5];
+            // 以玩家视角方向为中心，小角度偏移，确保正面冲来
+            const angleOffsets = [0, 0.3, -0.3, 0.6, -0.6, 0.9, -0.9, 1.2, -1.2];
+            for (const dist of FINAL_DISTANCES) {
+              for (const aOff of angleOffsets) {
+                const angle = playerYaw - aOff;
+                const nx = px + -Math.sin(angle) * dist;
+                const nz = pz + -Math.cos(angle) * dist;
+
+                if (nx < LAYOUT.room.minX + 0.3 || nx > LAYOUT.room.maxX - 0.3) continue;
+                if (nz < LAYOUT.room.minZ + 0.3 || nz > LAYOUT.room.maxZ - 0.3) continue;
+
+                let blocked = false;
+                const desks = LAYOUT.desks;
+                for (const x0 of desks.towardBoard) {
+                  for (const z0 of desks.across) {
+                    const dx = nx - x0;
+                    const dz = nz - z0;
+                    const halfDesk = Math.max(desks.topW, desks.topD) * 0.55;
+                    if (Math.abs(dx) < halfDesk && Math.abs(dz) < halfDesk) { blocked = true; break; }
+                  }
+                  if (blocked) break;
+                }
+                if (!blocked) {
+                  const dx = nx - 8.2;
+                  const dz = nz - 0;
+                  if (Math.abs(dx) < 0.4 && Math.abs(dz) < 0.9) blocked = true;
+                }
+                if (!blocked) {
+                  faceX = nx;
+                  faceZ = nz;
+                  // 发射位置：沿 player → face 方向向外延伸 LAUNCH_DIST 米
+                  const dirFromPlayerX = faceX - px;
+                  const dirFromPlayerZ = faceZ - pz;
+                  const distToFace = Math.hypot(dirFromPlayerX, dirFromPlayerZ);
+                  if (distToFace > 0.01) {
+                    const norm = LAUNCH_DIST / distToFace;
+                    launchX = px + dirFromPlayerX * norm;
+                    launchZ = pz + dirFromPlayerZ * norm;
+                  } else {
+                    launchX = px;
+                    launchZ = pz - LAUNCH_DIST;
+                  }
+                  // 确保发射位置在教室范围内
+                  launchX = Math.max(LAYOUT.room.minX + 0.3, Math.min(LAYOUT.room.maxX - 0.3, launchX));
+                  launchZ = Math.max(LAYOUT.room.minZ + 0.3, Math.min(LAYOUT.room.maxZ - 0.3, launchZ));
+
+                  foundClose = true;
+                  break;
+                }
+              }
+              if (foundClose) break;
+            }
+
+            if (!foundClose) {
+              // 兜底：角落
+              cornerIndex = (cornerIndex + 1) % CORNERS.length;
+              group.position.set(CORNERS[cornerIndex].x, groundY, CORNERS[cornerIndex].z);
+              group.rotation.y = Math.atan2(px - CORNERS[cornerIndex].x, pz - CORNERS[cornerIndex].z);
+            } else {
+              // 开始冲刺
+              group.position.set(launchX, groundY, launchZ);
+              group.rotation.y = Math.atan2(px - launchX, pz - launchZ);
+              lastDollRotation = group.rotation.y;
+              group.visible = true;
+              charging = true;
+              chargeFromX = launchX;
+              chargeFromZ = launchZ;
+              chargeTargetX = faceX;
+              chargeTargetZ = faceZ;
+              chargeProgress = 0;
+              chargeMaxDist = Math.hypot(faceX - launchX, faceZ - launchZ);
+
+              // 播放冲刺音效
+              if (audio) {
+                try {
+                  // 渐强噪音
+                  audio.burst({ duration: 0.08, gain: 0.15, type: 'highpass', freq: 3000, q: 0.4 });
+                  audio.burst({ duration: 0.12, gain: 0.25, type: 'bandpass', freq: 800, q: 0.6, delay: 0.02 });
+                  audio.burst({ duration: 0.2, gain: 0.35, type: 'bandpass', freq: 400, q: 0.5, delay: 0.06 });
+                  // 低吼
+                  audio.tone(110, 0.35, 0.10, 'sawtooth');
+                  audio.tone(55, 0.4, 0.06, 'sine');
+                } catch (e) { /* 音效出错不影响核心逻辑 */ }
+              }
+            }
+          } else {
+            // ── 角落瞬移，面向玩家 ──
+            cornerIndex = (cornerIndex + 1) % CORNERS.length;
+            group.position.set(CORNERS[cornerIndex].x, groundY, CORNERS[cornerIndex].z);
+            group.rotation.y = Math.atan2(px - CORNERS[cornerIndex].x, pz - CORNERS[cornerIndex].z);
+            lastDollRotation = group.rotation.y;
+          }
+
+          teleportPhase++;
+        }
+      }
+
+      // ===== 3. 每帧保持面向玩家（仅非冲刺状态） =====
+      if (group.visible && !charging) {
+        group.rotation.y = Math.atan2(px - group.position.x, pz - group.position.z);
+        lastDollRotation = group.rotation.y;
+      }
+
+      // ===== 4. 微小的呼吸浮动（非冲刺时） =====
+      if (group.visible && !charging) {
+        const breath = Math.sin(env.time * 2.1) * 0.006;
+        group.position.y = groundY + breath;
+      }
     },
   };
 }
