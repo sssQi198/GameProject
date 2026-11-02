@@ -5,6 +5,8 @@
   --blood: #8e2f2a;
   --line: rgba(243, 239, 230, 0.4);
   --bg: #07080c;
+  /* 1u = 设计稿 1744×901 上的 1px，再乘 0.375（在 0.75 的基础上再缩小一半）。窗口不是这个尺寸时，按更紧的一边缩放，不拉伸。 */
+  --u: min(calc(100vw / 1744 * 0.375), calc(100vh / 901 * 0.375));
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
@@ -106,8 +108,8 @@ body { min-width: 320px; }
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 16px;
-  height: 16px;
+  width: calc(16 * var(--u));
+  height: calc(16 * var(--u));
   transform: translate(-50%, -50%);
 }
 
@@ -118,8 +120,8 @@ body { min-width: 320px; }
   background: rgba(243, 239, 230, 0.9);
 }
 
-#crosshair::before { left: 7px; top: 0; width: 2px; height: 16px; }
-#crosshair::after { left: 0; top: 7px; width: 16px; height: 2px; }
+#crosshair::before { left: calc(7 * var(--u)); top: 0; width: calc(2 * var(--u)); height: calc(16 * var(--u)); }
+#crosshair::after { left: 0; top: calc(7 * var(--u)); width: calc(16 * var(--u)); height: calc(2 * var(--u)); }
 
 #crosshair.hot::before,
 #crosshair.hot::after { background: #ffb15a; }
@@ -129,11 +131,10 @@ body { min-width: 320px; }
   left: 50%;
   bottom: 16%;
   transform: translateX(-50%);
-  width: min(48rem, 90vw);
+  width: calc(1024 * var(--u));
   text-align: center;
   color: var(--ink);
-  /* 以视口为基准，避免大画布/浏览器缩放时字幕被显示得过小 */
-  font-size: clamp(1.35rem, 2.1vw, 2.1rem);
+  font-size: calc(67.2 * var(--u));
   line-height: 1.45;
   letter-spacing: 0.06em;
 }
@@ -192,7 +193,7 @@ body { min-width: 320px; }
   top: 93%;
   margin: 0;
   color: #f0d7a8;
-  font-size: min(1rem, 2.6vh);
+  font-size: calc(17 * var(--u));
 }
 
 /* 图片按钮：Start / Watch Demo / Mute */
@@ -241,8 +242,8 @@ body { min-width: 320px; }
   aspect-ratio: 270 / 14;
   display: flex;
   align-items: center;
-  /* 1em ≈ 设计稿 17px，随舞台等比缩放 */
-  font-size: min(0.975vw, 1.887vh);
+  /* 1em = 设计稿 17px，与 --u 同一锚点 */
+  font-size: calc(17 * var(--u));
 }
 
 .ui-volume input[type="range"] {
@@ -259,7 +260,7 @@ body { min-width: 320px; }
   border: none;
   border-radius: 50%;
   background: #d94833;
-  box-shadow: 0 0 8px rgba(217, 72, 51, 0.8), 0 1px 3px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 0 calc(8 * var(--u)) rgba(217, 72, 51, 0.8), 0 calc(1 * var(--u)) calc(3 * var(--u)) rgba(0, 0, 0, 0.8);
 }
 
 .ui-volume input[type="range"]::-moz-range-thumb {
@@ -268,7 +269,7 @@ body { min-width: 320px; }
   border: none;
   border-radius: 50%;
   background: #d94833;
-  box-shadow: 0 0 8px rgba(217, 72, 51, 0.8), 0 1px 3px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 0 calc(8 * var(--u)) rgba(217, 72, 51, 0.8), 0 calc(1 * var(--u)) calc(3 * var(--u)) rgba(0, 0, 0, 0.8);
 }
 
 /* ===== 暂停 / 胜负面板（保留原有风格） ===== */
@@ -277,7 +278,7 @@ body { min-width: 320px; }
   background: rgba(7, 8, 12, 0.72);
   justify-content: center;
   align-items: center;
-  padding: clamp(1.5rem, 4.5vh, 3rem) clamp(1.4rem, 3.2vw, 3.6rem);
+  padding: calc(40.545 * var(--u)) calc(55.808 * var(--u));
   overflow-y: auto;
 }
 
@@ -332,9 +333,9 @@ button:hover { border-color: #e07a6a; }
 .volume {
   display: flex;
   align-items: center;
-  gap: 1.1rem;
-  margin-top: clamp(0.4rem, 1.5vh, 0.9rem);
-  font-size: 0.95rem;
+  gap: calc(17.6 * var(--u));
+  margin-top: calc(13.515 * var(--u));
+  font-size: calc(15.2 * var(--u));
   letter-spacing: 0.12em;
   color: var(--muted);
 }
@@ -343,9 +344,9 @@ button:hover { border-color: #e07a6a; }
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
-  width: min(15.5rem, 42vw);
-  height: 0.62rem;
-  border-radius: 3px;
+  width: calc(248 * var(--u));
+  height: calc(9.92 * var(--u));
+  border-radius: calc(3 * var(--u));
   outline: none;
   cursor: pointer;
   background:
@@ -356,48 +357,51 @@ input[type="range"] {
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 1.05rem;
-  height: 1.05rem;
+  width: calc(16.8 * var(--u));
+  height: calc(16.8 * var(--u));
   border: none;
   border-radius: 50%;
   background: #d94833;
-  box-shadow: 0 0 8px rgba(217, 72, 51, 0.8), 0 1px 3px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 0 calc(8 * var(--u)) rgba(217, 72, 51, 0.8), 0 calc(1 * var(--u)) calc(3 * var(--u)) rgba(0, 0, 0, 0.8);
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 1.05rem;
-  height: 1.05rem;
+  width: calc(16.8 * var(--u));
+  height: calc(16.8 * var(--u));
   border: none;
   border-radius: 50%;
   background: #d94833;
-  box-shadow: 0 0 8px rgba(217, 72, 51, 0.8), 0 1px 3px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 0 calc(8 * var(--u)) rgba(217, 72, 51, 0.8), 0 calc(1 * var(--u)) calc(3 * var(--u)) rgba(0, 0, 0, 0.8);
 }
 
 input[type="range"]::-moz-range-track {
-  height: 0.62rem;
-  border-radius: 3px;
+  height: calc(9.92 * var(--u));
+  border-radius: calc(3 * var(--u));
   background: rgba(243, 239, 230, 0.16);
 }
 
 input[type="range"]::-moz-range-progress {
-  height: 0.62rem;
-  border-radius: 3px;
+  height: calc(9.92 * var(--u));
+  border-radius: calc(3 * var(--u));
   background: #c0392b;
 }
 
 #btn-exit-demo {
   position: absolute;
-  top: 1rem;
+  top: calc(16 * var(--u));
   left: 50%;
   transform: translateX(-50%);
   z-index: 3;
+  padding: calc(12 * var(--u)) calc(17.6 * var(--u));
+  font-size: calc(16 * var(--u));
   background: rgba(7, 8, 12, 0.7);
 }
 
 #demo-badge {
   position: absolute;
-  top: 1.15rem;
-  right: 1.3rem;
+  top: calc(18.4 * var(--u));
+  right: calc(20.8 * var(--u));
+  font-size: calc(16 * var(--u));
   margin: 0;
   letter-spacing: 0.28em;
   color: #ffb15a;
@@ -431,10 +435,6 @@ input[type="range"]::-moz-range-progress {
   .menu-actions { margin-block: 0.8rem; }
 }
 
-@media (max-width: 720px) {
-  #screen-panel { padding: 4vh 1.2rem; }
-}
-
 /* ===== 取景器（节点 3） ===== */
 #viewfinder {
   position: absolute;
@@ -446,9 +446,9 @@ input[type="range"]::-moz-range-progress {
 #vf-screen {
   position: absolute;
   inset: 7% 9%;
-  border-radius: 8px;
-  border: 2px solid rgba(240, 230, 210, 0.3);
-  box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.6);
+  border-radius: calc(8 * var(--u));
+  border: calc(2 * var(--u)) solid rgba(240, 230, 210, 0.3);
+  box-shadow: inset 0 0 calc(40 * var(--u)) rgba(0, 0, 0, 0.6);
   overflow: hidden;
   background: transparent;
 }
@@ -502,8 +502,8 @@ input[type="range"]::-moz-range-progress {
 
 .vf-corner {
   position: absolute;
-  width: 24px;
-  height: 24px;
+  width: calc(24 * var(--u));
+  height: calc(24 * var(--u));
 }
 
 .vf-corner::before,
@@ -514,39 +514,39 @@ input[type="range"]::-moz-range-progress {
 }
 
 .vf-corner.tl {
-  top: 8px;
-  left: 8px;
+  top: calc(8 * var(--u));
+  left: calc(8 * var(--u));
 }
 
 .vf-corner.tr {
-  top: 8px;
-  right: 8px;
+  top: calc(8 * var(--u));
+  right: calc(8 * var(--u));
 }
 
 .vf-corner.bl {
-  bottom: 8px;
-  left: 8px;
+  bottom: calc(8 * var(--u));
+  left: calc(8 * var(--u));
 }
 
 .vf-corner.br {
-  bottom: 8px;
-  right: 8px;
+  bottom: calc(8 * var(--u));
+  right: calc(8 * var(--u));
 }
 
 .vf-corner.tl::before,
 .vf-corner.tr::before,
 .vf-corner.bl::before,
 .vf-corner.br::before {
-  width: 2px;
-  height: 16px;
+  width: calc(2 * var(--u));
+  height: calc(16 * var(--u));
 }
 
 .vf-corner.tl::after,
 .vf-corner.tr::after,
 .vf-corner.bl::after,
 .vf-corner.br::after {
-  width: 16px;
-  height: 2px;
+  width: calc(16 * var(--u));
+  height: calc(2 * var(--u));
 }
 
 .vf-corner.tl::before { top: 0; left: 0; }
@@ -566,17 +566,17 @@ input[type="range"]::-moz-range-progress {
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 48px;
-  height: 48px;
-  border: 2px solid rgba(240, 230, 210, 0.85);
+  width: calc(48 * var(--u));
+  height: calc(48 * var(--u));
+  border: calc(2 * var(--u)) solid rgba(240, 230, 210, 0.85);
 }
 
 #vf-status {
   position: absolute;
-  top: 12px;
-  left: 16px;
+  top: calc(12 * var(--u));
+  left: calc(16 * var(--u));
   margin: 0;
-  font-size: 0.75rem;
+  font-size: calc(12 * var(--u));
   letter-spacing: 0.15em;
   color: rgba(240, 230, 210, 0.85);
 }
@@ -735,14 +735,14 @@ body { letter-spacing: 0.045em; }
 .ui-volume input[type="range"]::-webkit-slider-thumb,
 input[type="range"]::-webkit-slider-thumb,
 .ui-volume input[type="range"]::-moz-range-thumb,
-input[type="range"]::-moz-range-thumb { background: #a83235; box-shadow: 0 0 12px rgba(168, 50, 53, 0.85); }
+input[type="range"]::-moz-range-thumb { background: #a83235; box-shadow: 0 0 calc(12 * var(--u)) rgba(168, 50, 53, 0.85); }
 
 #screen-panel {
   background: rgba(3, 3, 5, 0.88);
 }
 .menu-card {
   position: relative;
-  padding: clamp(1.5rem, 4vw, 3rem);
+  padding: calc(90.1 * var(--u)) calc(144 * var(--u));
   border: 1px solid rgba(154, 54, 56, 0.34);
   background: linear-gradient(135deg, rgba(20, 16, 17, 0.96), rgba(5, 5, 7, 0.92));
   box-shadow: 0 20px 70px rgba(0,0,0,0.7), inset 0 0 40px rgba(104, 18, 24, 0.08);
@@ -753,8 +753,8 @@ input[type="range"]::-moz-range-thumb { background: #a83235; box-shadow: 0 0 12p
   pointer-events: none;
   border-color: rgba(164, 56, 58, 0.52);
 }
-.menu-card::before { inset: 10px; border-top: 1px solid; border-left: 1px solid; }
-.menu-card::after { right: 10px; bottom: 10px; width: 25%; height: 25%; border-right: 1px solid; border-bottom: 1px solid; }
+.menu-card::before { inset: calc(10 * var(--u)); border-top: 1px solid; border-left: 1px solid; }
+.menu-card::after { right: calc(10 * var(--u)); bottom: calc(10 * var(--u)); width: 25%; height: 25%; border-right: 1px solid; border-bottom: 1px solid; }
 
 h1, h2 {
   font-family: "Arial Black", "Microsoft YaHei", sans-serif;
@@ -779,53 +779,7 @@ button:hover { border-color: #c45c58; color: #fff4e7; }
 #record { color: #c9bdb0; }
 #chase { color: #d77b72; }
 #prompt { color: #c5a493; }
-#crosshair.hot::before, #crosshair.hot::after { background: #bd3638; box-shadow: 0 0 8px rgba(189, 54, 56, 0.9); }
-
-/* ===== 游戏内文字与 Esc 暂停菜单：保持清晰的可读尺寸 =====
-   这些元素不属于主菜单 1744x901 舞台，不能跟随主菜单图片缩放。 */
-#hud,
-#screen-panel {
-  font-size: 16px;
-}
-
-#subtitle {
-  font-size: clamp(1.35rem, 2.1vw, 2.1rem);
-  line-height: 1.45;
-  min-height: 1.45em;
-}
-
-#screen-panel .menu-card {
-  width: min(44rem, 92vw);
-  padding: clamp(2rem, 5vh, 4rem) clamp(2rem, 5vw, 4.5rem);
-}
-
-#screen-panel h2 {
-  margin-bottom: 0.9rem;
-  font-size: clamp(2.6rem, 5vw, 4rem);
-  line-height: 1.15;
-}
-
-#screen-panel #panel-text {
-  margin: 0;
-  font-size: clamp(1.05rem, 1.7vw, 1.35rem);
-  line-height: 1.8;
-}
-
-#screen-panel .menu-actions {
-  gap: 0.9rem;
-  margin: 1.8rem 0 1.3rem;
-}
-
-#screen-panel .menu-actions button {
-  min-height: 3rem;
-  padding: 0.8rem 1.25rem;
-  font-size: clamp(1rem, 1.35vw, 1.2rem);
-}
-
-#screen-panel .volume {
-  gap: 1.2rem;
-  font-size: clamp(1rem, 1.35vw, 1.2rem);
-}
+#crosshair.hot::before, #crosshair.hot::after { background: #bd3638; box-shadow: 0 0 calc(8 * var(--u)) rgba(189, 54, 56, 0.9); }
 
 /* ===== 原始界面背景：按 1744x901 原比例完整铺设，不裁切、不滤镜、不叠加纹理 ===== */
 #menu {
@@ -852,22 +806,22 @@ button:hover { border-color: #c45c58; color: #fff4e7; }
   filter: none;
 }
 
-/* ===== 游戏内 HUD 二次放大：字幕/暂停内容翻倍，顶部信息统一字号 ===== */
+/* ===== 游戏内 HUD / 暂停菜单：按 1744×901 上的像素，随 --u 等比缩放 ===== */
 #hud,
 #screen-panel {
-  font-size: 32px;
+  font-size: calc(32 * var(--u));
 }
 
 .hud-top {
-  padding: 2.5rem 2.8rem;
-  gap: 2rem;
+  padding: calc(40 * var(--u)) calc(44.8 * var(--u));
+  gap: calc(32 * var(--u));
 }
 
 #record,
 #timer,
 #objective,
 #btn-mute-hud {
-  font-size: 2rem;
+  font-size: calc(32 * var(--u));
   line-height: 1.35;
 }
 
@@ -877,71 +831,60 @@ button:hover { border-color: #c45c58; color: #fff4e7; }
   letter-spacing: 0.08em;
 }
 
-#objective { margin-top: 0.7rem; }
+#objective { margin-top: calc(11.2 * var(--u)); }
 
 #btn-mute-hud {
-  padding: 1.5rem 2.2rem;
+  padding: calc(24 * var(--u)) calc(35.2 * var(--u));
   letter-spacing: 0.08em;
 }
 
 #chase,
 #prompt {
-  font-size: 2rem;
+  font-size: calc(32 * var(--u));
   line-height: 1.35;
 }
 
-#chase { top: 9.2rem; }
+#chase { top: calc(147.2 * var(--u)); }
 #prompt { right: 6%; bottom: 10%; }
 
 #subtitle {
-  font-size: clamp(2.7rem, 4.2vw, 4.2rem);
+  font-size: calc(67.2 * var(--u));
   line-height: 1.45;
   min-height: 1.45em;
-  width: min(64rem, 92vw);
+  width: calc(1024 * var(--u));
 }
 
 #screen-panel .menu-card {
-  width: min(60rem, 92vw);
-  padding: clamp(4rem, 10vh, 8rem) clamp(4rem, 10vw, 9rem);
+  width: calc(960 * var(--u));
+  padding: calc(90.1 * var(--u)) calc(144 * var(--u));
 }
 
 #screen-panel h2 {
-  margin-bottom: 1.8rem;
-  font-size: clamp(5.2rem, 10vw, 8rem);
+  margin-bottom: calc(28.8 * var(--u));
+  font-size: calc(128 * var(--u));
   line-height: 1.15;
 }
 
 #screen-panel #panel-text {
-  font-size: clamp(2.1rem, 3.4vw, 2.7rem);
+  margin: 0;
+  font-size: calc(43.2 * var(--u));
   line-height: 1.8;
 }
 
 #screen-panel .menu-actions {
-  gap: 1.8rem;
-  margin: 3.6rem 0 2.6rem;
+  gap: calc(28.8 * var(--u));
+  margin: calc(57.6 * var(--u)) 0 calc(41.6 * var(--u));
 }
 
 #screen-panel .menu-actions button {
-  min-height: 6rem;
-  padding: 1.6rem 2.5rem;
-  font-size: clamp(2rem, 2.7vw, 2.4rem);
+  min-height: calc(96 * var(--u));
+  padding: calc(25.6 * var(--u)) calc(40 * var(--u));
+  font-size: calc(38.4 * var(--u));
 }
 
 #screen-panel .volume {
-  gap: 2.4rem;
-  font-size: clamp(2rem, 2.7vw, 2.4rem);
-}
-
-@media (max-width: 720px) {
-  .hud-top { padding: 1.5rem; }
-  #record, #timer, #objective, #btn-mute-hud,
-  #chase, #prompt { font-size: 1.35rem; }
-  #subtitle { font-size: clamp(1.8rem, 7vw, 2.7rem); }
-  #screen-panel .menu-card { padding: 2.4rem 1.6rem; }
-  #screen-panel h2 { font-size: clamp(3rem, 12vw, 5.2rem); }
-  #screen-panel #panel-text { font-size: clamp(1.2rem, 5vw, 2rem); }
-  #screen-panel .menu-actions button,
-  #screen-panel .volume { font-size: clamp(1.2rem, 5vw, 1.8rem); }
+  gap: calc(38.4 * var(--u));
+  font-size: calc(38.4 * var(--u));
 }
 
 @media (prefers-reduced-motion: reduce) {
