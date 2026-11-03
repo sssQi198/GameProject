@@ -141,11 +141,19 @@ for mat, cx, cy, cz, sx, sy, sz, ry in BOXES:
         nz = -normal[0] * sin_r + normal[2] * cos_r
         base = len(verts)
         for cxr, cyr, czr in corners:
-            ox = cxr * sx / 2
-            oz = czr * sz / 2
-            px = cx + ox * cos_r + oz * sin_r
-            pz = cz - ox * sin_r + oz * cos_r
-            verts.append((px, cy + cyr * sy / 2, pz, nx, normal[1], nz))
+            lx = cxr * sx / 2
+            ly = cyr * sy / 2
+            lz = czr * sz / 2
+            px = cx + lx * cos_r + lz * sin_r
+            pz = cz - lx * sin_r + lz * cos_r
+            # 1 UV = 1 metre on the face, so the texture turns with the box.
+            if abs(normal[1]) > 0.5:
+                uv = (lx, lz)
+            elif abs(normal[0]) > 0.5:
+                uv = (lz, ly)
+            else:
+                uv = (lx, ly)
+            verts.append((px, cy + ly, pz, nx, normal[1], nz, uv[0], uv[1]))
         idx.extend([base, base + 1, base + 2, base, base + 2, base + 3])
 
 MATERIALS[0] = ('Wood', [0.030, 0.017, 0.009, 1])
@@ -157,16 +165,18 @@ for mat in range(len(MATERIALS)):
     verts, idx = batches[mat]
     if not verts:
         continue
-    pos, nrm = [], []
-    for x, y, z, nx, ny, nz in verts:
+    pos, nrm, uv = [], [], []
+    for x, y, z, nx, ny, nz, u, v in verts:
         pos.append((x, y, z))
         nrm.append((nx, ny, nz))
+        uv.append((u, v))
     pmin = [min(p[i] for p in pos) for i in range(3)]
     pmax = [max(p[i] for p in pos) for i in range(3)]
     groups.append({
         'mat': mat,
         'pos': b''.join(struct.pack('<3f', *p) for p in pos),
         'nrm': b''.join(struct.pack('<3f', *n) for n in nrm),
+        'uv': b''.join(struct.pack('<2f', *t) for t in uv),
         'idx': b''.join(struct.pack('<I', i) for i in idx),
         'posCount': len(pos),
         'idxCount': len(idx),
@@ -185,6 +195,7 @@ for group in groups:
     for data, target in (
         (group['pos'], 34962),
         (group['nrm'], 34962),
+        (group['uv'], 34962),
         (group['idx'], 34963),
     ):
         blob = pad4(blob)
@@ -198,13 +209,16 @@ for group in groups:
     nrm_acc = len(accessors)
     accessors.append({'bufferView': base_view + 1, 'componentType': 5126,
                       'count': group['posCount'], 'type': 'VEC3'})
+    uv_acc = len(accessors)
+    accessors.append({'bufferView': base_view + 2, 'componentType': 5126,
+                      'count': group['posCount'], 'type': 'VEC2'})
     idx_acc = len(accessors)
-    accessors.append({'bufferView': base_view + 2, 'componentType': 5125,
+    accessors.append({'bufferView': base_view + 3, 'componentType': 5125,
                       'count': group['idxCount'], 'type': 'SCALAR'})
 
     name = MATERIALS[group['mat']][0]
     meshes.append({'name': f'Furniture_{name}', 'primitives': [{
-        'attributes': {'POSITION': pos_acc, 'NORMAL': nrm_acc},
+        'attributes': {'POSITION': pos_acc, 'NORMAL': nrm_acc, 'TEXCOORD_0': uv_acc},
         'indices': idx_acc,
         'material': group['mat'],
     }]})
@@ -214,7 +228,7 @@ for group in groups:
 blob = pad4(blob)
 
 meta = {
-    'asset': {'version': '2.0', 'generator': 'Wrong Floor M1 furniture v3'},
+    'asset': {'version': '2.0', 'generator': 'Wrong Floor M1 furniture v4'},
     'scene': 0,
     'scenes': [{'nodes': list(range(len(nodes)))}],
     'nodes': nodes,

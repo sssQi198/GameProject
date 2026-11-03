@@ -96,17 +96,40 @@ export class Level {
   }
 
   loadClassroomModel() {
+    const woodMap = repeatMap('/assets/textures/desk_diff.jpg');
+    const wood = new THREE.MeshStandardMaterial({
+      map: woodMap,
+      color: 0x4d433a,
+      roughness: 0.82,
+      metalness: 0.04,
+    });
+    const woodDark = new THREE.MeshStandardMaterial({
+      map: woodMap,
+      color: 0x453930,
+      roughness: 0.86,
+      metalness: 0.04,
+    });
     import('../vendor/GLTFLoader.js').then(({ GLTFLoader }) => {
       const loader = new GLTFLoader();
       loader.load('/assets/models/classroom_m1_v01.glb', (gltf) => {
         const model = gltf.scene;
         model.name = 'Classroom_M1_GLTF';
+        const retired = new Set();
         model.traverse((node) => {
           if (!node.isMesh) return;
           node.castShadow = false;
           node.receiveShadow = true;
           node.userData.noRay = true;
+          const name = node.material?.name;
+          if (name === 'Wood') {
+            retired.add(node.material);
+            node.material = wood;
+          } else if (name === 'WoodDark') {
+            retired.add(node.material);
+            node.material = woodDark;
+          }
         });
+        for (const material of retired) material.dispose();
         this.scene.add(model);
         this.classroomModel = model;
         for (const mesh of this.furnitureVisuals) {
@@ -1062,10 +1085,20 @@ export class Level {
   buildDoor() {
     this.doorPivot = new THREE.Group();
     this.doorPivot.position.set(-LAYOUT.door.half, 0, LAYOUT.room.maxZ + LAYOUT.wall / 2);
-    const door = new THREE.Mesh(
-      new THREE.BoxGeometry(LAYOUT.door.half * 2, LAYOUT.door.height, 0.08),
-      this.materials.door,
-    );
+    const doorW = LAYOUT.door.half * 2;
+    const doorH = LAYOUT.door.height;
+    const doorGeo = new THREE.BoxGeometry(doorW, doorH, 0.08);
+    scaleBoxUvs(doorGeo, doorW, doorH, 0.08);
+    // 贴图纹路是横的。门的两面换成竖纹。
+    const uv = doorGeo.attributes.uv;
+    for (const face of [4, 5]) {
+      for (let i = 0; i < 4; i += 1) {
+        const idx = face * 4 + i;
+        const u = uv.getX(idx);
+        uv.setXY(idx, uv.getY(idx), u);
+      }
+    }
+    const door = new THREE.Mesh(doorGeo, this.materials.door);
     door.position.set(LAYOUT.door.half, LAYOUT.door.height / 2, 0);
     door.name = 'door-panel';
     const handle = new THREE.Mesh(
@@ -1084,8 +1117,10 @@ export class Level {
     const z = room.maxZ + wall / 2;
     const leftX = -door.half - jambW / 2;
     const rightX = door.half + jambW / 2;
-    this.addBox(jambW, door.height, jambD, leftX, door.height / 2, z, this.materials.door, true);
-    this.addBox(jambW, door.height, jambD, rightX, door.height / 2, z, this.materials.door, true);
+    const left = this.addBox(jambW, door.height, jambD, leftX, door.height / 2, z, this.materials.door, true);
+    const right = this.addBox(jambW, door.height, jambD, rightX, door.height / 2, z, this.materials.door, true);
+    turnBoxGrain(left.geometry);
+    turnBoxGrain(right.geometry);
     const span = door.half * 2 + jambW * 2;
     this.addBox(span, headH, jambD, 0, door.height + headH / 2, z, this.materials.door, false);
   }
@@ -1360,7 +1395,9 @@ export class Level {
   }
 
   addBox(w, h, d, x, y, z, material, collider) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    const geo = new THREE.BoxGeometry(w, h, d);
+    scaleBoxUvs(geo, w, h, d);
+    const mesh = new THREE.Mesh(geo, material);
     mesh.position.set(x, y, z);
     this.scene.add(mesh);
     if (collider) {
@@ -1387,6 +1424,32 @@ export class Level {
 }
 
 /** 4 条竖条，每条上段、中段、下摆。靠墙的一侧 outer 为 0 或 1。 */
+/** 每面按实际米数铺，1 个 UV = 2 米。否则大墙和小墙垛会共用同一套 0–1。 */
+function scaleBoxUvs(geo, w, h, d) {
+  const uv = geo.attributes.uv;
+  const faces = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let face = 0; face < 6; face += 1) {
+    const su = faces[face][0] / 2;
+    const sv = faces[face][1] / 2;
+    for (let i = 0; i < 4; i += 1) {
+      const idx = face * 4 + i;
+      uv.setXY(idx, uv.getX(idx) * su, uv.getY(idx) * sv);
+    }
+  }
+}
+
+/** 把门框立柱四面的横纹转成顺着高度走。 */
+function turnBoxGrain(geo) {
+  const uv = geo.attributes.uv;
+  for (const face of [0, 1, 4, 5]) {
+    for (let i = 0; i < 4; i += 1) {
+      const idx = face * 4 + i;
+      const u = uv.getX(idx);
+      uv.setXY(idx, uv.getY(idx), u);
+    }
+  }
+}
+
 function makeCurtainGust(outer) {
   const nodes = [];
   for (let strip = 0; strip < 4; strip += 1) {
@@ -1526,11 +1589,44 @@ transformed += curtainOff(position);
 #endif
 `;
 
+/** 平铺贴图。窗帘图每边 8 个四叶纹，课桌 UV 按 1 米 = 1 个单位。 */
+function repeatMap(url) {
+  const texture = new THREE.TextureLoader().load(url);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  return texture;
+}
+
 function makeMaterials() {
-  const wood = new THREE.MeshStandardMaterial({ map: woodTexture(), roughness: 0.86, metalness: 0 });
-  wood.map.repeat.set(6, 5);
-  const wall = new THREE.MeshStandardMaterial({ map: grainTexture('#3c433c'), color: 0xffffff, roughness: 0.92 });
-  const curtain = new THREE.MeshStandardMaterial({ color: 0x6e3438, roughness: 0.95, side: THREE.DoubleSide });
+  const floorMap = repeatMap('/assets/textures/floor_diff.jpg');
+  const floorW = LAYOUT.room.maxX - LAYOUT.room.minX;
+  const floorD = LAYOUT.room.maxZ - LAYOUT.room.minZ;
+  // 一张图大约 2 米。教室 20×12，板宽才像地板。
+  floorMap.repeat.set(floorW / 2, floorD / 2);
+  const wood = new THREE.MeshStandardMaterial({
+    map: floorMap,
+    color: 0x50483c,
+    roughness: 0.9,
+    metalness: 0,
+  });
+  const wallMap = repeatMap('/assets/textures/wall_diff.jpg');
+  const wall = new THREE.MeshStandardMaterial({
+    map: wallMap,
+    color: 0x74716c,
+    roughness: 0.92,
+    metalness: 0,
+  });
+  const curtainMap = repeatMap('/assets/textures/curtain_diff.jpg');
+  const motif = 0.2;
+  curtainMap.repeat.set(CURTAIN_W / (motif * 8), CURTAIN_H / (motif * 8));
+  // 图本身已是暗红提花。再乘 0x6e3438 会把纹样沉进雾里，所以保持白色相乘。
+  const curtain = new THREE.MeshStandardMaterial({
+    map: curtainMap,
+    color: 0xffffff,
+    roughness: 0.95,
+    side: THREE.DoubleSide,
+  });
   const sway = {
     uTime: { value: 0 },
     uAmp: { value: 1 },
@@ -1563,7 +1659,11 @@ function makeMaterials() {
       metalness: 0.08,
       side: THREE.DoubleSide,
     }),
-    door: new THREE.MeshStandardMaterial({ color: 0x5c4030, roughness: 0.72 }),
+    door: new THREE.MeshStandardMaterial({
+      map: repeatMap('/assets/textures/door_diff.jpg'),
+      color: 0xffffff,
+      roughness: 0.72,
+    }),
     bulb: new THREE.MeshStandardMaterial({ color: 0x22262c, emissive: 0x8ea0c0, emissiveIntensity: 0.3 }),
   };
 }
@@ -1608,9 +1708,16 @@ function bottleMesh() {
 }
 
 function paperMesh() {
+  const paperNor = new THREE.TextureLoader().load('/assets/textures/paper_nor.jpg?v=3');
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(0.28, 0.03, 0.22),
-    new THREE.MeshStandardMaterial({ color: 0xd9d3c4, roughness: 0.9 }),
+    new THREE.MeshStandardMaterial({
+      map: repeatMap('/assets/textures/paper_diff.jpg?v=3'),
+      normalMap: paperNor,
+      color: 0xe2d6c6,
+      roughness: 1,
+      metalness: 0,
+    }),
   );
   mesh.position.y = 0.02;
   return mesh;
@@ -1639,37 +1746,6 @@ function mopMesh() {
   head.position.y = 0.08;
   group.add(stick, head);
   return group;
-}
-
-function woodTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#3a2c20';
-  ctx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 8; i += 1) {
-    ctx.fillStyle = i % 2 ? '#32261c' : '#463628';
-    ctx.fillRect(0, i * 32, 256, 30);
-  }
-  return canvasTexture(canvas, true);
-}
-
-function grainTexture(hex) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = hex;
-  ctx.fillRect(0, 0, 128, 128);
-  for (let i = 0; i < 700; i += 1) {
-    const shade = 18 + Math.random() * 40;
-    ctx.fillStyle = `rgba(${shade},${shade},${shade},${Math.random() * 0.07})`;
-    ctx.fillRect(Math.random() * 128, Math.random() * 128, 2, 2);
-  }
-  const texture = canvasTexture(canvas, true);
-  texture.repeat.set(3, 2);
-  return texture;
 }
 
 function clockTexture() {

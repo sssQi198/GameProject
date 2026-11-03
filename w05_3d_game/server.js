@@ -13,6 +13,8 @@ const types = {
   '.json': 'application/json',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
   '.glb': 'model/gltf-binary',
   '.mp3': 'audio/mpeg',
   '.mp4': 'video/mp4',

@@ -132,58 +132,6 @@ function handTexture(THREE) {
   return texture;
 }
 
-/** 一张踩脏的作业纸：横线 + 污点。 */
-function paperTexture(THREE) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 180;
-  const ctx = canvas.getContext('2d');
-  const rand = mulberry32(31415);
-
-  ctx.fillStyle = '#c9c4b2';
-  ctx.fillRect(0, 0, 128, 180);
-
-  // 纸上的横线
-  ctx.strokeStyle = 'rgba(70,74,80,0.35)';
-  ctx.lineWidth = 1;
-  for (let y = 26; y < 168; y += 14) {
-    ctx.beginPath();
-    ctx.moveTo(14, y);
-    ctx.lineTo(114, y);
-    ctx.stroke();
-  }
-  // 划掉的字迹
-  ctx.strokeStyle = 'rgba(40,42,48,0.55)';
-  ctx.lineWidth = 2.2;
-  for (let i = 0; i < 7; i += 1) {
-    const x = 20 + rand() * 70;
-    const y = 30 + rand() * 120;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + 8 + rand() * 14, y + 3);
-    ctx.stroke();
-  }
-  // 脏污和褶皱
-  for (let i = 0; i < 26; i += 1) {
-    ctx.fillStyle = `rgba(58,48,38,${0.05 + rand() * 0.16})`;
-    ctx.beginPath();
-    ctx.arc(rand() * 128, rand() * 180, 3 + rand() * 16, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.strokeStyle = 'rgba(60,54,44,0.25)';
-  ctx.lineWidth = 1.4;
-  for (let i = 0; i < 4; i += 1) {
-    ctx.beginPath();
-    ctx.moveTo(0, rand() * 180);
-    ctx.lineTo(128, rand() * 180);
-    ctx.stroke();
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
 /** 收集实例矩阵，最后一次性建 InstancedMesh。 */
 function makeBatch(THREE, geometry, material, entries) {
   const mesh = new THREE.InstancedMesh(geometry, material, entries.length);
@@ -397,12 +345,19 @@ export function createSceneExtra(THREE, LAYOUT) {
   }
 
   if (papers.length) {
-    group.add(makeBatch(THREE, planeGeometry, new THREE.MeshBasicMaterial({
-      map: paperTexture(THREE),
-      transparent: true,
-      opacity: 0.92,
-      depthWrite: false,
+    const paperMap = new THREE.TextureLoader().load('/assets/textures/paper_diff.jpg?v=3');
+    paperMap.colorSpace = THREE.SRGBColorSpace;
+    const paperNor = new THREE.TextureLoader().load('/assets/textures/paper_nor.jpg?v=3');
+    group.add(makeBatch(THREE, planeGeometry, new THREE.MeshStandardMaterial({
+      map: paperMap,
+      normalMap: paperNor,
+      color: 0xe2d6c6,
+      roughness: 1,
+      metalness: 0,
       side: THREE.DoubleSide,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
     }), papers));
   }
 
