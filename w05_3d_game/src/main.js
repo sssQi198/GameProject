@@ -121,5 +121,8 @@ try {
 } catch (error) {
   console.error(error);
   bootError.classList.remove('hidden');
-  bootError.textContent = '这个浏览器打不开 WebGL，换 Chrome 或 Edge 再试。';
+  const message = String((error && error.message) || error);
+  bootError.textContent = /WebGL|webgl/.test(message)
+    ? '这个浏览器打不开 WebGL，换 Chrome 或 Edge 再试。'
+    : '游戏启动失败，请刷新页面再试。';
 }
