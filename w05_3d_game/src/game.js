@@ -90,6 +90,7 @@ export class Game {
     this.shakeX = 0;
     this.shakeY = 0;
     this.shakeT = 0;
+    this.l5ShakeT = 0; // 第5关拍照后颤抖计时
     this.controlHints = [];
     this.level.reset();
     this.player.setScripted(asDemo);
@@ -265,6 +266,14 @@ export class Game {
       this.camera.position.x += this.shakeX;
       this.camera.position.y += this.shakeY;
     }
+    // 第5关拍照后教室颤抖
+    if (this.l5ShakeT > 0) {
+      this.l5ShakeT = Math.max(0, this.l5ShakeT - dt);
+      const intensity = this.l5ShakeT / 2.0 * 0.035;
+      this.camera.position.x += (Math.random() - 0.5) * 2 * intensity;
+      this.camera.position.y += (Math.random() - 0.5) * 2 * intensity;
+      if (this.l5ShakeT <= 0) this.l5ShakeT = 0;
+    }
     this.updateZones();
     this.updateFlow(dt);
     this.level.stepItems(dt, this.player);
@@ -298,6 +307,7 @@ export class Game {
       playerX: this.player.x,
       playerZ: this.player.z,
       playerYaw: this.player.yaw,
+      levelIndex: this.levelIndex,
     };
   }
 
@@ -655,6 +665,20 @@ export class Game {
     this.hud.setRecord(this.levelIndex, LEVELS);
     this.audio.shutter(true);
     if (this.levelIndex === 4) this.audio.breath();
+    // 第5关：眼睛被拍 → 怒吼 + 颤抖
+    if (this.levelIndex === 5) {
+      this.level.notifyAnomalyPhoto(5);
+      // 低频怒吼（叠加2层，营造厚重感）
+      const roar = () => {
+        this.audio.burst({ duration: 1.2, gain: 0.55, type: 'lowpass', freq: 120, q: 0.4 });
+        this.audio.burst({ duration: 0.9, gain: 0.35, type: 'bandpass', freq: 260, q: 0.6 });
+        this.audio.tone(55, 0.6, 0.12, 'sawtooth');
+        this.audio.tone(98, 0.5, 0.08, 'sine');
+      };
+      roar();
+      // 颤抖效果：启动一个短暂的位置抖动
+      this.l5ShakeT = 2.0;
+    }
     this.level.setDoorOpen(true);
     this.audio.door();
     this.hud.setObjective(copy.doorOpen);

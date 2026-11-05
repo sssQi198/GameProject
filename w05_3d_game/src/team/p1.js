@@ -8,7 +8,7 @@ export const hints = {
   2: '黑板在自己写字。',
   3: '窗边的布在呼吸。',
   4: '角落里多了一个不该在的东西。',
-  5: '看看那扇门。',
+  5: '天花板在裂开……抬头，拍下那对眼睛。',
 };
 
 export const successLines = {
@@ -16,7 +16,7 @@ export const successLines = {
   2: '它不想被擦掉。',
   3: '它在布后面看着你。',
   4: '它在盯着你笑。',
-  5: '教室外面还是教室。',
+  5: '血肉在呼吸，墙缝里的眼睛闭上了。',
 };
 
 export const introDialog = [

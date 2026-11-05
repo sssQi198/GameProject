@@ -416,6 +416,12 @@ export class Level {
     return anomaly?.stand ?? LAYOUT.photoStand;
   }
 
+  /** 通知当前关卡的异常对象——被拍照了（触发级联反应如怒吼、颤抖） */
+  notifyAnomalyPhoto(level) {
+    const anomaly = this.anomalies.find((item) => item.level === level);
+    if (anomaly && typeof anomaly.onPhoto === 'function') anomaly.onPhoto();
+  }
+
   isInsideRoom(x, z) {
     const room = LAYOUT.room;
     return x > room.minX + 0.08 && x < room.maxX - 0.08 && z > room.minZ + 0.08 && z < room.maxZ - 0.05;

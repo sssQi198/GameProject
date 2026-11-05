@@ -24,7 +24,7 @@ export function createAnomaly(level) {
     case 2: return createBoard();
     case 3: return createCurtain();
     case 4: return createRedDoll();
-    case 5: return createDoorVision();
+    case 5: return createFleshWall();
     default: throw new Error(`没有第 ${level} 关异常`);
   }
 }
@@ -893,8 +893,10 @@ function createRedDoll() {
         // 每 4 次灯灭触发一次瞬移
         if (flickerCount % 4 === 0) {
           const isClosePhase = teleportPhase % 3 === 2;
+          // 第5关禁用冲刺，只做角落瞬移
+          const inLevel5 = (env.levelIndex ?? 0) === 5;
 
-          if (isClosePhase) {
+          if (isClosePhase && !inLevel5) {
             // ── 冲刺贴脸（基于玩家视角方向） ──
             let launchX = px;
             let launchZ = pz;
@@ -1020,108 +1022,734 @@ function createRedDoll() {
 
 /* ---------------------------------------------------------------- 第 5 关 */
 
-/** 门缝里的错层教室：门内还是同一间教室，钟停在你进来的时间。 */
-function createDoorVision() {
+/**
+ * 血肉教室：整个教室被活体器官覆盖的沉浸式场景。
+ * 六面墙血肉纹理 + 3D 器官（心脏/肌肉束/血管/肋骨/脂肪/肺叶）+ 天花板裂缝红眼（拍照目标）
+ */
+function createFleshWall() {
   const group = new THREE.Group();
-  group.position.set(LAYOUT.door.half, 1.4, -0.08);
+  const { room, door } = LAYOUT;
+  const xMin = room.minX, xMax = room.maxX;
+  const zMin = room.minZ, zMax = room.maxZ;
+  const yCeil = room.height;
 
+  // ---- 工具函数：带种子的伪随机（确保每帧视觉效果一致） ----
+  const seedVal = 20251031;
+  let rngState = seedVal;
+  function rng() {
+    rngState = (rngState * 16807 + 0) % 2147483647;
+    return (rngState - 1) / 2147483646;
+  }
+
+  // ========== 1. 高品质 CanvasTexture 血肉纹理（512×512） ==========
+  const W = 512, H = 512;
   const canvas = document.createElement('canvas');
-  canvas.width = 320;
-  canvas.height = 448;
+  canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
+  const imgData = ctx.createImageData(W, H);
+  const data = imgData.data;
 
-  ctx.fillStyle = '#080b0e';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // 辅助函数
+  function smoothNoise(x, y) {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    let fx = x - ix, fy = y - iy;
+    fx = fx * fx * (3 - 2 * fx);
+    fy = fy * fy * (3 - 2 * fy);
+    const h = (ix * 374761393 + iy * 668265263) & 0x7FFFFFFF;
+    const h2 = ((ix + 1) * 374761393 + iy * 668265263) & 0x7FFFFFFF;
+    const h3 = (ix * 374761393 + (iy + 1) * 668265263) & 0x7FFFFFFF;
+    const h4 = ((ix + 1) * 374761393 + (iy + 1) * 668265263) & 0x7FFFFFFF;
+    const r1 = (h ^ (h >> 13)) * 1274126177 & 0x7FFFFFFF;
+    const r2 = (h2 ^ (h2 >> 13)) * 1274126177 & 0x7FFFFFFF;
+    const r3 = (h3 ^ (h3 >> 13)) * 1274126177 & 0x7FFFFFFF;
+    const r4 = (h4 ^ (h4 >> 13)) * 1274126177 & 0x7FFFFFFF;
+    const n00 = (r1 & 0x7FFFFFFF) / 0x7FFFFFFF;
+    const n10 = (r2 & 0x7FFFFFFF) / 0x7FFFFFFF;
+    const n01 = (r3 & 0x7FFFFFFF) / 0x7FFFFFFF;
+    const n11 = (r4 & 0x7FFFFFFF) / 0x7FFFFFFF;
+    return n00*(1-fx)*(1-fy) + n10*fx*(1-fy) + n01*(1-fx)*fy + n11*fx*fy;
+  }
 
-  ctx.strokeStyle = '#2a2f34';
-  ctx.lineWidth = 14;
-  ctx.strokeRect(24, 20, canvas.width - 48, canvas.height - 40);
+  function fbm(x, y, oct, lac, gain) {
+    let v = 0, amp = 0.5, freq = 1;
+    for (let k = 0; k < oct; k++) {
+      v += amp * smoothNoise(x * freq, y * freq);
+      freq *= lac;
+      amp *= gain;
+    }
+    return v;
+  }
 
-  for (let row = 0; row < 4; row += 1) {
-    const scale = 1 - row * 0.16;
-    const y = 250 - row * 42 * scale;
-    const w = 150 * scale;
-    ctx.globalAlpha = 0.55 + row * 0.08;
-    ctx.fillStyle = '#12181c';
-    for (let col = -1; col <= 1; col += 1) {
-      ctx.fillRect(canvas.width / 2 + col * (w * 0.62) * 1.35 - w / 2, y, w, 11 * scale);
-      ctx.fillRect(canvas.width / 2 + col * (w * 0.62) * 1.35 - w / 2, y, 7 * scale, 46 * scale);
+  function clamp(v, lo, hi) {
+    return Math.max(lo, Math.min(hi, Math.round(v)));
+  }
+
+  function setPx(x, y, r, g, b) {
+    const idx = ((y % H) * W + (x % W)) * 4;
+    data[idx] = clamp(r, 0, 255);
+    data[idx + 1] = clamp(g, 0, 255);
+    data[idx + 2] = clamp(b, 0, 255);
+    data[idx + 3] = 255;
+  }
+
+  function getPx(x, y) {
+    const idx = ((y % H) * W + (x % W)) * 4;
+    return [data[idx], data[idx + 1], data[idx + 2]];
+  }
+
+  // 1a) 基底：肌肉组织底色
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const n = fbm(x / W * 6, y / H * 6, 3, 2.5, 0.6);
+      const r = 45 + Math.round(n * 35);
+      const g = 10 + Math.round(n * 15);
+      const b = 18 + Math.round(n * 20);
+      setPx(x, y, r, g, b);
     }
   }
-  ctx.globalAlpha = 1;
 
-  const glow = ctx.createRadialGradient(canvas.width / 2, 150, 8, canvas.width / 2, 150, 120);
-  glow.addColorStop(0, 'rgba(120,140,120,0.30)');
-  glow.addColorStop(1, 'rgba(120,140,120,0)');
-  ctx.fillStyle = glow;
-  ctx.fillRect(0, 30, canvas.width, 260);
+  // 1b) 横向肌肉纤维
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const ny = y / H * 12 + fbm(x / W * 20, y / H * 8, 2, 2, 0.4) * 2;
+      let fib = Math.abs(((ny % 1) + 1) % 1 - 0.5) * 2;
+      fib = Math.max(0, 1 - fib * 2);
+      fib = fib ** 0.3;
+      const [cr, cg, cb] = getPx(x, y);
+      const bright = Math.round(fib * 20);
+      setPx(x, y, cr + bright, cg + Math.round(bright / 3), cb + Math.round(bright / 4));
+    }
+  }
 
-  ctx.strokeStyle = '#cfc9b8';
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.arc(canvas.width / 2, 96, 30, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.moveTo(canvas.width / 2, 96);
-  ctx.lineTo(canvas.width / 2 + 12, 96 - 8);
-  ctx.stroke();
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(canvas.width / 2, 96);
-  ctx.lineTo(canvas.width / 2 - 3, 96 - 22);
-  ctx.stroke();
+  // 1c) 主血管网络
+  for (let i = 0; i < 25; i++) {
+    let vx = rng() * W, vy = rng() * H;
+    let angle = rng() * Math.PI * 2;
+    const len = 20 + Math.floor(rng() * 40);
+    const thick = 3 + Math.floor(rng() * 4);
+    for (let j = 0; j < len; j++) {
+      angle += (rng() - 0.5) * 0.6;
+      vx += Math.cos(angle) * 2;
+      vy += Math.sin(angle) * 2;
+      for (let tx = -thick; tx <= thick; tx++) {
+        for (let ty = -thick; ty <= thick; ty++) {
+          const d = Math.sqrt(tx * tx + ty * ty);
+          if (d > thick) continue;
+          const px = Math.round(vx + tx), py = Math.round(vy + ty);
+          const [cr, cg, cb] = getPx(px, py);
+          const darkness = 1 - d / thick;
+          setPx(px, py,
+            cr - Math.round(darkness * 25),
+            cg - Math.round(darkness * 8),
+            cb - Math.round(darkness * 5),
+          );
+        }
+      }
+      // 分支
+      if (j > 5 && rng() > 0.8) {
+        const ba = angle + (rng() - 0.5) * 3;
+        let bx = vx, by = vy;
+        for (let k = 0; k < 5 + Math.floor(rng() * 7); k++) {
+          bx += Math.cos(ba) * 2;
+          by += Math.sin(ba) * 2;
+          for (let t = -2; t <= 2; t++) {
+            for (let tt = -2; tt <= 2; tt++) {
+              const [cr, cg, cb] = getPx(Math.round(bx + t), Math.round(by + tt));
+              setPx(Math.round(bx + t), Math.round(by + tt), cr - 8, cg - 3, cb - 2);
+            }
+          }
+        }
+      }
+    }
+  }
 
-  ctx.fillStyle = '#c9c2b0';
-  ctx.font = '30px "Microsoft YaHei", sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('03:17', canvas.width / 2, 410);
+  // 1d) 毛细血管
+  for (let i = 0; i < 100; i++) {
+    let vx = rng() * W, vy = rng() * H;
+    let angle = rng() * Math.PI * 2;
+    const len = 8 + Math.floor(rng() * 12);
+    for (let j = 0; j < len; j++) {
+      angle += (rng() - 0.5) * 1.6;
+      vx += Math.cos(angle) * 1.5;
+      vy += Math.sin(angle) * 1.5;
+      const [cr, cg, cb] = getPx(Math.round(vx), Math.round(vy));
+      setPx(Math.round(vx), Math.round(vy), cr - 5, cg - 2, cb - 2);
+    }
+  }
 
-  const map = new THREE.CanvasTexture(canvas);
-  map.colorSpace = THREE.SRGBColorSpace;
+  // 1e) 脂肪淡黄斑点
+  for (let i = 0; i < 16; i++) {
+    const fx = Math.round(rng() * W), fy = Math.round(rng() * H);
+    const rad = 6 + Math.floor(rng() * 14);
+    for (let y = -rad; y <= rad; y++) {
+      for (let x = -rad; x <= rad; x++) {
+        const d = Math.sqrt(x * x + y * y);
+        if (d > rad) continue;
+        const factor = 1 - d / rad;
+        const n = fbm((fx + x) / W * 12, (fy + y) / H * 12, 2, 2, 0.3) * 0.3;
+        const [cr, cg, cb] = getPx(fx + x, fy + y);
+        setPx(fx + x, fy + y,
+          cr + Math.round(factor * (25 + n * 20)),
+          cg + Math.round(factor * (30 + n * 25)),
+          cb + Math.round(factor * (15 + n * 10)),
+        );
+      }
+    }
+  }
 
-  const glass = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.46, 0.7),
-    new THREE.MeshBasicMaterial({ map, toneMapped: false, side: THREE.DoubleSide }),
-  );
+  // 1f) 局部瘀伤
+  for (let i = 0; i < 8; i++) {
+    const sx = Math.round(rng() * W), sy = Math.round(rng() * H);
+    const rad = 15 + Math.floor(rng() * 20);
+    for (let y = -rad; y <= rad; y++) {
+      for (let x = -rad; x <= rad; x++) {
+        const d = Math.sqrt(x * x + y * y);
+        if (d > rad) continue;
+        const factor = (1 - d / rad) ** 0.8;
+        const [cr, cg, cb] = getPx(sx + x, sy + y);
+        setPx(sx + x, sy + y,
+          cr - Math.round(factor * 20),
+          cg - Math.round(factor * 10),
+          cb - Math.round(factor * 5),
+        );
+      }
+    }
+  }
 
-  const sheen = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.46, 0.7),
-    new THREE.MeshBasicMaterial({
-      color: 0x9fb4c0,
-      transparent: true,
-      opacity: 0.1,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-    }),
-  );
-  sheen.position.z = 0.002;
+  // 1g) 湿润高光
+  for (let i = 0; i < 6; i++) {
+    const hx = Math.round(rng() * W), hy = Math.round(rng() * H);
+    const rad = 4 + Math.floor(rng() * 6);
+    for (let y = -rad; y <= rad; y++) {
+      for (let x = -rad; x <= rad; x++) {
+        const d = Math.sqrt(x * x + y * y);
+        if (d > rad) continue;
+        const factor = (1 - d / rad) ** 0.5;
+        const [cr, cg, cb] = getPx(hx + x, hy + y);
+        setPx(hx + x, hy + y,
+          cr + Math.round(factor * 25),
+          cg + Math.round(factor * 12),
+          cb + Math.round(factor * 6),
+        );
+      }
+    }
+  }
 
-  const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2438 });
-  eyeMat.toneMapped = false;
-  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), eyeMat);
-  const eyeR = eyeL.clone();
-  eyeL.position.set(-0.075, 0.085, 0.02);
-  eyeR.position.set(0.075, 0.085, 0.02);
+  ctx.putImageData(imgData, 0, 0);
 
-  group.add(glass, sheen, eyeL, eyeR);
-  tag(group, 5, 'door');
+  // ---- 纹理增强：顶部加深（对应天花板、墙壁上半更暗） ----
+  // 在现有纹理上再做一步局部调整
+  const imgData2 = ctx.getImageData(0, 0, W, H);
+  const data2 = imgData2.data;
+  for (let y = 0; y < H; y++) {
+    // y=0 是顶部（对应天花板），y=H 是底部（对应下半墙地板区域）
+    const topFactor = 1 - y / H;
+    const darken = 0.85 + topFactor * 0.15; // 顶部变暗 15%
+    for (let x = 0; x < W; x++) {
+      const idx = (y * W + x) * 4;
+      data2[idx] = Math.round(data2[idx] * darken);
+      data2[idx + 1] = Math.round(data2[idx + 1] * (darken * 0.8));
+      data2[idx + 2] = Math.round(data2[idx + 2] * (darken * 0.85));
+    }
+  }
+  // 增加高光斑（模拟潮湿反光）
+  const seedHL = 20251101;
+  let rngHL = seedHL;
+  function rngHLFn() {
+    rngHL = (rngHL * 16807 + 0) % 2147483647;
+    return (rngHL - 1) / 2147483646;
+  }
+  for (let i = 0; i < 10; i++) {
+    const hlx = Math.round(rngHLFn() * W), hly = Math.round(rngHLFn() * H * 0.6);
+    const rad = 5 + Math.floor(rngHLFn() * 8);
+    for (let dy = -rad; dy <= rad; dy++) {
+      for (let dx = -rad; dx <= rad; dx++) {
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d > rad) continue;
+        const factor = (1 - d / rad) ** 0.6;
+        const idx = ((hly + dy) % H * W + (hlx + dx) % W) * 4;
+        data2[idx] = Math.min(255, data2[idx] + Math.round(factor * 30));
+        data2[idx + 1] = Math.min(255, data2[idx + 1] + Math.round(factor * 12));
+        data2[idx + 2] = Math.min(255, data2[idx + 2] + Math.round(factor * 8));
+      }
+    }
+  }
+  ctx.putImageData(imgData2, 0, 0);
 
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(6, 4.5);
+
+  // 纹理流动动画状态
+  let flowTime = 0;
+  // 天花板呼吸偏移量
+  let ceilBreath = 0;
+
+  const fleshMat = new THREE.MeshBasicMaterial({
+    map: texture,
+    side: THREE.DoubleSide,
+  });
+
+  // 天花板专用材质：clone fleshMat 但纹理 repeat 不同（天花板 20m × 12m）
+  const ceilTexture = texture.clone();
+  ceilTexture.repeat.set(10, 6);  // 20:12 ≈ 10:6 比例，适合天花板尺寸
+  const ceilMat = new THREE.MeshBasicMaterial({
+    map: ceilTexture,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -8,
+    polygonOffsetUnits: -4,
+  });
+
+
+  
+  // ========== 2. 四面墙壁与天花板（全部血肉覆盖） ==========
+  // 2a) 天花板：单层水平面，旋转烘焙进几何体，
+  //     使几何体局部 +Y == 世界竖直方向（update() 的 setY 呼吸波才成立）
+  const ceilGeo = new THREE.PlaneGeometry(xMax - xMin, zMax - zMin);
+  ceilGeo.rotateX(-Math.PI / 2);
+  const ceil = new THREE.Mesh(ceilGeo, ceilMat);
+  ceil.position.set(0, yCeil - 0.04, (zMin + zMax) / 2);  // 原教室天花板底面在 y=3.20，这里 3.16，留 4cm
+  group.add(ceil);
+
+  // 2b) 地板（保持暗色）—— 用独立几何体，绝不复用天花板几何体
+  const floorMat = fleshMat.clone();
+  floorMat.color.setHex(0x1a080a);
+  const floorGeo = new THREE.PlaneGeometry(xMax - xMin, zMax - zMin);
+  floorGeo.rotateX(-Math.PI / 2);
+  const floor = new THREE.Mesh(floorGeo, floorMat);
+  floor.position.set(0, 0.01, (zMin + zMax) / 2);
+  group.add(floor);
+
+  // 门参数
+  const doorHalf = door.half;
+  const doorH = door.height;
+
+  // 四面墙尺寸
+  const totalW = xMax - xMin;   // 前/后墙宽 = 20m
+  const sideW = zMax - zMin;   // 左/右墙宽 = 12m
+  const halfZ = (zMin + zMax) / 2;
+
+  // 带门的后墙辅助函数
+  function addDoorWall(w, px, pz, ry) {
+    const leftW = (w / 2) - doorHalf;
+    const rightW = (w / 2) - doorHalf;
+    // 门上方
+    const topH = yCeil - doorH;
+    if (topH > 0) {
+      const topMesh = new THREE.Mesh(new THREE.PlaneGeometry(w, topH), fleshMat);
+      topMesh.position.set(px, yCeil - topH / 2, pz);
+      topMesh.rotation.y = ry;
+      group.add(topMesh);
+    }
+    // 门左侧
+    if (leftW > 0.01) {
+      const leftMesh = new THREE.Mesh(new THREE.PlaneGeometry(leftW, yCeil), fleshMat);
+      leftMesh.position.set(px - (w/2 - leftW/2) + 0.01, yCeil/2, pz);
+      leftMesh.rotation.y = ry;
+      group.add(leftMesh);
+    }
+    // 门右侧
+    if (rightW > 0.01) {
+      const rightMesh = new THREE.Mesh(new THREE.PlaneGeometry(rightW, yCeil), fleshMat);
+      rightMesh.position.set(px + (w/2 - rightW/2) - 0.01, yCeil/2, pz);
+      rightMesh.rotation.y = ry;
+      group.add(rightMesh);
+    }
+    // 门框上沿（细小横条）
+    const overMesh = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.04), fleshMat);
+    overMesh.position.set(px, doorH + 0.02, pz);
+    overMesh.rotation.y = ry;
+    group.add(overMesh);
+  }
+
+  // 2c) 四面墙壁：全部血肉覆盖
+  for (const wall of [
+    { w: totalW, x: 0, z: zMin + 0.01, ry: Math.PI },           // 前墙（zMin）
+    { w: sideW, x: xMin + 0.01, z: halfZ, ry: Math.PI / 2 },    // 左墙
+    { w: sideW, x: xMax - 0.01, z: halfZ, ry: -Math.PI / 2 },   // 右墙
+  ]) {
+    const wallMesh = new THREE.Mesh(new THREE.PlaneGeometry(wall.w, yCeil), fleshMat);
+    wallMesh.position.set(wall.x, yCeil / 2, wall.z);
+    wallMesh.rotation.y = wall.ry;
+    group.add(wallMesh);
+  }
+  // 后墙（zMax）—— 避开门
+  addDoorWall(totalW, 0, zMax - 0.01, 0);
+
+  // ---- 垂直向下流淌的血液（随机分布在整个天花板下，贴墙处密度增大） ----
+  const dripMatRed = new THREE.MeshBasicMaterial({
+    color: 0x8a0c10,
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+  const darkDripMat = new THREE.MeshBasicMaterial({
+    color: 0x3a0508,
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+
+  /**
+   * 在教室天花板下随机生成垂直血条。
+   * 密度在 x 和 z 两个方向上通过权重函数控制，越靠近墙壁密度越大。
+   * 每个血条用两个交叉的 PlaneGeometry 形成十字，确保从任意角度可见。
+   */
+  function addRandomDrips(count, xMin_, xMax_, zMin_, zMax_) {
+    const halfLenX = (xMax_ - xMin_) / 2;
+    const halfLenZ = (zMax_ - zMin_) / 2;
+    const midX = (xMin_ + xMax_) / 2;
+    const midZ = (zMin_ + zMax_) / 2;
+
+    for (let i = 0; i < count; i++) {
+      // 使用权重函数让随机位置倾向于靠近墙壁：
+      // 在 [0,1] 区间，偏 0 或偏 1 的概率增大
+      const ux = Math.random() ** 0.5;
+      const signX = Math.random() > 0.5 ? 1 : -1;
+      const tx = signX * ux * halfLenX;
+      const x = midX + tx;
+
+      const uz = Math.random() ** 0.5;
+      const signZ = Math.random() > 0.5 ? 1 : -1;
+      const tz = signZ * uz * halfLenZ;
+      const z = midZ + tz;
+
+      // 避开门口的通道（后墙门附近）
+      if (x > -0.9 && x < 0.9 && z > zMax - 1.5) continue;
+
+      const stripH = 0.6 + Math.random() * 2.2;
+      const stripW = 0.012 + Math.random() * 0.04;
+      const yTop = yCeil - 0.02 - Math.random() * 0.3;
+      const yPos = yTop - stripH / 2;
+      const opacity = 0.15 + Math.random() * 0.35;
+      const rotY = Math.random() * Math.PI; // 随机朝向
+
+      // 十字交叉的两个平面
+      const geo = new THREE.PlaneGeometry(stripW, stripH);
+      const m1 = new THREE.Mesh(geo, dripMatRed.clone());
+      m1.position.set(x, yPos, z);
+      m1.rotation.y = rotY;
+      m1.material.opacity = opacity;
+      group.add(m1);
+
+      const m2 = new THREE.Mesh(geo, dripMatRed.clone());
+      m2.position.set(x, yPos, z);
+      m2.rotation.y = rotY + Math.PI / 2;
+      m2.material.opacity = opacity * 0.7;
+      group.add(m2);
+
+      // 末端变淡延伸
+      if (Math.random() > 0.5 && stripH > 1.0) {
+        const extH = 0.15 + Math.random() * 0.4;
+        const extW = stripW * (0.3 + Math.random() * 0.5);
+        const extGeo = new THREE.PlaneGeometry(extW, extH);
+        const ey = yPos - stripH / 2 - extH / 2;
+        const e1 = new THREE.Mesh(extGeo, dripMatRed.clone());
+        e1.position.set(x + (Math.random() - 0.5) * 0.03, ey, z);
+        e1.rotation.y = rotY;
+        e1.material.opacity = opacity * 0.4;
+        group.add(e1);
+        const e2 = new THREE.Mesh(extGeo, dripMatRed.clone());
+        e2.position.set(x + (Math.random() - 0.5) * 0.03, ey, z);
+        e2.rotation.y = rotY + Math.PI / 2;
+        e2.material.opacity = opacity * 0.3;
+        group.add(e2);
+      }
+    }
+
+    // 天花板附近的暗红色宽短血渍
+    const stainCount = Math.floor(count * 0.3);
+    for (let i = 0; i < stainCount; i++) {
+      const ux = Math.random() ** 0.5;
+      const signX = Math.random() > 0.5 ? 1 : -1;
+      const x = midX + signX * ux * halfLenX;
+      const uz = Math.random() ** 0.5;
+      const signZ = Math.random() > 0.5 ? 1 : -1;
+      const z = midZ + signZ * uz * halfLenZ;
+      if (x > -0.9 && x < 0.9 && z > zMax - 1.5) continue;
+
+      const stainH = 0.02 + Math.random() * 0.08;
+      const stainW = 0.04 + Math.random() * 0.1;
+      const yPos = yCeil - 0.05 - Math.random() * 0.35;
+      const sRotY = Math.random() * Math.PI;
+      const s1 = new THREE.Mesh(new THREE.PlaneGeometry(stainW, stainH), darkDripMat.clone());
+      s1.position.set(x, yPos, z);
+      s1.rotation.y = sRotY;
+      s1.material.opacity = 0.3 + Math.random() * 0.3;
+      group.add(s1);
+      const s2 = new THREE.Mesh(new THREE.PlaneGeometry(stainW * 0.5, stainH * 0.5), darkDripMat.clone());
+      s2.position.set(x, yPos, z);
+      s2.rotation.y = sRotY + Math.PI / 2;
+      s2.material.opacity = 0.2 + Math.random() * 0.2;
+      group.add(s2);
+    }
+  }
+  // 生成约 300 条随机血条（密度在贴墙处自然增大）
+  addRandomDrips(300, xMin, xMax, zMin, zMax);
+
+  // ========== 3. 立体血管（TubeGeometry，贴附天花板和上半墙） ==========
+  const veins = [];
+  const tubeMat1 = new THREE.MeshBasicMaterial({
+    color: 0x3a0a0a,
+    transparent: true, opacity: 0.55,
+    side: THREE.DoubleSide,
+  });
+  const tubeMat2 = new THREE.MeshBasicMaterial({
+    color: 0x4a0a12,
+    transparent: true, opacity: 0.5,
+    side: THREE.DoubleSide,
+  });
+  const tubeMat3 = new THREE.MeshBasicMaterial({
+    color: 0x2a0510,
+    transparent: true, opacity: 0.6,
+    side: THREE.DoubleSide,
+  });
+
+  const numVeins = 15;
+  for (let i = 0; i < numVeins; i++) {
+    const surface = Math.floor(rng() * 4); // 0=天花板, 1=前墙上半, 2=左墙上半, 3=右墙上半
+    const pts = [];
+    const nSegs = 3 + Math.floor(rng() * 4);
+
+    if (surface === 0) {
+      const cx = xMin + 1 + rng() * (xMax - xMin - 2);
+      const cz = zMin + 1 + rng() * (zMax - zMin - 2);
+      const dir = rng() * Math.PI * 2;
+      const len = 1 + rng() * 2;
+      for (let j = 0; j <= nSegs; j++) {
+        const t = j / nSegs;
+        const angle = dir + t * 0.8 + Math.sin(t * Math.PI * 2) * 0.5;
+        const rad = t * len;
+        pts.push(new THREE.Vector3(
+          cx + Math.cos(angle) * rad,
+          yCeil - 0.01,
+          cz + Math.sin(angle) * rad,
+        ));
+      }
+    } else if (surface === 1) {
+      const x0 = xMin + 0.5 + rng() * (xMax - xMin - 1);
+      const y0 = 0.1 + rng() * (yCeil - 0.2);
+      const dir = rng() * Math.PI * 2;
+      const len = 0.5 + rng() * 1.2;
+      for (let j = 0; j <= nSegs; j++) {
+        const t = j / nSegs;
+        const dx = Math.cos(dir + t * 1.2 + Math.sin(t * Math.PI) * 0.4) * t * len;
+        const dy = Math.sin(dir * 0.6 + t * 0.7 + Math.cos(t * Math.PI * 1.3) * 0.3) * t * len * 0.6;
+        pts.push(new THREE.Vector3(
+          x0 + dx,
+          Math.max(0, Math.min(yCeil, y0 + dy)),
+          zMin + 0.01,
+        ));
+      }
+    } else if (surface === 2) {
+      const z0 = zMin + 0.5 + rng() * (zMax - zMin - 1);
+      const y0 = 0.1 + rng() * (yCeil - 0.2);
+      const dir = rng() * Math.PI * 2;
+      const len = 0.5 + rng() * 1.2;
+      for (let j = 0; j <= nSegs; j++) {
+        const t = j / nSegs;
+        const dz = Math.cos(dir + t * 1.2 + Math.sin(t * Math.PI) * 0.4) * t * len;
+        const dy = Math.sin(dir * 0.6 + t * 0.7 + Math.cos(t * Math.PI * 1.3) * 0.3) * t * len * 0.6;
+        pts.push(new THREE.Vector3(
+          xMin + 0.01,
+          Math.max(0, Math.min(yCeil, y0 + dy)),
+          z0 + dz,
+        ));
+      }
+    } else {
+      const z0 = zMin + 0.5 + rng() * (zMax - zMin - 1);
+      const y0 = 0.1 + rng() * (yCeil - 0.2);
+      const dir = rng() * Math.PI * 2;
+      const len = 0.5 + rng() * 1.2;
+      for (let j = 0; j <= nSegs; j++) {
+        const t = j / nSegs;
+        const dz = Math.cos(dir + t * 1.2 + Math.sin(t * Math.PI) * 0.4) * t * len;
+        const dy = Math.sin(dir * 0.6 + t * 0.7 + Math.cos(t * Math.PI * 1.3) * 0.3) * t * len * 0.6;
+        pts.push(new THREE.Vector3(
+          xMax - 0.01,
+          Math.max(0, Math.min(yCeil, y0 + dy)),
+          z0 + dz,
+        ));
+      }
+    }
+
+    if (pts.length < 3) continue;
+
+    const radius = 0.015 + rng() * 0.02;
+    const tubeGeo = new THREE.TubeGeometry(
+      new THREE.CatmullRomCurve3(pts),
+      nSegs * 3,
+      radius,
+      5, false,
+    );
+
+    const matChoice = [tubeMat1, tubeMat2, tubeMat3][Math.floor(rng() * 3)];
+    const veinGroup = new THREE.Group();
+    const veinMesh = new THREE.Mesh(tubeGeo, matChoice);
+    veinGroup.add(veinMesh);
+
+    if (rng() > 0.5) {
+      const branchStart = 1 + Math.floor(rng() * (nSegs - 2));
+      const bStart = pts[branchStart];
+      const bDir = rng() * Math.PI * 2;
+      const bLen = 0.2 + rng() * 0.4;
+      const bPts = [];
+      for (let j = 0; j <= 3; j++) {
+        const t = j / 3;
+        bPts.push(new THREE.Vector3(
+          bStart.x + Math.cos(bDir + t * 0.5) * t * bLen,
+          bStart.y + Math.sin(bDir * 0.5 + t) * t * bLen * 0.3,
+          bStart.z + Math.sin(bDir + t * 0.8) * t * bLen * 0.3,
+        ));
+      }
+      if (bPts.length >= 3) {
+        const bGeo = new THREE.TubeGeometry(
+          new THREE.CatmullRomCurve3(bPts),
+          3, radius * 0.5, 4, false,
+        );
+        veinGroup.add(new THREE.Mesh(bGeo, matChoice));
+      }
+    }
+
+    group.add(veinGroup);
+    veins.push({
+      group: veinGroup,
+      phase: rng() * Math.PI * 2,
+      freq: 1 + rng() * 0.5,
+      amp: 0.02 + rng() * 0.04,
+    });
+  }
+
+  // ========== 4. 毛细血管网 ==========
+  const capPoints = [];
+  const capCount = 200;
+  for (let i = 0; i < capCount; i++) {
+    const sx = xMin + rng() * (xMax - xMin);
+    const sz = zMin + rng() * (zMax - zMin);
+    capPoints.push(sx, yCeil - 0.005, sz);
+    const angle = rng() * Math.PI * 2;
+    const len = 0.05 + rng() * 0.15;
+    capPoints.push(sx + Math.cos(angle) * len, yCeil - 0.005, sz + Math.sin(angle) * len);
+  }
+  const capGeo = new THREE.BufferGeometry();
+  capGeo.setAttribute('position', new THREE.Float32BufferAttribute(capPoints, 3));
+  const capLines = new THREE.LineSegments(capGeo, new THREE.LineBasicMaterial({
+    color: 0x4a0a12, transparent: true, opacity: 0.25,
+  }));
+  group.add(capLines);
+
+  // ========== 5. 血雾粒子 ==========
+  const mistCount = 80;
+  const mistPositions = [];
+  const mistPhase = [];
+  for (let i = 0; i < mistCount; i++) {
+    mistPositions.push(
+      xMin + rng() * (xMax - xMin),
+      rng() * yCeil,
+      zMin + rng() * (zMax - zMin),
+    );
+    mistPhase.push(rng() * Math.PI * 2);
+  }
+  const mistGeo = new THREE.BufferGeometry();
+  mistGeo.setAttribute('position', new THREE.Float32BufferAttribute(mistPositions, 3));
+  const mistMat = new THREE.PointsMaterial({
+    color: 0x3a0a12, size: 0.03, transparent: true, opacity: 0.08,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const mistPoints = new THREE.Points(mistGeo, mistMat);
+  group.add(mistPoints);
+  const mistMat2 = new THREE.PointsMaterial({
+    color: 0x5a1020, size: 0.06, transparent: true, opacity: 0.12,
+    depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const mistPoints2 = new THREE.Points(mistGeo.clone(), mistMat2);
+  group.add(mistPoints2);
+
+  // ========== 标签 ==========
+  tag(group, 5, 'flesh-wall');
+
+  // ========== 状态变量 ==========
+  let photoReactActive = false;
+  let photoReactT = 0;
+
+  // ========== 返回对象 ==========
   return {
     level: 5,
-    id: 'door',
+    id: 'flesh-wall',
     group,
     stand: { x: 0, z: 4.2 },
-    aimY: 0,
-    parent: 'door',
+    aimY: 3.15,
     update(dt, env) {
-      const s = env.flickerDark ? 1.5 : 0.32;
-      eyeL.scale.setScalar(eyeL.scale.x + (s - eyeL.scale.x) * Math.min(1, dt * 12));
-      eyeR.scale.setScalar(eyeL.scale.x);
-      sheen.material.opacity = 0.08 + Math.sin(env.time * 0.6) * 0.03;
+      const flicker = env.flickerDark ?? false;
+      const time = env.time ?? 0;
+
+      // ---- 纹理流动（严格单向，不要再叠加 sin 横向漂移） ----
+      flowTime += dt * 0.06;
+      texture.offset.y = -flowTime;   // 负号 = 血液向下淌
+      texture.offset.x = 0;
+      if (ceilTexture) {
+        ceilTexture.offset.y = -flowTime * 0.7;
+        ceilTexture.offset.x = 0;
+      }
+
+      // ---- 天花板呼吸起伏 ----
+      ceilBreath = Math.sin(time * 0.8) * 0.012;
+      const cPos = ceil.geometry.attributes.position;
+      const halfSizeX = (xMax - xMin) / 2;
+      const halfSizeZ = (zMax - zMin) / 2;
+      const cOrigZ = (zMin + zMax) / 2;
+      for (let i = 0; i < cPos.count; i++) {
+        const lx = cPos.getX(i) / halfSizeX;
+        const lz = (cPos.getZ(i) - cOrigZ) / halfSizeZ;
+        const wave = Math.sin(lx * 2.5 + time * 0.8) * Math.cos(lz * 2.0 + time * 0.6) * 0.006;
+        cPos.setY(i, ceilBreath + wave);
+      }
+      cPos.needsUpdate = true;
+
+      // ---- 血管搏动 ----
+      for (const v of veins) {
+        const pulse = 1 + Math.sin(time * v.freq + v.phase) * v.amp;
+        v.group.scale.set(pulse, 1, pulse);
+      }
+
+      // ---- 灯灭时血管变亮 ----
+      if (flicker) {
+        capLines.material.color.setHSL(0, 1, 0.12);
+        capLines.material.opacity = 0.5;
+      } else {
+        capLines.material.color.setHSL(0, 1, 0.05);
+        capLines.material.opacity = 0.3;
+      }
+
+      // ---- 血雾漂移 ----
+      const pos = mistPoints.geometry.attributes.position;
+      for (let i = 0; i < mistCount; i++) {
+        let y = pos.getY(i);
+        y += Math.sin(time * 0.5 + mistPhase[i]) * 0.003;
+        if (y > yCeil) y = 0.1;
+        if (y < 0) y = yCeil - 0.1;
+        pos.setY(i, y);
+      }
+      pos.needsUpdate = true;
+
+      // ---- 拍照后反应 ----
+      if (photoReactActive) {
+        photoReactT += dt;
+        mistMat2.opacity = 0.12 + 0.15 * Math.max(0, 1 - photoReactT * 2);
+        if (photoReactT > 2) {
+          photoReactActive = false;
+          photoReactT = 0;
+          mistMat2.opacity = 0.12;
+        }
+      }
+    },
+    onPhoto() {
+      photoReactActive = true;
+      photoReactT = 0;
     },
   };
 }
+
 
 /* ------------------------------------------------------- 可拾取的相机模型 */
 

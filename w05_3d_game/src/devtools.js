@@ -216,6 +216,7 @@ export function setupDevTools({ game, player, level }) {
         level.hidePickup();
         // 委托原版 beginFinale 设置终局注视状态（含 objective、say、audio 等）
         game.beginFinale();
+        game.phase = 'finaleLook';
         showHint('已跳转到终局> 注视阶段');
         break;
       }
@@ -299,20 +300,19 @@ export function setupDevTools({ game, player, level }) {
       showHint(`关卡 ${num} 无效（1–${LEVELS}）`);
       return;
     }
-    game.levelIndex = num - 1;
-    game.phase = 'level';
-    game.cleared = false;
-    game.hasCamera = num > 1; // 从第 2 关起认为已有相机
     game.time = 0;
-    player.reset(LAYOUT.pickup.x, LAYOUT.room.maxZ - 2.5, 0);
+    game.hasCamera = num > 1; // 从第 2 关起认为已有相机
+    // 玩家站在门内，面向教室内部（-Z 方向）
+    player.reset(LAYOUT.pickup.x, LAYOUT.room.maxZ - 2.5, Math.PI);
     player.setControl(true);
     player.setScripted(false);
     player.setLamp(game.hasCamera ? CONFIG.lamp : CONFIG.lampDim);
     level.reset();
-    // 委托原版 beginLevel 设置关卡状态（含异常提示 objective）
+    // 委托原版 beginLevel 设置关卡状态（含异常提示 objective、levelIndex 等）
     game.beginLevel(num);
     level.loopEnabled = num > 1; // 第 2 关起走廊可循环（覆盖 beginLevel 默认值）
     game.setCameraState(game.hasCamera ? 'holstered' : 'none');
+    game.cleared = false;
     showHint(`已跳转到第 ${num} 关`);
   }
 
