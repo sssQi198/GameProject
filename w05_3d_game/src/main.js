@@ -36,6 +36,19 @@ try {
   bindPlayerInput(player, canvas);
   const game = new Game({ scene, camera, canvas, hud, audio, level, player });
 
+  // 新材质进场时异步预编译着色器。level.js 里一直有这两个调用点
+  // （"先让渲染器编译，避免玩家第一次看到它时掉帧"），但之前没人赋值，
+  // 所以一直是空转。compileAsync 走 KHR_parallel_shader_compile，不阻塞主线程。
+  level.onSceneChanged = () => {
+    if (typeof renderer.compileAsync !== 'function') return;
+    renderer.compileAsync(scene, camera).catch(() => {});
+  };
+  // 玩家还在主菜单时就把第 5 关那套重场景建好（只建不入场），
+  // 这样走廊预建时几乎不用再花时间。
+  const prewarmLevel5 = () => { try { level.prewarm(5); } catch (e) { console.warn('[prewarm] 第 5 关预建失败', e); } };
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(prewarmLevel5, { timeout: 5000 });
+  else setTimeout(prewarmLevel5, 1500);
+
   hud.bind({
     onStart: () => game.start(false),
     onDemo: () => game.startDemo(),

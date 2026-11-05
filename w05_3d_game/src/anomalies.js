@@ -1331,37 +1331,95 @@ function createFleshWall() {
   const sideW = zMax - zMin;   // 左/右墙宽 = 12m
   const halfZ = (zMin + zMax) / 2;
 
-  // 带门的后墙辅助函数
-  function addDoorWall(w, px, pz, ry) {
-    const leftW = (w / 2) - doorHalf;
-    const rightW = (w / 2) - doorHalf;
-    // 门上方
-    const topH = yCeil - doorH;
-    if (topH > 0) {
-      const topMesh = new THREE.Mesh(new THREE.PlaneGeometry(w, topH), fleshMat);
-      topMesh.position.set(px, yCeil - topH / 2, pz);
-      topMesh.rotation.y = ry;
-      group.add(topMesh);
+  // 门这块墙是几块平面拼起来的。若共用 fleshMat 会有两个毛病：
+  //   1) "门上方"原来取整墙宽 20m，跟左右两块共面重叠 → 逐像素打架，贴图闪变；
+  //   2) 共用同一个 repeat(6,4.5)，尺寸不同的块贴图密度差一个数量级 → 被拉糊、
+  //      而且纵向压缩后 mipmap 一糊，看起来"不流动"。
+  // 所以每块单独 clone 一份纹理，按前墙的密度（横 0.3 次/米、纵 1.40625 次/米）
+  // 设 repeat，接缝处纹理才连续、流动速度也一致。
+  const doorTextures = [];
+  function fleshMatFor(w, h) {
+    const tex = texture.clone();
+    tex.needsUpdate = true;
+    tex.repeat.set(0.3 * w, 1.40625 * h);
+    doorTextures.push(tex);
+    return new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
+  }
+
+  // ---- 后墙：必须给窗户留洞，否则整排窗会被血肉从内侧糊死 ----
+  // 窗位必须和 level.js 的 addWindowRun 严格对齐，否则会露出实墙或切到窗框。
+  // 常量抄自 level.js:868-873 与 DOOR_FRAME（jambW = 0.12）。
+  const WIN = { count: 3, w: 1.9, sill: 0.95, top: 2.28, jamb: 0.12 };
+  function windowGaps() {
+    const outer = doorHalf + WIN.jamb;
+    const gaps = [];
+    const runs = [[xMin, -outer], [outer, xMax]];
+    for (const [x0, x1] of runs) {
+      const pier = ((x1 - x0) - WIN.count * WIN.w) / (WIN.count + 1);
+      for (let i = 0; i < WIN.count; i += 1) {
+        const xa = x0 + (i + 1) * pier + i * WIN.w;
+        gaps.push([xa, xa + WIN.w]);
+      }
     }
-    // 门左侧
-    if (leftW > 0.01) {
-      const leftMesh = new THREE.Mesh(new THREE.PlaneGeometry(leftW, yCeil), fleshMat);
-      leftMesh.position.set(px - (w/2 - leftW/2) + 0.01, yCeil/2, pz);
-      leftMesh.rotation.y = ry;
-      group.add(leftMesh);
+    return gaps;
+  }
+
+  function buildBackWall() {
+    // 13 块分片共用一份纹理：repeat 设成 1，UV 按世界坐标烘进几何体
+    // （横向 0.3 次/米、纵向 1.40625 次/米，与前墙同密度）。
+    // 这样只多一张纹理、图案跨缝连续、流动也只需要动一份 offset。
+    const backTex = texture.clone();
+    backTex.needsUpdate = true;
+    backTex.repeat.set(1, 1);
+    backTex.wrapS = THREE.RepeatWrapping;
+    backTex.wrapT = THREE.RepeatWrapping;
+    const backMat = new THREE.MeshBasicMaterial({ map: backTex, side: THREE.DoubleSide });
+    doorTextures.push(backTex);
+
+    const U = 0.3;
+    const V = 1.40625;
+    const zBack = zMax - 0.01;
+
+    function panel(xa, xb, ya, yb) {
+      const w = xb - xa;
+      const h = yb - ya;
+      if (w < 1e-4 || h < 1e-4) return;
+      const geo = new THREE.PlaneGeometry(w, h);
+      const uv = geo.attributes.uv;
+      const u0 = U * xa;
+      const u1 = U * xb;
+      const v0 = V * ya;
+      const v1 = V * yb;
+      // PlaneGeometry 的 uv 顺序：(0,1) (1,1) (0,0) (1,0)
+      uv.setXY(0, u0, v1);
+      uv.setXY(1, u1, v1);
+      uv.setXY(2, u0, v0);
+      uv.setXY(3, u1, v0);
+      uv.needsUpdate = true;
+      const mesh = new THREE.Mesh(geo, backMat);
+      mesh.position.set((xa + xb) / 2, (ya + yb) / 2, zBack);
+      group.add(mesh);
     }
-    // 门右侧
-    if (rightW > 0.01) {
-      const rightMesh = new THREE.Mesh(new THREE.PlaneGeometry(rightW, yCeil), fleshMat);
-      rightMesh.position.set(px + (w/2 - rightW/2) - 0.01, yCeil/2, pz);
-      rightMesh.rotation.y = ry;
-      group.add(rightMesh);
+
+    // 按 y 切 4 条横带，每条带内按 x 扣掉该带的缺口
+    const gaps = windowGaps();
+    const doorGap = [[-doorHalf, doorHalf]];
+    const bands = [
+      [0, WIN.sill, doorGap],
+      [WIN.sill, WIN.top, doorGap.concat(gaps)],
+      [WIN.top, doorH, doorGap],
+      [doorH, yCeil, []],
+    ];
+    for (const [ya, yb, bandGaps] of bands) {
+      if (yb - ya < 1e-4) continue;
+      const sorted = bandGaps.slice().sort((p, q) => p[0] - q[0]);
+      let cursor = xMin;
+      for (const [g0, g1] of sorted) {
+        if (g0 > cursor + 1e-6) panel(cursor, g0, ya, yb);
+        if (g1 > cursor) cursor = g1;
+      }
+      if (xMax > cursor + 1e-6) panel(cursor, xMax, ya, yb);
     }
-    // 门框上沿（细小横条）
-    const overMesh = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.04), fleshMat);
-    overMesh.position.set(px, doorH + 0.02, pz);
-    overMesh.rotation.y = ry;
-    group.add(overMesh);
   }
 
   // 2c) 四面墙壁：全部血肉覆盖
@@ -1375,8 +1433,8 @@ function createFleshWall() {
     wallMesh.rotation.y = wall.ry;
     group.add(wallMesh);
   }
-  // 后墙（zMax）—— 避开门
-  addDoorWall(totalW, 0, zMax - 0.01, 0);
+  // 后墙（zMax）—— 避开门，并且必须给 6 扇窗留洞（否则从走廊看进去是一块血肉板）
+  buildBackWall();
 
   // ---- 垂直向下流淌的血液（随机分布在整个天花板下，贴墙处密度增大） ----
   const dripMatRed = new THREE.MeshBasicMaterial({
@@ -1404,25 +1462,28 @@ function createFleshWall() {
     for (let i = 0; i < count; i++) {
       // 使用权重函数让随机位置倾向于靠近墙壁：
       // 在 [0,1] 区间，偏 0 或偏 1 的概率增大
-      const ux = Math.random() ** 0.5;
-      const signX = Math.random() > 0.5 ? 1 : -1;
+      const ux = rng() ** 0.5;
+      const signX = rng() > 0.5 ? 1 : -1;
       const tx = signX * ux * halfLenX;
       const x = midX + tx;
 
-      const uz = Math.random() ** 0.5;
-      const signZ = Math.random() > 0.5 ? 1 : -1;
+      const uz = rng() ** 0.5;
+      const signZ = rng() > 0.5 ? 1 : -1;
       const tz = signZ * uz * halfLenZ;
       const z = midZ + tz;
 
       // 避开门口的通道（后墙门附近）
       if (x > -0.9 && x < 0.9 && z > zMax - 1.5) continue;
+      // 裂缝正前方不挂血条：这些亮红细条会横在裂口前面，把 L 形转角切成
+      // 看起来不连贯的几段（实测 x≈±1.6、z≈-5.8 那几条正好压在裂口上）。
+      if (Math.abs(x) < 3.5 && z < -2.4) continue;
 
-      const stripH = 0.6 + Math.random() * 2.2;
-      const stripW = 0.012 + Math.random() * 0.04;
-      const yTop = yCeil - 0.02 - Math.random() * 0.3;
+      const stripH = 0.6 + rng() * 2.2;
+      const stripW = 0.012 + rng() * 0.04;
+      const yTop = yCeil - 0.06 - rng() * 0.3;
       const yPos = yTop - stripH / 2;
-      const opacity = 0.15 + Math.random() * 0.35;
-      const rotY = Math.random() * Math.PI; // 随机朝向
+      const opacity = 0.15 + rng() * 0.35;
+      const rotY = rng() * Math.PI; // 随机朝向
 
       // 十字交叉的两个平面
       const geo = new THREE.PlaneGeometry(stripW, stripH);
@@ -1439,18 +1500,18 @@ function createFleshWall() {
       group.add(m2);
 
       // 末端变淡延伸
-      if (Math.random() > 0.5 && stripH > 1.0) {
-        const extH = 0.15 + Math.random() * 0.4;
-        const extW = stripW * (0.3 + Math.random() * 0.5);
+      if (rng() > 0.5 && stripH > 1.0) {
+        const extH = 0.15 + rng() * 0.4;
+        const extW = stripW * (0.3 + rng() * 0.5);
         const extGeo = new THREE.PlaneGeometry(extW, extH);
         const ey = yPos - stripH / 2 - extH / 2;
         const e1 = new THREE.Mesh(extGeo, dripMatRed.clone());
-        e1.position.set(x + (Math.random() - 0.5) * 0.03, ey, z);
+        e1.position.set(x + (rng() - 0.5) * 0.03, ey, z);
         e1.rotation.y = rotY;
         e1.material.opacity = opacity * 0.4;
         group.add(e1);
         const e2 = new THREE.Mesh(extGeo, dripMatRed.clone());
-        e2.position.set(x + (Math.random() - 0.5) * 0.03, ey, z);
+        e2.position.set(x + (rng() - 0.5) * 0.03, ey, z);
         e2.rotation.y = rotY + Math.PI / 2;
         e2.material.opacity = opacity * 0.3;
         group.add(e2);
@@ -1460,32 +1521,603 @@ function createFleshWall() {
     // 天花板附近的暗红色宽短血渍
     const stainCount = Math.floor(count * 0.3);
     for (let i = 0; i < stainCount; i++) {
-      const ux = Math.random() ** 0.5;
-      const signX = Math.random() > 0.5 ? 1 : -1;
+      const ux = rng() ** 0.5;
+      const signX = rng() > 0.5 ? 1 : -1;
       const x = midX + signX * ux * halfLenX;
-      const uz = Math.random() ** 0.5;
-      const signZ = Math.random() > 0.5 ? 1 : -1;
+      const uz = rng() ** 0.5;
+      const signZ = rng() > 0.5 ? 1 : -1;
       const z = midZ + signZ * uz * halfLenZ;
       if (x > -0.9 && x < 0.9 && z > zMax - 1.5) continue;
+      // 裂缝正前方不挂血条：这些亮红细条会横在裂口前面，把 L 形转角切成
+      // 看起来不连贯的几段（实测 x≈±1.6、z≈-5.8 那几条正好压在裂口上）。
+      if (Math.abs(x) < 3.5 && z < -2.4) continue;
 
-      const stainH = 0.02 + Math.random() * 0.08;
-      const stainW = 0.04 + Math.random() * 0.1;
-      const yPos = yCeil - 0.05 - Math.random() * 0.35;
-      const sRotY = Math.random() * Math.PI;
+      const stainH = 0.02 + rng() * 0.08;
+      const stainW = 0.04 + rng() * 0.1;
+      const yPos = yCeil - 0.09 - rng() * 0.35;
+      const sRotY = rng() * Math.PI;
       const s1 = new THREE.Mesh(new THREE.PlaneGeometry(stainW, stainH), darkDripMat.clone());
       s1.position.set(x, yPos, z);
       s1.rotation.y = sRotY;
-      s1.material.opacity = 0.3 + Math.random() * 0.3;
+      s1.material.opacity = 0.3 + rng() * 0.3;
       group.add(s1);
       const s2 = new THREE.Mesh(new THREE.PlaneGeometry(stainW * 0.5, stainH * 0.5), darkDripMat.clone());
       s2.position.set(x, yPos, z);
       s2.rotation.y = sRotY + Math.PI / 2;
-      s2.material.opacity = 0.2 + Math.random() * 0.2;
+      s2.material.opacity = 0.2 + rng() * 0.2;
       group.add(s2);
     }
   }
   // 生成约 300 条随机血条（密度在贴墙处自然增大）
   addRandomDrips(300, xMin, xMax, zMin, zMax);
+
+  // 裂缝里那套眼睛的引用。IIFE 内部建好之后挂到这里，
+  // 外层的 update() / onPhoto() 才能驱动待机动画和拍后淡出。
+  let eyeRig = null;
+
+  // ---- L 形裂缝本体 + 触手封边（重写版） --------------------------------
+  // 上一版有三个硬伤，这里逐条解决：
+  //  1) 裂缝看不见：旧的多边形裂缝与前墙共面（都在 zMin+0.01），被墙挡住或闪面。
+  //     现在裂缝条带放在墙面前方 7cm，天花板那条放在天花板下方 7cm，一定在遮盖面之前。
+  //  2) 蓝绿偏色：所有颜色只动红通道，G/B 恒 <= 8；并关掉雾（fog:false），
+  //     避免暗红被雾色 0x07080c 洗成灰蓝。
+  //  3) 边缘太规整：裂缝外圈做成暗血红"翻肉"，再由触手从边缘向外生长盖住边界，
+  //     没有一条清晰的轮廓线。
+  (function addCrackAndTentacles() {
+    const RNG = seeded(20251102);
+
+    // ---- 几何锚点 -------------------------------------------------------
+    const WALL_FACE_Z = zMin + 0.01;       // 前墙血肉面所在 z
+    const CEIL_FACE_Y = yCeil - 0.04;      // 天花板血肉面所在 y
+    const CRACK_Z = WALL_FACE_Z + 0.07;    // 裂缝贴在前墙前方（相机在 +z 一侧）
+    const CRACK_Y = CEIL_FACE_Y - 0.07;    // 裂缝贴在天花板下方（相机在下方）
+
+    // ---- 颜色工具：只动红通道，杜绝蓝绿 --------------------------------
+    function fleshHex(rMin, rMax) {
+      const r = rMin + Math.floor(RNG() * Math.max(1, rMax - rMin));
+      const gb = Math.floor(RNG() * 9);    // 0~8，肉眼分辨不出，但保住"血肉"层次
+      return (Math.min(255, r) << 16) | (gb << 8) | gb;
+    }
+    function flatMat(hex) {
+      return new THREE.MeshBasicMaterial({
+        color: hex,
+        side: THREE.DoubleSide,
+        fog: false,          // 关键：不让雾把暗红洗成灰蓝
+        depthWrite: true,    // 不透明，不需要排序，杜绝半透明混合异常
+      });
+    }
+    // 带顶点色的版本：管状物靠"沿长度明暗渐变"造出体积感，
+    // 否则纯 BasicMaterial 的管子看起来只是一块扁红片。
+    function flatMatVC(hex) {
+      return new THREE.MeshBasicMaterial({
+        color: hex,
+        side: THREE.DoubleSide,
+        fog: false,
+        depthWrite: true,
+        vertexColors: true,
+      });
+    }
+
+    // ---- 条带几何：两条等长边界线之间逐段拼四边形 ----------------------
+    // 不用扇形三角化，任意不规则形状都不会自交出错。
+    function ribbonGeometry(left, right) {
+      const pos = [];
+      const idx = [];
+      const n = Math.min(left.length, right.length);
+      for (let i = 0; i < n; i++) {
+        pos.push(left[i][0], left[i][1], left[i][2]);
+        pos.push(right[i][0], right[i][1], right[i][2]);
+      }
+      for (let i = 0; i < n - 1; i++) {
+        const a = i * 2;
+        idx.push(a, a + 1, a + 3, a, a + 3, a + 2);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setIndex(idx);
+      return geo;
+    }
+
+    // 把条带按半宽系数放大，并朝相机方向微移，避免共面闪面
+    function addBand(left, right, grow, offZ, offY, mat) {
+      const l = [];
+      const r = [];
+      for (let i = 0; i < left.length; i++) {
+        const cx = (left[i][0] + right[i][0]) / 2;
+        l.push([cx + (left[i][0] - cx) * grow, left[i][1] + offY, left[i][2] + offZ]);
+        r.push([cx + (right[i][0] - cx) * grow, right[i][1] + offY, right[i][2] + offZ]);
+      }
+      group.add(new THREE.Mesh(ribbonGeometry(l, r), mat));
+    }
+
+    // 环形条带：只画 [gIn, gOut] 这一圈，中间留空。
+    // 裂缝的三层带必须改成环形，否则实心带会把中心糊住，
+    // 后面想"镶进去"的脸和眼睛就全被挡在带子后面了。
+    function addRing(left, right, gIn, gOut, offZ, offY, mat) {
+      const lOuter = [];
+      const lInner = [];
+      const rInner = [];
+      const rOuter = [];
+      for (let i = 0; i < left.length; i++) {
+        const cx = (left[i][0] + right[i][0]) / 2;
+        const dz = left[i][2] + offZ;
+        const dy = left[i][1] + offY;
+        // 左半边（cx 左侧）
+        lOuter.push([cx + (left[i][0] - cx) * gOut, dy, dz]);
+        lInner.push([cx + (left[i][0] - cx) * gIn, dy, dz]);
+        // 右半边（cx 右侧）
+        rInner.push([cx + (right[i][0] - cx) * gIn, dy, dz]);
+        rOuter.push([cx + (right[i][0] - cx) * gOut, dy, dz]);
+      }
+      group.add(new THREE.Mesh(ribbonGeometry(lOuter, lInner), mat));
+      group.add(new THREE.Mesh(ribbonGeometry(rInner, rOuter), mat));
+    }
+
+    // 把一条边界线按半宽系数缩放（用于生成开口轮廓）
+    function scaleEdge(edge, other, g) {
+      return edge.map((p, i) => {
+        const cx = (edge[i][0] + other[i][0]) / 2;
+        return [cx + (p[0] - cx) * g, p[1], p[2]];
+      });
+    }
+
+    // ---- 前墙那条臂：从地板一直裂到天花板转角 --------------------------
+    const wallSteps = 18;
+    const wallY0 = 0.0;                            // 下界延伸到地板
+    const wallY1 = CEIL_FACE_Y - 0.03;             // 停在天花板下方，不被天花板盖住
+    const wallLeftEdge = [];
+    const wallRightEdge = [];
+    for (let i = 0; i <= wallSteps; i += 1) {
+      const t = i / wallSteps;
+      const y = wallY0 + (wallY1 - wallY0) * t;
+      // 中心线轻微左右游走，避免一条直线
+      const cx = Math.sin(t * 5.1 + 1.1) * 0.14 + (RNG() - 0.5) * 0.08;
+      // 半宽：中段最宽，但两端不收死——转角处要和天花板那条接上，不留腰缩
+      const taper = Math.sin(Math.pow(t, 0.75) * Math.PI) * 0.65 + 0.35;
+      const halfW = (0.52 + 0.84 * taper) * (1 + (RNG() - 0.5) * 0.4);
+      wallLeftEdge.push([cx - halfW, y, CRACK_Z]);
+      wallRightEdge.push([cx + halfW, y, CRACK_Z]);
+    }
+
+    // ---- 天花板那条臂：从转角往教室内延伸 ------------------------------
+    const ceilSteps = 16;
+    const ceilZ0 = WALL_FACE_Z + 0.05;
+    const ceilZ1 = WALL_FACE_Z + 2.60;
+    const ceilLeftEdge = [];
+    const ceilRightEdge = [];
+    for (let i = 0; i <= ceilSteps; i += 1) {
+      const t = i / ceilSteps;
+      const z = ceilZ0 + (ceilZ1 - ceilZ0) * t;
+      const cx = Math.sin(t * 4.3 + 0.4) * 0.13 + (RNG() - 0.5) * 0.08;
+      const taper = Math.sin(Math.pow(t, 0.8) * Math.PI) * 0.55 + 0.45;
+      // 末端 16% 收到 0：裂缝在教室内侧收成一个尖，再交给触手盖住
+      const endTaper = Math.min(1, (1 - t) / 0.16);
+      const halfW = (0.44 + 0.68 * taper) * endTaper * (1 + (RNG() - 0.5) * 0.4);
+      ceilLeftEdge.push([cx - halfW, CRACK_Y, z]);
+      ceilRightEdge.push([cx + halfW, CRACK_Y, z]);
+    }
+
+    // ---- 裂缝本体：三层条带，越靠中心越黑 ------------------------------
+    // 外圈是血泡翻边，中圈深红，内核近黑，看上去就是被撕开的口子。
+    const matMargin = flatMat(0x3c0709);
+    const matBody = flatMat(0x140102);
+    const matCore = flatMat(0x020000);
+    // 三层改「环形」：外轮廓不变，但中心留出真开口（内边界 0.30 半宽），
+    // 深渊、脸、眼睛才能镶进去而不是贴在表面。
+    // 前墙臂（朝相机 = +z）
+    addRing(wallLeftEdge, wallRightEdge, 1.05, 1.85, 0.000, 0, matMargin);
+    addRing(wallLeftEdge, wallRightEdge, 0.65, 1.05, 0.014, 0, matBody);
+    addRing(wallLeftEdge, wallRightEdge, 0.34, 0.65, 0.028, 0, matCore);
+    // 天花板臂（朝相机 = -y）
+    addRing(ceilLeftEdge, ceilRightEdge, 1.05, 1.85, 0, -0.000, matMargin);
+    addRing(ceilLeftEdge, ceilRightEdge, 0.65, 1.05, 0, -0.014, matBody);
+    addRing(ceilLeftEdge, ceilRightEdge, 0.34, 0.65, 0, -0.028, matCore);
+
+    // 转角补片：把前墙臂顶端和天花板臂近端直接连起来，避免 L 形在拐角处裂开
+    const wEndL = wallLeftEdge[wallLeftEdge.length - 1];
+    const wEndR = wallRightEdge[wallRightEdge.length - 1];
+    const cEndL = ceilLeftEdge[0];
+    const cEndR = ceilRightEdge[0];
+    addBand([wEndL, cEndL], [wEndR, cEndR], 1.85, 0.000, 0, matMargin);
+    addBand([wEndL, cEndL], [wEndR, cEndR], 1.05, 0.014, 0, matBody);
+    addBand([wEndL, cEndL], [wEndR, cEndR], 0.55, 0.028, 0, matCore);
+
+    // ---- 深渊：把竖直臂的开口沿 z 挤出 9cm 做真凹槽 --------------------
+    // 前壁就是 core 环所在的开口平面（CRACK_Z + 0.028），退到 -5.982，
+    // 正好用满前墙那 8cm 厚度，不突出墙面。
+    const AP = 0.34;                                    // 开口半宽系数（与 core 环内边界一致）
+    const Z_THROAT_FRONT = CRACK_Z + 0.028;
+    const Z_THROAT_BACK = -5.982;
+    const apWallL = scaleEdge(wallLeftEdge, wallRightEdge, AP)
+      .map((p) => [p[0], p[1], Z_THROAT_FRONT]);
+    const apWallR = scaleEdge(wallRightEdge, wallLeftEdge, AP)
+      .map((p) => [p[0], p[1], Z_THROAT_FRONT]);
+    const apWallLBack = apWallL.map((p) => [p[0], p[1], Z_THROAT_BACK]);
+    const apWallRBack = apWallR.map((p) => [p[0], p[1], Z_THROAT_BACK]);
+
+    // 洞壁用顶点色做纵深衰减：靠开口一端略亮、往深处趋于全黑。
+    // 一整片同色的槽看起来是块灰板，只有明暗梯度才读得出"这是个往里去的洞"。
+    // ribbonGeometry 的顶点是 (front, back) 交替排列，所以偶数顶点是前端。
+    function depthRamp(geo) {
+      const cnt = geo.attributes.position.count;
+      const col = new Float32Array(cnt * 3);
+      for (let v = 0; v < cnt; v += 1) {
+        const k = v % 2 === 0 ? 1.0 : 0.10;
+        col[v * 3] = k;
+        col[v * 3 + 1] = k;
+        col[v * 3 + 2] = k;
+      }
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      return geo;
+    }
+    const matThroat = flatMatVC(0x180608);
+    group.add(new THREE.Mesh(depthRamp(ribbonGeometry(apWallL, apWallLBack)), matThroat));
+    group.add(new THREE.Mesh(depthRamp(ribbonGeometry(apWallR, apWallRBack)), matThroat));
+    // 背板：挡住凹槽后面的血肉墙，让最深处是纯黑
+    group.add(new THREE.Mesh(ribbonGeometry(apWallLBack, apWallRBack), flatMat(0x010000)));
+
+    // 天花板那条臂不挖深渊（眼睛在竖直段），用一条填实的暗带把开口封住，
+    // 否则透过开口会看到后面的天花板血肉。
+    addBand(ceilLeftEdge, ceilRightEdge, AP, 0, -0.028, matCore);
+
+    // ---- 触手：从裂缝边缘向外生长，把边界盖住 --------------------------
+    function growTentacle(start, dir, len, radius, mat) {
+      // 直角交汇区（|x|<0.95 且 y>=3.0 且 z<=-5.5）不放触手：亮红细管横在这儿
+      // 会把本该连续的黑裂口切断，看起来就像"几条小血管把转角切成几段"。
+      // 转角本身的接缝交给补片条带。
+      if (Math.abs(start[0]) < 0.95 && start[1] >= 3.0 && start[2] <= -5.5) return;
+      const pts = [new THREE.Vector3(start[0], start[1], start[2])];
+      const segs = 3 + Math.floor(RNG() * 3);      // 3~5 段
+      let px = start[0];
+      let py = start[1];
+      let pz = start[2];
+      let dx = dir[0];
+      let dy = dir[1];
+      let dz = dir[2];
+      for (let s = 1; s <= segs; s += 1) {
+        dx += (RNG() - 0.5) * 0.85;
+        dy += (RNG() - 0.5) * 0.60;
+        dz += (RNG() - 0.5) * 0.45 + 0.20;         // 略微朝教室内立起来
+        const m = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+        const step = len / segs;
+        px += (dx / m) * step;
+        py += (dy / m) * step;
+        pz += (dz / m) * step;
+        // 夹紧在房间内，避免钻到墙里或穿出天花板
+        px = Math.min(xMax - 0.25, Math.max(xMin + 0.25, px));
+        py = Math.min(CEIL_FACE_Y - 0.06, Math.max(0.05, py));
+        pz = Math.max(WALL_FACE_Z + 0.02, pz);
+        pts.push(new THREE.Vector3(px, py, pz));
+      }
+      const TS = 5;
+      const RS = 4;
+      const curve = new THREE.CatmullRomCurve3(pts);
+      const geo = new THREE.TubeGeometry(curve, TS, radius, RS, false);
+      // 沿长度加一条明暗渐变：根部暗、尖端亮，管子才有立体感
+      const cnt = geo.attributes.position.count;
+      const vcol = new Float32Array(cnt * 3);
+      for (let v = 0; v < cnt; v += 1) {
+        const seg = Math.floor(v / (RS + 1));
+        const k = 0.30 + 0.95 * (seg / TS);
+        vcol[v * 3] = k;
+        vcol[v * 3 + 1] = k;
+        vcol[v * 3 + 2] = k;
+      }
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(vcol, 3));
+      group.add(new THREE.Mesh(geo, mat));
+    }
+
+    // 材质池：复用，避免每根触手一个材质。
+    // 颜色必须比血肉墙底（约 RGB 58,20,26）明显更亮，否则 10 米外完全糊在墙上。
+    const tentMats = [];
+    for (let i = 0; i < 6; i += 1) tentMats.push(flatMatVC(fleshHex(0x6a, 0xa8)));
+    const pickTentMat = () => tentMats[Math.floor(RNG() * tentMats.length)];
+
+    // 前墙臂：左右两侧各撒一批。半径 3~8cm 才够在玩家站位处成像素。
+    for (let i = 1; i < wallSteps; i += 1) {
+      if (RNG() < 0.72) {
+        growTentacle(
+          wallLeftEdge[i], [-1, (RNG() - 0.5) * 0.9, 0.45],
+          0.20 + RNG() * 0.42, 0.030 + RNG() * 0.050, pickTentMat(),
+        );
+      }
+      if (RNG() < 0.72) {
+        growTentacle(
+          wallRightEdge[i], [1, (RNG() - 0.5) * 0.9, 0.45],
+          0.20 + RNG() * 0.42, 0.030 + RNG() * 0.050, pickTentMat(),
+        );
+      }
+    }
+    // 天花板臂：两侧各撒一批（朝下生长，别穿进天花板）
+    for (let i = 1; i < ceilSteps; i += 1) {
+      if (RNG() < 0.62) {
+        growTentacle(
+          ceilLeftEdge[i], [-1, -0.55, 0.25],
+          0.16 + RNG() * 0.34, 0.022 + RNG() * 0.026, pickTentMat(),
+        );
+      }
+      if (RNG() < 0.62) {
+        growTentacle(
+          ceilRightEdge[i], [1, -0.55, 0.25],
+          0.16 + RNG() * 0.34, 0.022 + RNG() * 0.026, pickTentMat(),
+        );
+      }
+    }
+    // 转角接缝不再补"竖直向上"的触手：那会在直角中心堆出一撮亮红疙瘩，
+    // 反而把连续的黑裂口切断。接缝交给下方的转角补片条带 + 后面贴天花板铺开的须。
+
+    // ---- 两端过渡：别让裂缝在上下界被"切一刀" --------------------------
+    // 下界（y=0 贴地板）：沿底边撒一圈，一半往地板里钻成铺开的根须，
+    // 一半沿墙根向左右两侧铺开，把裂缝口和地面血肉缝起来。
+    for (let k = 0; k <= 13; k += 1) {
+      const s = k / 13;
+      const L0 = wallLeftEdge[0];
+      const R0 = wallRightEdge[0];
+      const sx = L0[0] + (R0[0] - L0[0]) * s;
+      growTentacle(
+        [sx, 0.06 + RNG() * 0.05, CRACK_Z],
+        RNG() < 0.5
+          ? [(RNG() - 0.5) * 0.7, -0.75, 0.85]                           // 往地板里钻
+          : [(s < 0.5 ? -1 : 1) * 0.95, -0.30, 0.50],                     // 沿墙根铺开
+        0.30 + RNG() * 0.50,
+        0.038 + RNG() * 0.045,
+        pickTentMat(),
+      );
+    }
+    // 上界（转角，y≈CRACK_Y）：再补一圈贴着天花板铺开的须，
+    // 让竖缝顶端不是硬边，而是化进天花板血肉里。
+    for (let k = 0; k <= 6; k += 1) {
+      const s = k / 6;
+      const LT = wallLeftEdge[wallSteps];
+      const RT = wallRightEdge[wallSteps];
+      const sx = LT[0] + (RT[0] - LT[0]) * s;
+      growTentacle(
+        [sx, CRACK_Y + 0.015, CRACK_Z - 0.01],
+        [(RNG() - 0.5) * 1.1, 0.55, 0.60],
+        0.20 + RNG() * 0.34,
+        0.028 + RNG() * 0.030,
+        pickTentMat(),
+      );
+    }
+    // 天花板臂末端（z≈-3.39）：往教室内侧再铺一层，别在头顶断头
+    for (let k = 0; k <= 10; k += 1) {
+      const s = k / 10;
+      const LE = ceilLeftEdge[ceilSteps];
+      const RE = ceilRightEdge[ceilSteps];
+      const sx = LE[0] + (RE[0] - LE[0]) * s;
+      growTentacle(
+        [sx, CRACK_Y - 0.010, LE[2] - 0.02],
+        [(RNG() - 0.5) * 1.1, -0.40, 1.00],
+        0.26 + RNG() * 0.44,
+        0.030 + RNG() * 0.036,
+        pickTentMat(),
+      );
+    }
+
+    // ---- 沿边缘的肉芽：小、贴边，不散布到整面墙 ------------------------
+    const bumpMat = flatMat(0x5e0a0c);
+    for (let i = 0; i < 14; i += 1) {
+      let bx;
+      let by;
+      let bz;
+      if (i % 3 !== 0) {
+        const k = 1 + Math.floor(RNG() * (wallSteps - 1));
+        const side = RNG() > 0.5 ? wallLeftEdge[k] : wallRightEdge[k];
+        bx = side[0] + (RNG() - 0.5) * 0.04;
+        by = side[1];
+        bz = CRACK_Z + 0.02;
+      } else {
+        const k = 1 + Math.floor(RNG() * (ceilSteps - 1));
+        const side = RNG() > 0.5 ? ceilLeftEdge[k] : ceilRightEdge[k];
+        bx = side[0] + (RNG() - 0.5) * 0.04;
+        by = CRACK_Y - 0.015;
+        bz = side[2];
+      }
+      const rad = 0.022 + RNG() * 0.038;
+      const bump = new THREE.Mesh(new THREE.SphereGeometry(rad, 7, 5), bumpMat);
+      bump.position.set(bx, by, bz);
+      group.add(bump);
+    }
+
+    // ============ 裂缝深处：黑色巨脸 + 两只红色发光眼 ============
+    // 全部塞在开口后面那 9cm 凹槽里，最靠前的点不超过 FACE_FRONT(-5.941)；
+    // 眼睛前极 -5.894，仍比开口平面(-5.892)靠里，不凸出墙面。
+    const EYE_Y = 2.42;
+    // 半径比原来 +50%（0.058 → 0.087）。为了不凸出开口，球心相应后退到 -5.981，
+    // 这样前极 = -5.894，仍在开口平面(-5.892)之后。
+    const EYE_R = 0.087;
+    const EYE_Z = -5.981;
+    const EYE_DX = 0.19;
+    const FACE_FRONT = -5.941;
+
+    // 裂缝的中心线在眼睛高度上**不在 x=0**：墙臂那条
+    // `cx = sin(t*5.1+1.1)*0.14 + 抖动` 把它推到了约 -0.14。
+    // 眼睛若照 x=0 摆，右眼外缘(+0.25)会顶到开口右缘(约 +0.22)被洞壁切掉。
+    // 所以先取该高度处真正的中心线，整张脸 + 两眼都跟着它走。
+    function centerXAt(y) {
+      let best = 0;
+      let bestD = Infinity;
+      for (let i = 0; i < wallLeftEdge.length; i += 1) {
+        const d = Math.abs(wallLeftEdge[i][1] - y);
+        if (d < bestD) { bestD = d; best = i; }
+      }
+      return (wallLeftEdge[best][0] + wallRightEdge[best][0]) / 2;
+    }
+    const EYE_CX = centerXAt(EYE_Y);
+
+    const innerRoot = new THREE.Group();
+    innerRoot.position.x = EYE_CX;
+    group.add(innerRoot);
+
+    // 脸单独一层：可以整体做极缓慢的前后"呼吸"，不会带着眼睛一起动
+    const faceRoot = new THREE.Group();
+    innerRoot.add(faceRoot);
+
+    // ---- 黑色巨脸：极暗的几块板，只暗示"后面有个大东西" ----
+    // 用顶点色做"自上而下"的明暗：顶面略亮、底面更黑。
+    // 这样不靠灯光也能读出眉弓/鼻梁/颧骨的结构，同时整体仍然是近黑。
+    function faceShade(geo, bottomK, topK) {
+      const pos = geo.attributes.position;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (let i = 0; i < pos.count; i += 1) {
+        const y = pos.getY(i);
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      const span = maxY - minY;
+      const col = new Float32Array(pos.count * 3);
+      for (let i = 0; i < pos.count; i += 1) {
+        const t = span > 1e-6 ? (pos.getY(i) - minY) / span : 0.5;
+        const k = bottomK + (topK - bottomK) * t;
+        col[i * 3] = k;
+        col[i * 3 + 1] = k;
+        col[i * 3 + 2] = k;
+      }
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+      return geo;
+    }
+    const faceMat = flatMatVC(0x050303);
+    const faceHi = flatMatVC(0x0a0808);
+    function faceBox(w, h, d, x, y, frontZ, mat) {
+      const geo = faceShade(new THREE.BoxGeometry(w, h, d), 0.30, 1.35);
+      const m = new THREE.Mesh(geo, mat || faceMat);
+      m.position.set(x, y, frontZ - d / 2);
+      faceRoot.add(m);
+      return m;
+    }
+    // 主板（底）：比开口宽，被洞壁裁掉两侧 → 读作"一张大脸贴在洞后"
+    faceBox(1.15, 1.62, 0.020, 0, 2.42, -5.958);
+    // 颅顶
+    faceBox(1.00, 0.30, 0.020, 0, 2.95, -5.958);
+    // 眉弓（左右）：下沿 2.5175，要压在眼球顶(2.507)之上
+    faceBox(0.34, 0.085, 0.017, -0.20, 2.56, FACE_FRONT);
+    faceBox(0.34, 0.085, 0.017, 0.20, 2.56, FACE_FRONT);
+    // 鼻梁：x 只有 ±0.055，离眼睛(内缘 0.103)还远
+    faceBox(0.11, 0.44, 0.014, 0, 2.33, -5.943);
+    // 颧骨：往外下方挪（原 2.30/±0.33 会压到眼球下外侧）
+    faceBox(0.26, 0.15, 0.014, -0.36, 2.24, -5.945);
+    faceBox(0.26, 0.15, 0.014, 0.36, 2.24, -5.945);
+    // 下颌：加宽到 0.95，让那条咧嘴正好落在颌骨上
+    faceBox(0.95, 0.20, 0.018, 0, 1.92, -5.956);
+
+    // ---- 眼睛 ----
+    const eyesRoot = new THREE.Group();
+    eyesRoot.position.set(0, EYE_Y, EYE_Z);
+    innerRoot.add(eyesRoot);
+
+    const eyeBase = new THREE.Color(0xff2030);
+    const eyeMat = new THREE.MeshBasicMaterial({
+      color: eyeBase.clone(),
+      toneMapped: false,      // 不加这句，ACES 会把红压成灰
+    });
+    const eyeGeo = new THREE.SphereGeometry(EYE_R, 16, 12);
+    const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
+    eyeL.position.set(-EYE_DX, 0, 0);
+    const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
+    eyeR.position.set(EYE_DX, 0, 0);
+    eyesRoot.add(eyeL, eyeR);
+
+    // 光晕：加性混合、不写深度，只往周围染红，不产生几何轮廓
+    const haloMat = new THREE.MeshBasicMaterial({
+      color: 0xff2434,
+      transparent: true,
+      opacity: 0.18,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const haloGeo = new THREE.SphereGeometry(EYE_R * 1.9, 12, 10);
+    const haloL = new THREE.Mesh(haloGeo, haloMat);
+    haloL.position.copy(eyeL.position);
+    const haloR = new THREE.Mesh(haloGeo, haloMat);
+    haloR.position.copy(eyeR.position);
+    eyesRoot.add(haloL, haloR);
+
+    // 红色点光。注意：裂缝与整面血肉墙都是 MeshBasicMaterial（不吃光），
+    // 所以这盏灯真正照亮的是教室的课桌/地板，让屋里也染上红光。
+    const eyeLight = new THREE.PointLight(0xff2233, 1.2, 3.2, 2);
+    eyeLight.position.set(0, 0, 0.03);
+    eyesRoot.add(eyeLight);
+
+    // ============ 咧嘴笑：横在眼睛下方的一排牙 ============
+    // 上一版把牙排在眼睛左右（竖着的一张"口"），看起来像伤口上长的刺。
+    // 这一版改成横在眼睛下面的咧嘴：两排牙分别朝下/朝上，交错咬合，嘴角上扬。
+    //
+    // 位置约束（实测得出，别随手改）：
+    //  · 笑口最高处在嘴角：y = 1.94 + 0.20 = 2.14，上排牙根再 +0.115 → 2.255，
+    //    而眼球下沿是 2.42 - 0.087 = 2.333，还差 0.078 —— 不会咬到眼睛；
+    //  · 裂缝三层环在 z = -5.892 ~ -5.92，牙压在 -5.885 之前，否则会被环挡住；
+    //  · 半宽 0.46×0.94 ≈ 0.43，正好卡在 y≈1.94 处开口半宽 0.46 之内 —— 咧满整个洞。
+    const teethRoot = new THREE.Group();
+    innerRoot.add(teethRoot);
+    const toothMat = flatMatVC(0x4a2a20);
+    const upVec = new THREE.Vector3(0, 1, 0);
+
+    const GRIN_Y0 = 1.94;        // 笑口中央（最低处）
+    const GRIN_LIFT = 0.20;      // 嘴角比中央抬高多少（决定"咧"的程度）
+    const GRIN_HALF = 0.46;      // 半宽
+    const GRIN_Z = -5.885;
+    const grinY = (u) => GRIN_Y0 + GRIN_LIFT * u * u;   // 抛物线：中间低、两边高
+
+    function addTooth(x, yBase, yTip, radius) {
+      const base = new THREE.Vector3(x, yBase, GRIN_Z + (RNG() - 0.5) * 0.006);
+      const tip = new THREE.Vector3(x * 0.985, yTip, GRIN_Z + 0.014 + (RNG() - 0.5) * 0.006);
+      const dir = new THREE.Vector3().subVectors(tip, base);
+      const len = dir.length();
+      dir.normalize();
+      // 复用脸的明暗函数：锥体 apex 在局部 +Y，所以牙尖自然更亮
+      const geo = faceShade(new THREE.ConeGeometry(radius, len, 7), 0.75, 2.0);
+      const tooth = new THREE.Mesh(geo, toothMat);
+      tooth.position.copy(base).addScaledVector(dir, len / 2);
+      tooth.quaternion.setFromUnitVectors(upVec, dir);
+      teethRoot.add(tooth);
+    }
+
+    // 上排：牙根在上、牙尖朝下
+    const UPPER_TEETH = 9;
+    for (let k = 0; k < UPPER_TEETH; k += 1) {
+      const u = -1 + (2 * k) / (UPPER_TEETH - 1);
+      const y = grinY(u) + (RNG() - 0.5) * 0.012;
+      addTooth(u * GRIN_HALF * 0.94, y + 0.115, y - 0.030, 0.028 + RNG() * 0.012);
+    }
+    // 下排：牙根在下、牙尖朝上，与上排错开半格形成咬合
+    const LOWER_TEETH = 8;
+    for (let k = 0; k < LOWER_TEETH; k += 1) {
+      const u = -1 + (2 * k + 1) / LOWER_TEETH;
+      const y = grinY(u) + (RNG() - 0.5) * 0.012;
+      addTooth(u * GRIN_HALF * 0.94, y - 0.125, y + 0.040, 0.026 + RNG() * 0.012);
+    }
+
+    // ---- 拍照命中球 ----
+    // 整个 group 不再挂 anomalyLevel，只有这个球带标签：
+    // 必须瞄到眼睛才算拍到。visible=false 不影响射线
+    // （three.js 的 intersect() 只判 layers，不判 visible）。
+    const hitbox = new THREE.Mesh(
+      new THREE.SphereGeometry(0.65, 8, 6),
+      new THREE.MeshBasicMaterial(),
+    );
+    hitbox.visible = false;
+    hitbox.position.set(EYE_CX, EYE_Y, EYE_Z + 0.05);
+    group.add(hitbox);            // 挂在 group 上而不是 eyesRoot，免得被心跳缩放影响
+    tagAnomaly(hitbox, 5, 'flesh-eyes');
+
+    // 交出引用给外层的 update() / onPhoto()
+    eyeRig = {
+      root: eyesRoot,
+      face: faceRoot,
+      teeth: teethRoot,
+      mat: eyeMat,
+      base: eyeBase,
+      halo: haloMat,
+      light: eyeLight,
+      cx: EYE_CX,
+      z0: EYE_Z,
+      fade: 0,
+      fadeActive: false,
+      breathT: 2.6,      // 进关后 2.6 秒来第一口"呼吸"
+    };
+  })();
 
   // ========== 3. 立体血管（TubeGeometry，贴附天花板和上半墙） ==========
   const veins = [];
@@ -1512,8 +2144,16 @@ function createFleshWall() {
     const nSegs = 3 + Math.floor(rng() * 4);
 
     if (surface === 0) {
-      const cx = xMin + 1 + rng() * (xMax - xMin - 2);
-      const cz = zMin + 1 + rng() * (zMax - zMin - 2);
+      let cx = xMin + 1 + rng() * (xMax - xMin - 2);
+      let cz = zMin + 1 + rng() * (zMax - zMin - 2);
+      // 裂缝占的这一片（x±3.8、z<-2.9）不放血管：否则天花板血管会从裂缝条带里
+      // 穿出来，在 L 形直角转角处把裂口切成看起来不连贯的几段。
+      if (Math.abs(cx) < 3.8 && cz < -2.9) {
+        cx = cx >= 0
+          ? Math.min(xMax - 1.5, cx + 4.4)
+          : Math.max(xMin + 1.5, cx - 4.4);
+        cz = Math.max(0.5, Math.min(zMax - 1.5, cz + 6.0));
+      }
       const dir = rng() * Math.PI * 2;
       const len = 1 + rng() * 2;
       for (let j = 0; j <= nSegs; j++) {
@@ -1522,12 +2162,18 @@ function createFleshWall() {
         const rad = t * len;
         pts.push(new THREE.Vector3(
           cx + Math.cos(angle) * rad,
-          yCeil - 0.01,
+          yCeil - 0.06,                       // 抬到裂缝条带之上：被翻边挡住而不是穿出来
           cz + Math.sin(angle) * rad,
         ));
       }
     } else if (surface === 1) {
-      const x0 = xMin + 0.5 + rng() * (xMax - xMin - 1);
+      let x0 = xMin + 0.5 + rng() * (xMax - xMin - 1);
+      // 前墙血管也避开裂缝正后方，免得从撕裂口的锯齿缝里透出来
+      if (Math.abs(x0) < 3.8) {
+        x0 = x0 >= 0
+          ? Math.min(xMax - 1.2, x0 + 4.4)
+          : Math.max(xMin + 1.2, x0 - 4.4);
+      }
       const y0 = 0.1 + rng() * (yCeil - 0.2);
       const dir = rng() * Math.PI * 2;
       const len = 0.5 + rng() * 1.2;
@@ -1537,8 +2183,8 @@ function createFleshWall() {
         const dy = Math.sin(dir * 0.6 + t * 0.7 + Math.cos(t * Math.PI * 1.3) * 0.3) * t * len * 0.6;
         pts.push(new THREE.Vector3(
           x0 + dx,
-          Math.max(0, Math.min(yCeil, y0 + dy)),
-          zMin + 0.01,
+          Math.max(0, Math.min(yCeil - 0.12, y0 + dy)),
+          zMin + 0.05,
         ));
       }
     } else if (surface === 2) {
@@ -1551,8 +2197,8 @@ function createFleshWall() {
         const dz = Math.cos(dir + t * 1.2 + Math.sin(t * Math.PI) * 0.4) * t * len;
         const dy = Math.sin(dir * 0.6 + t * 0.7 + Math.cos(t * Math.PI * 1.3) * 0.3) * t * len * 0.6;
         pts.push(new THREE.Vector3(
-          xMin + 0.01,
-          Math.max(0, Math.min(yCeil, y0 + dy)),
+          xMin + 0.05,
+          Math.max(0, Math.min(yCeil - 0.12, y0 + dy)),
           z0 + dz,
         ));
       }
@@ -1566,8 +2212,8 @@ function createFleshWall() {
         const dz = Math.cos(dir + t * 1.2 + Math.sin(t * Math.PI) * 0.4) * t * len;
         const dy = Math.sin(dir * 0.6 + t * 0.7 + Math.cos(t * Math.PI * 1.3) * 0.3) * t * len * 0.6;
         pts.push(new THREE.Vector3(
-          xMax - 0.01,
-          Math.max(0, Math.min(yCeil, y0 + dy)),
+          xMax - 0.05,
+          Math.max(0, Math.min(yCeil - 0.12, y0 + dy)),
           z0 + dz,
         ));
       }
@@ -1621,21 +2267,32 @@ function createFleshWall() {
   }
 
   // ========== 4. 毛细血管网 ==========
+  // 注意：裂缝那一带（x±3.8、z<-2.9）不铺毛细血管。它们是一堆亮红细线段，
+  // 正好横在 L 形直角转角那个高度上，会把连续的黑裂口切成看起来不连贯的几段。
   const capPoints = [];
   const capCount = 200;
   for (let i = 0; i < capCount; i++) {
     const sx = xMin + rng() * (xMax - xMin);
     const sz = zMin + rng() * (zMax - zMin);
-    capPoints.push(sx, yCeil - 0.005, sz);
     const angle = rng() * Math.PI * 2;
     const len = 0.05 + rng() * 0.15;
-    capPoints.push(sx + Math.cos(angle) * len, yCeil - 0.005, sz + Math.sin(angle) * len);
+    const ex = sx + Math.cos(angle) * len;
+    const ez = sz + Math.sin(angle) * len;
+    if (Math.abs(sx) < 3.8 && sz < -2.9) continue;
+    if (Math.abs(ex) < 3.8 && ez < -2.9) continue;
+    capPoints.push(sx, yCeil - 0.09, sz);
+    capPoints.push(ex, yCeil - 0.09, ez);
   }
   const capGeo = new THREE.BufferGeometry();
   capGeo.setAttribute('position', new THREE.Float32BufferAttribute(capPoints, 3));
   const capLines = new THREE.LineSegments(capGeo, new THREE.LineBasicMaterial({
     color: 0x4a0a12, transparent: true, opacity: 0.25,
   }));
+  // 毛细血管必须标 noRay：LineSegments 在 three.js 里按"到射线的距离"判命中，
+  // 默认阈值 1 米（raycaster.params.Line.threshold）。它铺满整个天花板，
+  // 拍照射线会在 0 米处被它挡住 → level.aim() 遇到第一个非 noRay 命中就返回
+  // none，整关根本拍不过。
+  capLines.userData.noRay = true;
   group.add(capLines);
 
   // ========== 5. 血雾粒子 ==========
@@ -1656,17 +2313,23 @@ function createFleshWall() {
     color: 0x3a0a12, size: 0.03, transparent: true, opacity: 0.08,
     depthWrite: false, blending: THREE.AdditiveBlending,
   });
+  // 血雾同理：Points 的射线阈值也是 1 米，粒子铺满整个房间，
+  // 不标 noRay 的话射线在离相机 0 米处就被吸住，拍照永远判 none。
   const mistPoints = new THREE.Points(mistGeo, mistMat);
+  mistPoints.userData.noRay = true;
   group.add(mistPoints);
   const mistMat2 = new THREE.PointsMaterial({
     color: 0x5a1020, size: 0.06, transparent: true, opacity: 0.12,
     depthWrite: false, blending: THREE.AdditiveBlending,
   });
   const mistPoints2 = new THREE.Points(mistGeo.clone(), mistMat2);
+  mistPoints2.userData.noRay = true;
   group.add(mistPoints2);
 
   // ========== 标签 ==========
-  tag(group, 5, 'flesh-wall');
+  // 注意：group 本身**不挂** anomalyLevel。拍照目标已经收窄到裂缝里的眼睛
+  // （命中球在 addCrackAndTentacles 里单独 tagAnomaly），所以瞄墙面不再算过关。
+  group.name = 'anomaly-flesh-wall';
 
   // ========== 状态变量 ==========
   let photoReactActive = false;
@@ -1678,7 +2341,10 @@ function createFleshWall() {
     id: 'flesh-wall',
     group,
     stand: { x: 0, z: 4.2 },
-    aimY: 3.15,
+    // 瞄准点改成眼睛所在的位置（level.js 的 getAnomalyAimPoint 支持完整 xyz）
+    // 瞄准点跟着眼睛走（裂缝中心线在眼睛高度上偏左约 0.14，不能写死 x=0）
+    aim: { x: eyeRig ? eyeRig.cx : 0, y: 2.42, z: -5.95 },
+    aimY: 2.42,
     update(dt, env) {
       const flicker = env.flickerDark ?? false;
       const time = env.time ?? 0;
@@ -1690,6 +2356,11 @@ function createFleshWall() {
       if (ceilTexture) {
         ceilTexture.offset.y = -flowTime * 0.7;
         ceilTexture.offset.x = 0;
+      }
+      // 门那块墙的各分片有各自的纹理，要同步流动，否则会有一块不动
+      for (const tex of doorTextures) {
+        tex.offset.y = -flowTime;
+        tex.offset.x = 0;
       }
 
       // ---- 天花板呼吸起伏 ----
@@ -1732,6 +2403,61 @@ function createFleshWall() {
       }
       pos.needsUpdate = true;
 
+      // ---- 裂缝里的眼睛：待机心跳/扫视，拍后往深处淡去 ----
+      if (eyeRig) {
+        if (eyeRig.fadeActive) {
+          eyeRig.fade = Math.min(1, eyeRig.fade + dt / 1.6);
+        }
+        const f = eyeRig.fade;
+        if (f > 0) {
+          const k = 1 - f;
+          eyeRig.mat.color.copy(eyeRig.base).multiplyScalar(k);
+          eyeRig.halo.opacity = 0.18 * k;
+          eyeRig.light.intensity = 1.2 * k;
+          eyeRig.root.scale.setScalar(1 - 0.55 * f);
+          eyeRig.root.position.z = eyeRig.z0 - 0.018 * f;   // 往裂缝深处退
+          if (f >= 1 && eyeRig.root.visible) eyeRig.root.visible = false;
+        } else {
+          // 心跳缩放 + 极慢的左右扫视，避免"死盯"的假感
+          eyeRig.root.scale.setScalar(1 + 0.06 * Math.sin(time * 2.4));
+          eyeRig.root.position.x = Math.sin(time * 0.32) * 0.012;
+          eyeRig.halo.opacity = (flicker ? 0.27 : 0.18) + 0.05 * Math.sin(time * 2.3);
+          eyeRig.light.intensity = flicker ? 1.7 : 1.2;
+        }
+
+        // 尖牙缓慢开合（方案 B）：两排整体各向外扩/收约 ±2cm，周期 6.5 秒；
+        // 灯灭时张幅 +50%（呼吸变重）。
+        if (eyeRig.teeth) {
+          const openAmp = flicker ? 0.052 : 0.035;
+          eyeRig.teeth.scale.x = 1 + Math.sin(time * 0.966) * openAmp;
+        }
+
+        // 脸极缓慢地前后"呼吸"（±1cm，周期约 7.3 秒）：眼睛不动、脸在靠近。
+        // 这是"黑暗里有个大东西在呼吸"最省成本的写法，比加牙更符合"未知"。
+        if (eyeRig.face) {
+          const amp = flicker ? 0.014 : 0.010;
+          eyeRig.face.position.z = Math.sin(time * 0.86) * amp;
+        }
+
+        // 低频呼吸声：约每 5 秒一次，越靠近裂口越响（env 里带 audio 与玩家坐标）
+        if (env.phase === 'level' && env.levelIndex === 5 && !eyeRig.fadeActive) {
+          eyeRig.breathT -= dt;
+          if (eyeRig.breathT <= 0) {
+            eyeRig.breathT = 5.0 + Math.random() * 1.4;
+            const bx = (env.playerX ?? 0) - eyeRig.cx;
+            const bz = (env.playerZ ?? 0) - eyeRig.z0;
+            const dist = Math.sqrt(bx * bx + bz * bz);
+            const k = Math.max(0, Math.min(1, 1 - (dist - 1.5) / 9));
+            if (k > 0.02 && env.audio) {
+              const g = 0.070 * k;
+              env.audio.burst({ duration: 2.9, gain: g, type: 'lowpass', freq: 150, q: 0.5 });
+              env.audio.burst({ duration: 2.1, gain: g * 0.55, type: 'bandpass', freq: 330, q: 0.8, delay: 0.3 });
+              env.audio.tone(45, 1.7, g * 0.5, 'sine');
+            }
+          }
+        }
+      }
+
       // ---- 拍照后反应 ----
       if (photoReactActive) {
         photoReactT += dt;
@@ -1746,6 +2472,8 @@ function createFleshWall() {
     onPhoto() {
       photoReactActive = true;
       photoReactT = 0;
+      // 眼睛开始往裂缝深处淡去（低吼与镜头颤抖在 game.js 的 succeedPhoto 里）
+      if (eyeRig) eyeRig.fadeActive = true;
     },
   };
 }

@@ -387,7 +387,11 @@ export class Level {
     let added = false;
     for (let level = 1; level <= count; level += 1) {
       if (this.anomalies.some((item) => item.level === level)) continue;
-      const anomaly = createAnomaly(level);
+      // 预建缓存优先：第 5 关那种重场景可以提前建好（比如玩家还在菜单/走廊时），
+      // 避免进屋那一刻才建 1000+ 网格和 512² 血肉纹理造成掉帧。
+      let anomaly = this.prewarmed ? this.prewarmed.get(level) : null;
+      if (anomaly) this.prewarmed.delete(level);
+      else anomaly = createAnomaly(level);
       if (anomaly.parent === 'door') this.doorPivot.add(anomaly.group);
       else this.scene.add(anomaly.group);
       this.anomalies.push(anomaly);
@@ -397,18 +401,38 @@ export class Level {
     if (added) this.onSceneChanged?.();
   }
 
+  /**
+   * 预建某一关的异常，但**不挂进场景**。
+   * 之后 spawnUpTo 会直接取用这份缓存，于是"建场景"的开销被挪到了玩家看不到的地方。
+   */
+  prewarm(level) {
+    if (!this.prewarmed) this.prewarmed = new Map();
+    if (this.anomalies.some((item) => item.level === level)) return;
+    if (this.prewarmed.has(level)) return;
+    this.prewarmed.set(level, createAnomaly(level));
+  }
+
   clearAnomalies() {
     for (const anomaly of this.anomalies) {
       anomaly.group.removeFromParent();
       disposeObject(anomaly.group);
     }
     this.anomalies = [];
+    // 预建但还没入场的也必须一起释放，否则 reset 之后既泄漏、又可能复用到已 dispose 的网格。
+    if (this.prewarmed && this.prewarmed.size) {
+      for (const anomaly of this.prewarmed.values()) disposeObject(anomaly.group);
+      this.prewarmed.clear();
+    }
   }
 
   getAnomalyAimPoint(level) {
     const anomaly = this.anomalies.find((item) => item.level === level);
     if (!anomaly) return null;
-    return anomaly.group.localToWorld(new THREE.Vector3(0, anomaly.aimY ?? 0, 0));
+    // 支持异常自带完整瞄准点：第 5 关的眼睛在前墙上，只给 aimY 拿不到 z。
+    const local = anomaly.aim
+      ? new THREE.Vector3(anomaly.aim.x, anomaly.aim.y, anomaly.aim.z)
+      : new THREE.Vector3(0, anomaly.aimY ?? 0, 0);
+    return anomaly.group.localToWorld(local);
   }
 
   getAnomalyStand(level) {

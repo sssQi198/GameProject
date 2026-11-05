@@ -527,6 +527,11 @@ export class Game {
     this.level.setDoorOpen(true);
     this.hud.setObjective(copy.backToDoor);
     this.say(copy.corridorLoop, 2.6);
+    // 走出教室后就把第 5 关的血肉教室挂进场景：
+    // ① 玩家在走廊里回头/透过窗看到的就是血肉模式，而不是进屋才变；
+    // ② 建场景 + 生成血肉纹理 + 新增点光的着色器编译，全部挪到走路的时候。
+    // 此刻玩家在 z>7.35、背对教室往前走，变身的瞬间照不到。
+    if (this.levelIndex === LEVELS - 1) this.level.spawnUpTo(this.levelIndex + 1);
   }
 
   beginFinale() {
