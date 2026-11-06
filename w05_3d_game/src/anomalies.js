@@ -1313,13 +1313,17 @@ function createFleshWall() {
   ceil.position.set(0, yCeil - 0.04, (zMin + zMax) / 2);  // 原教室天花板底面在 y=3.20，这里 3.16，留 4cm
   group.add(ceil);
 
-  // 2b) 地板（保持暗色）—— 用独立几何体，绝不复用天花板几何体
+  // 2b) 地板：整片血肉覆盖。
+  //     y 必须高于教室自带地板的 0.03（level.js:813 的 roomFloor），
+  //     原来放在 0.01 是**压在木地板底下**的 —— 所以玩家一直看到的其实是木地板。
+  //     染色也从近黑 0x1a080a 改成不提色（白色 = 与墙面同一份血肉），
+  //     想让地板比墙暗一档，把下一行的注释打开即可。
   const floorMat = fleshMat.clone();
-  floorMat.color.setHex(0x1a080a);
+  // floorMat.color.setHex(0xb49a92);   // 想暗一档就打开这行
   const floorGeo = new THREE.PlaneGeometry(xMax - xMin, zMax - zMin);
   floorGeo.rotateX(-Math.PI / 2);
   const floor = new THREE.Mesh(floorGeo, floorMat);
-  floor.position.set(0, 0.01, (zMin + zMax) / 2);
+  floor.position.set(0, 0.04, (zMin + zMax) / 2);
   group.add(floor);
 
   // 门参数

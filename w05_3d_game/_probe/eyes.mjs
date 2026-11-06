@@ -236,6 +236,36 @@ if (teeth.length) {
 }
 log('');
 
+// ================= 3c. 地板血肉 =================
+log('=== 3c. 地板 ===');
+// 教室自带地板在 y = 0.03（level.js:813 roomFloor），血肉地板必须压在它上面，
+// 否则玩家看到的是木地板（这就是之前「地板不像血肉」的真正原因）。
+const ROOM_FLOOR_Y = 0.03;
+let floorMesh = null;
+group.traverse((o) => {
+  if (!o.isMesh || !o.material || !o.material.map) return;
+  if (o.geometry.type !== 'PlaneGeometry') return;
+  const p = o.geometry.parameters;
+  const bb = (o.geometry.computeBoundingBox(), o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld));
+  if (Math.abs((bb.max.y - bb.min.y)) > 0.01) return;          // 只看水平的
+  if (Math.abs((bb.max.x - bb.min.x) - (LAYOUT.room.maxX - LAYOUT.room.minX)) > 0.2) return;
+  if (Math.abs((bb.max.z - bb.min.z) - (LAYOUT.room.maxZ - LAYOUT.room.minZ)) > 0.2) return;
+  if (bb.min.y < 0.2) floorMesh = { bb, mat: o.material, p };
+});
+check(!!floorMesh, '找到地板网格');
+if (floorMesh) {
+  const fy = (floorMesh.bb.min.y + floorMesh.bb.max.y) / 2;
+  log('  地板 y = ' + fy.toFixed(3) + '（教室自带地板 y = ' + ROOM_FLOOR_Y + '）');
+  check(fy > ROOM_FLOOR_Y + 0.005, '血肉地板在木地板之上（不会被压住）');
+  const c = floorMesh.mat.color;
+  const cHex = c.getHex();
+  const isWhite = Math.abs(c.r - 1) < 0.01 && Math.abs(c.g - 1) < 0.01 && Math.abs(c.b - 1) < 0.01;
+  log('  地板 material.color = ' + hexStr(cHex) + (isWhite ? '（白 = 与墙面同一份血肉）' : '（有染色）'));
+  check(isWhite, '地板没有染成近黑（0x1a080a 那种会让血肉看不见）');
+  check(!!floorMesh.mat.map, '地板带血肉贴图');
+}
+log('');
+
 // ================= 4. 拍照判定 =================
 log('=== 4. 拍照判定 ===');
 check(!group.userData?.anomalyLevel, 'group 本身不带 anomalyLevel（瞄墙面不该过关）');

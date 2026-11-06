@@ -131,7 +131,14 @@ const tris = [];
       else if (type === 'SphereGeometry' && geo.parameters && geo.parameters.radius < 0.09) id = 6;
     }
     let cr; let cg; let cb;
-    if (hasMap) { cr = 58; cg = 20; cb = 26; } else { cr = (hex >> 16) & 255; cg = (hex >> 8) & 255; cb = bl; }
+    if (hasMap) {
+      // 贴图材质的实际颜色 = 贴图 × material.color（线性相乘后再回 sRGB）。
+      // 之前这里硬编码成 (58,20,26)，于是「染成近黑的地板」也被画成和墙一样亮，
+      // 完全看不出染色差异。现在按 material.color 换算（t 是线性值，要过 1/2.2）。
+      const t = mat.color;
+      const k = (v) => Math.pow(Math.max(0, Math.min(1, v)), 1 / 2.2);
+      cr = 58 * k(t.r); cg = 20 * k(t.g); cb = 26 * k(t.b);
+    } else { cr = (hex >> 16) & 255; cg = (hex >> 8) & 255; cb = bl; }
     if (id === 3) { cr = 26; cg = 3; cb = 4; }
     if (id === 4) { cr = 2; cg = 0; cb = 0; }
     // 半透明材质：近似成"和背后血肉色混合"，否则预览会把 55% 不透明度的
@@ -315,3 +322,4 @@ run('C 近景：(0,1.62,-2.5) 仰视裂缝与天花板臂', [0, 1.62, -2.5], [0,
 run('D 底部：低头看裂缝与地板的过渡', [0, 1.62, -3.2], [0, 0.55, -5.9], 960, 540, 74, ROOT + '\\_finalD.png');
 run('E 走廊：从 z=8.6 看后墙（窗洞应透出黑色）', [0, 1.62, 8.6], [0, 1.60, 6.0], 960, 540, 70, ROOT + '\\_finalE.png');
 run('F 眼睛特写：fov26 从 (0,1.62,0.5) 看眼睛', [0, 1.62, 0.5], [0, 2.42, -5.95], 960, 540, 26, ROOT + '\\_finalF.png');
+run('G 地板：站在教室中间低头看地板血肉', [0, 1.62, 2.6], [0, 0.0, -0.6], 960, 540, 72, ROOT + '\\_finalG.png');
