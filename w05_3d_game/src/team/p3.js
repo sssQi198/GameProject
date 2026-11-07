@@ -11,6 +11,103 @@
  */
 import { EVENT } from './contract.js';
 import { on } from './bus.js';
+import { CONFIG } from '../config.js';
+
+/**
+ * 终局追逐的“越近越压迫”反馈，作用在背景音乐和屏幕上：
+ * - 背景音乐（horror-music.mp4 循环）整体调高音量；
+ * - 追逐时怪物越近，背景音乐越响；
+ * - 屏幕叠加一层红色径向光，越近越浓。
+ * 全部挂在 p3 的每帧 tick 钩子上，不改 game.js / audio.js / hud.js。
+ */
+const PROX_FAR = 10;            // 从这个距离开始有亲密度加成（更早进入变化）
+const PROX_NEAR = 1.45;         // 被抓的距离，加成拉满
+const MUSIC_GAIN_MULT = 2.0;    // 背景音乐整体倍率（调高 BGM，原 0.18/0.23 → 0.36/0.46）
+const PROX_MUSIC_ADD = 0.40;    // 追逐时，怪物越近额外增加的音乐增益（越近越响，更明显）
+const MUSIC_GAIN_MAX = 1.0;     // 音乐增益上限，防止与其它层叠加削顶
+
+let proxOverlay = null;         // 惰性创建的红光遮罩层
+let proxDisplay = 0;            // 平滑后的亲密度（越近越大）
+
+/** 与 audio.js setMood 的音乐音量保持一致：menu 0.12 / chase 0.23 / 其余 0.18。 */
+function musicBase(mood) {
+  if (mood === 'menu') return 0.12;
+  if (mood === 'chase') return 0.23;
+  return 0.18;
+}
+
+/** 每帧把背景音乐音量定到目标值：基础音量 × 倍率，追逐时再按距离叠加。 */
+function stepMusicGain(env, p) {
+  const audio = env.audio;
+  if (!audio?.musicGain || !audio.ctx) return; // 尚未 unlock，还没有音乐节点
+  let target = musicBase(env.mood) * MUSIC_GAIN_MULT;
+  if (env.mood === 'chase') target += p * PROX_MUSIC_ADD;
+  target = Math.min(target, MUSIC_GAIN_MAX);
+  audio.musicGain.gain.setTargetAtTime(target, audio.ctx.currentTime, 0.08);
+}
+
+/** 屏幕上的红光：越近越浓。用 screen 混合，呈“红色灯光逼近”的加色效果。 */
+function ensureProxOverlay() {
+  if (proxOverlay) return proxOverlay;
+  const el = document.createElement('div');
+  el.setAttribute('aria-hidden', 'true');
+  el.style.position = 'fixed';
+  el.style.inset = '0';
+  el.style.zIndex = '1';
+  el.style.pointerEvents = 'none';
+  el.style.mixBlendMode = 'screen';
+  el.style.background = 'radial-gradient(ellipse at center, rgba(150,8,8,0) 30%, rgba(200,0,0,0.85) 100%)';
+  el.style.opacity = '0';
+  document.body.appendChild(el);
+  proxOverlay = el;
+  return el;
+}
+
+function stepProxOverlay(p) {
+  if (p <= 0.0005 && !proxOverlay) return; // 未逼近前不创建
+  const el = ensureProxOverlay();
+  const value = Math.round(Math.max(0, Math.min(1, p)) * 200) / 200;
+  if (el._prox === value) return;
+  el._prox = value;
+  el.style.opacity = String(value);
+}
+
+/** 追逐阶段里，越近 target 越大；其余阶段归 0。 */
+function proximityTarget(level, env) {
+  if (env.phase !== 'finaleChase') return 0;
+  const dx = env.playerX - level.entity.position.x;
+  const dz = env.playerZ - level.entity.position.z;
+  const dist = Math.hypot(dx, dz);
+  return Math.min(1, Math.max(0, (PROX_FAR - dist) / (PROX_FAR - PROX_NEAR)));
+}
+
+/** 每帧把“迫近压迫感”平滑推进，再分别作用到背景音乐音量和屏幕红光上。 */
+function stepProximity(level, dt, env) {
+  const target = proximityTarget(level, env);
+  const k = 1 - Math.exp(-6 * dt);
+  proxDisplay += (target - proxDisplay) * k;
+  stepMusicGain(env, proxDisplay);
+  stepProxOverlay(proxDisplay);
+}
+
+/**
+ * 「注视」阶段一开始，就把怪物再往后放约 1 秒的追逐脚程，多给玩家反应时间。
+ * placeEntity 把怪物放在 player.x - entityGap（z 相同，y=0）。这里只沿 X 把它再推远
+ * entitySpeed 米（≈ 怪物 1 秒的路程），z 和 y 不动，因此强制注视的方向不变，只是更远。
+ */
+let finaleEntityPushed = false;
+
+function pushFinaleEntityBack(level, env) {
+  if (env.phase !== 'finaleLook') {
+    finaleEntityPushed = false;
+    return;
+  }
+  if (finaleEntityPushed || !level.entity) return;
+  finaleEntityPushed = true;
+  const dx = level.entity.position.x - env.playerX;
+  const sign = dx === 0 ? -1 : Math.sign(dx);
+  level.entity.position.x = env.playerX + sign * (CONFIG.entityGap + CONFIG.entitySpeed);
+}
 
 /** 一轮里被抽中的灯一起灭、一起亮。灭的时长只决定“闪一下”好不好认，不占 1–3 秒的轮间隔。 */
 const FLICKER_GAP_MIN = 1;
@@ -187,6 +284,9 @@ function stepCurtain(gust, step) {
 }
 
 export function tick(level, dt, env) {
+  pushFinaleEntityBack(level, env);
+  stepProximity(level, dt, env);
+
   const cloth = level.materials?.curtainSoft?.userData;
   if (!cloth?.uTime || !cloth?.uAmp) return;
   cloth.uTime.value = env.time;
