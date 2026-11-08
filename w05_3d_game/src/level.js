@@ -175,6 +175,11 @@ export class Level {
     this.npcDoorReopen = false;
     this.npc.visible = false;
     this.setNpcOpacity(1);
+    // 红眼属于「最后一幕」的一次性演出，重开必须收回，否则下一局同学一出现就带着红眼
+    this.npcEyesOn = false;
+    this.npcFacingPlayer = false;
+    if (this.npcEyes) this.npcEyes.visible = false;
+    if (this.npcEyeLight) this.npcEyeLight.intensity = 0;
     this.entity.visible = false;
     this.entityLight.intensity = 0;
     this.exitSign.visible = false;
@@ -525,10 +530,11 @@ export class Level {
     this.npcFacingPlayer = !!toPlayer;
   }
 
-  /** 尾声：同学脸上的红眼开 / 关。 */
+  /** 尾声：同学脸上的红眼开 / 关。只有转身面对玩家时才会真的显示。 */
   showClassmateEyes(on) {
+    this.npcEyesOn = !!on;
     if (!this.npcEyes) return;
-    const visible = !!on;
+    const visible = this.npcEyesOn && !!this.npcFacingPlayer;
     this.npcEyes.visible = visible;
     if (this.npcEyeLight) this.npcEyeLight.intensity = visible ? 0.45 : 0;
   }
@@ -708,6 +714,13 @@ export class Level {
       if (typeof this.npcSmoothYaw !== 'number' || wasHidden) this.npcSmoothYaw = targetYaw;
       this.npcSmoothYaw = shortestTurn(this.npcSmoothYaw, targetYaw, dt * 2.4);
       this.npc.rotation.y = this.npcSmoothYaw;
+
+      // 红眼只在「已经揭示」且「正面朝向玩家」时出现；其余时刻强制收起
+      if (this.npcEyes) {
+        const showEyes = !!this.npcEyesOn && !!this.npcFacingPlayer;
+        this.npcEyes.visible = showEyes;
+        if (this.npcEyeLight) this.npcEyeLight.intensity = showEyes ? 0.45 : 0;
+      }
       this.setNpcOpacity(1 - (env.classmateFade || 0));
       return;
     }
@@ -1298,6 +1311,7 @@ export class Level {
     this.npc.add(this.npcEyeLight);
     this.npcEndingYaw = Math.PI / 2;   // 背对玩家（书包朝玩家）
     this.npcFacingPlayer = false;
+    this.npcEyesOn = false;
     this.entityFading = false;
     this.entityFadeT = 0;
 

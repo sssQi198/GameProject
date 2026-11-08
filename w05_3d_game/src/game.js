@@ -543,6 +543,9 @@ export class Game {
     this.level.loopEnabled = false;
     this.level.setDoorOpen(false);
     this.level.showExit(true);
+    // 追逐阶段绝不带红眼：那是最后一幕才揭示的东西
+    this.level.showClassmateEyes(false);
+    this.level.turnClassmate(false);
     const z = clamp(this.player.z, LAYOUT.hall.minZ + 0.45, LAYOUT.hall.maxZ - 0.45);
     this.level.placeEntity(this.player.x - CONFIG.entityGap, z);
     this.player.setControl(false);
@@ -887,6 +890,17 @@ export class Game {
       + ` eyes=${this.level.npcEyes ? this.level.npcEyes.visible : 'none'}`
       + ` yaw=${Number(this.level.npcEndingYaw).toFixed(2)}`
       + ` npc=${this.level.npc.visible}`;
+
+    // 红眼只该在最后一幕出现：检查开场、结局、重开三个时刻
+    const atWin = this.level.npcEyes ? this.level.npcEyes.visible : 'none';
+    this.level.reset();
+    const afterReset = this.level.npcEyes ? this.level.npcEyes.visible : 'none';
+    // 重开后即使进入尾声、且朝向玩家，只要没揭示过也不能亮
+    this.level.turnClassmate(true);
+    this.level.npc.visible = true;
+    this.level.update(0.05, { ...this.env(), npcMode: 'ending', mood: 'calm' });
+    const afterResetFacing = this.level.npcEyes ? this.level.npcEyes.visible : 'none';
+    document.body.dataset.epiEyes = `win=${atWin} reset=${afterReset} resetFacing=${afterResetFacing}`;
   }
 
   beginEpilogue() {
