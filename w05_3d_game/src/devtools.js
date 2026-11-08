@@ -241,8 +241,6 @@ export function setupDevTools({ game, player, level }) {
         game.phase = 'finaleChase';
         game.audio.startHeartbeat();
         game.audio.setMood('chase');
-        // 跳转没有那段 0.73 秒的转身，所以这里手动把节拍层接上
-        game.audio.startChaseMusic();
         game.hud.setObjective(copy.runToExit);
         game.hud.setChase(true);
         game.hud.flashChase();
@@ -323,50 +321,6 @@ export function setupDevTools({ game, player, level }) {
   for (const btn of navBtns) {
     const target = btn.getAttribute('data-dev-go');
     btn.addEventListener('click', () => doJump(target));
-  }
-
-  // ---- 音频试听：只碰音频，不动游戏状态（用来单独验「吼」和「追逐音乐」）----
-  for (const btn of document.querySelectorAll('[data-dev-audio]')) {
-    const what = btn.getAttribute('data-dev-audio');
-    btn.addEventListener('click', () => {
-      if (!game.audio.ctx) {
-        showHint('先点一下画面解锁音频（浏览器要求一次交互）');
-        return;
-      }
-      // "roar:1" = 换成第 2 条吼声素材；不带冒号就是默认那首
-      const [kind, arg] = what.split(':');
-      const pick = arg === undefined ? null : Number(arg);
-      if (kind === 'roar') {
-        const name = pick === null ? null : game.audio.setRoarSample(pick);
-        if (pick !== null && !name) {
-          showHint('吼声素材还没解码好 / 加载失败，正在用合成版（看控制台）');
-          return;
-        }
-        game.audio.roar(1, 0);
-        showHint(name
-          ? `试听：嘶吼（${name} · ${game.audio.roarDesignName()}档）`
-          : '试听：嘶吼');
-      } else if (kind === 'design') {
-        // 同一段录音换原型：只改加工链，不换素材，方便只听「加工」的差别
-        const label = game.audio.setRoarDesign(pick === null ? 1 : pick);
-        game.audio.roar(1, 0);
-        showHint(`试听：嘶吼（${game.audio.roarSampleName()} + ${label}档）`);
-      } else if (kind === 'chase') {
-        const name = pick === null ? null : game.audio.setChaseBed(pick);
-        if (pick !== null && !name) {
-          showHint('追逐音乐还没解码好 / 加载失败，正在用合成节拍');
-          return;
-        }
-        game.audio.setMood('chase');
-        game.audio.setTension(0.7);
-        game.audio.startChaseMusic();
-        showHint(name ? `试听：追逐音乐（${name}）` : '试听：追逐音乐（合成节拍）');
-      } else {
-        game.audio.stopChaseMusic();
-        game.audio.setMood('play');
-        showHint('试听结束，音乐回到原曲');
-      }
-    });
   }
 
   // ---- 给予相机 ----

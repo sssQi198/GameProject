@@ -23,7 +23,7 @@ function ok(cond, label, detail = '') {
   if (!cond) fail += 1;
 }
 
-// 假 Web Audio 见 fakeaudio.mjs（和 chasemusic.mjs 共用）
+// 假 Web Audio 见 fakeaudio.mjs
 installFakeAudio();
 
 const bus = new AudioBus();

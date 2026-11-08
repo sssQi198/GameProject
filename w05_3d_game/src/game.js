@@ -102,8 +102,6 @@ export class Game {
     this.l5ShakeT = 0; // 第5关拍照后颤抖计时
     this.entityStepAcc = 0; // 追逐中怪物已走的距离，攒够一个步幅就响一声
     this.entityStepSide = 1; // 左右脚交替（声音声像 ±0.28）
-    this.roarArmed = true; // 只有「拉开过距离」再贴近才会再吼，避免一路狂吼
-    this.roarCool = 0; // 两次嘶吼的冷却（秒）
     this.controlHints = [];
     this.level.reset();
     this.player.setScripted(asDemo);
@@ -570,8 +568,6 @@ export class Game {
     emit(EVENT.lookLock, { target: eyes });
     this.audio.startHeartbeat();
     this.audio.setMood('chase');
-    // 镜头被拧向它的那一刻，它张嘴了 —— 玩家看见脸，也听见嗓子
-    this.audio.roar(0.95, 0);
     this.hud.setObjective(copy.runToExit);
     this.hud.setChase(false);
     this.autoLowerCamera();
@@ -593,8 +589,6 @@ export class Game {
     // 注视期间玩家可能又拿出了相机，这里再收一次；之后仍可按 E 拿出
     this.autoLowerCamera();
     // 转身这 0.73 秒把环境低频抽空：真空之后再落 stinger，起跑那一下才有重量
-    // 长啸 2.4–2.6 秒，会在撞墙前把这一秒静音盖掉 —— 先掐掉，只留「吼 → 死寂 → 快跑！」
-    this.audio.cutRoar(0.18);
     this.audio.duckAmbient(true);
   }
 
@@ -610,12 +604,8 @@ export class Game {
     // 与「快跑！」同一帧落地：环境低频回来 + 一记下潜
     this.audio.duckAmbient(false);
     this.audio.stinger();
-    // 真空之后第一拍立刻落地：节拍层从这一帧开始，和 stinger、「快跑！」同一帧
-    this.audio.startChaseMusic();
     this.entityStepAcc = 0;
     this.entityStepSide = 1;
-    this.roarArmed = true;
-    this.roarCool = 1.2;
   }
 
   updateChase(dt) {
@@ -637,18 +627,6 @@ export class Game {
       this.entityStepAcc -= 1.5;
       this.entityStepSide = -this.entityStepSide;
       this.audio.monsterStep(dist, 0.28 * this.entityStepSide);
-    }
-    // 贴近到 4.6 米它会吼。带迟滞 + 冷却：先被拉开到 6.2 米之外、再逼近才吼一次，
-    // 否则贴脸时会变成循环播放的「吼吼吼」。声像按它偏在你哪一侧给一点左右。
-    this.roarCool = Math.max(0, this.roarCool - dt);
-    if (dist > 6.2) this.roarArmed = true;
-    else if (dist < 4.6 && this.roarArmed && this.roarCool <= 0) {
-      this.roarArmed = false;
-      // 长啸 2.4 秒，冷却必须比它长，否则会变成一条接一条的「啊啊啊」
-      this.roarCool = 6.0;
-      const near = 1 - Math.max(0, dist - CONFIG.entityCatch) / 4;
-      const side = clamp((this.level.entity.position.z - this.player.z) * 0.25, -0.45, 0.45);
-      this.audio.roar(0.6 + 0.45 * clamp(near, 0, 1), side);
     }
     // 眼睛先够到走廊尽头的同学 —— 追逐就地结束
     const mateDist = Math.hypot(
@@ -852,9 +830,6 @@ export class Game {
     this.player.clearCourse();
     this.level.hideEntity();
     this.audio.stopHeartbeat();
-    // 被咬住那一下：一声近身嘶吼盖住所有其它声音
-    this.audio.roar(1.1, 0);
-    this.audio.stopChaseMusic();
     this.audio.lose();
     this.hud.setChase(false);
     if (this.cameraState !== 'none') this.setCameraState('holstered');

@@ -79,15 +79,14 @@ w05_3d_game/
 │   ├── hud.js          进度、计时、提示
 │   ├── viewfinder.js   取景器：相机屏幕式取景层与效果
 │   ├── camera-rig.js   程序化手持相机模型
-│   ├── audio.js        Web Audio 音效（含 CC0 采样加载与兜底）
-│   ├── chasemusic.js   追逐段音乐：成品曲循环 / 十二层合成二选一
+│   ├── audio.js        Web Audio 音效（程序化合成 + 菜单/关卡底噪）
 │   ├── hallglow.js     走廊灯池与身后熄灯
 │   ├── demo.js         演示模式
 │   ├── collision.js    碰撞
 │   ├── layout.js       场景尺寸
 │   ├── config.js       手感
 │   └── debug.js        lil-gui
-└── assets/             glb、贴图；`audio/` 里是菜单曲和 5 个 CC0 采样
+└── assets/             glb、贴图；`audio/` 里只剩 `horror-music.mp4`（菜单/关卡底噪）
 ```
 
 场景现在用程序化几何体。把模型放进 `assets/models/` 后，可以在 `level.js` 里按同样的位置换上去。
@@ -417,6 +416,8 @@ python generate_furniture_glb.py
 自检脚本 `_probe/chasefeel.mjs`（假 `AudioContext` 记录所有节点与参数自动化，不需要浏览器）：断言心跳两档周期/增益、第二下更轻、drone 48→58、stinger 的 92→34Hz 与噪声扫、抽空与还原值、脚步的距离衰减与 14 米静音、左右脚 ±0.28、噪声偏移不重复、步频与帧率无关、灯灭方波与声像、`hallLampPassed/hallLampPan` 边界、以及把 `updateLights()` 的追逐分支照抄一遍跑完整条走廊（6 声、全灭、前方留灯、一帧跨 38 米不补响）。
 
 ## 第八轮：追逐音乐与怪物嘶吼
+
+> **已下线（第十四轮）**：本节到第十三轮描述的「嘶吼」与「追逐音乐」两套东西已整套删除——代码、素材、Dev 面板试听、探针一起撤掉，`src/chasemusic.js` 不再存在。下文原样保留，是重做这块时最省事的参考：哪些数试过、哪些坑踩过（尤其第九轮的频段分析）。
 
 第七轮解决了「有声音」，但整段追逐的音乐还是原来那首循环曲 —— 它只是在跑起来时从 0.18 抬到 0.23（约 +2dB），三五秒之后就习惯了。这一轮不再塞第二个 mp3，而是**在引擎里现场合成一层只属于追逐的音乐**，让它跟着怪物的距离变快、变刺；原曲反而压到 0.06，退到后面当底噪。
 
@@ -753,6 +754,46 @@ python generate_furniture_glb.py
 - HTTP 复核：`index.html` + 三个 `src/*.js` + 五个音频文件共 9 个 URL 全 200，MIME 分别是 `audio/wav` / `audio/mpeg`。
 - 老规矩：**探针只证明接线对，好不好听得你听。**
 
+## 第十四轮：吼叫与追逐音乐整套下线
+
+第八到第十三轮一直在打磨两样东西：**怪物嘶吼**（`audio.js` 的 `roar()`、`cutRoar()`、四档 `ROAR_DESIGNS`、六条 CC0 采样）和**追逐音乐**（`src/chasemusic.js` 的十二层合成节拍 + `CHASE_BED` 成品曲）。这两块听了五轮都没到想要的效果，决定先整体撤掉，以后重做——留着半成品比没有更难受：`setMood('chase')` 一进去就自动起节拍、靠近 4.6 米就自动吼，想「先安静听着试试」都做不到。
+
+### 删了什么
+
+| 层 | 具体 |
+|---|---|
+| 素材 | `assets/audio/` 下 11 个文件、26.1 MB：`roar-{space,possessed,beast,monster,kraken}.mp3`、`roar-sandworm.wav`、`chase-{drone,industrial}.mp3`、`chase-bed-{bravery,chase,wasteland}.ogg` |
+| 源码 | `src/chasemusic.js`（725 行）整文件；`src/audio.js` 里 roar 子系统（常量、采样异步加载、四档处理链、`cutRoar`、`duckMusic`、`startChaseMusic` / `stopChaseMusic`、`musicDuck` 侧链节点）共 680 行 |
+| 调用点 | `game.js`：`beginFinale()` 的一声长啸、`beginChase()` 的 `cutRoar`、`finishTurnBack()` 的 `startChaseMusic`、`updateChase()` 里整套「贴近 4.6 米就吼」的回滞块、`lose()` 的咬住嘶吼 + `stopChaseMusic`、以及 `roarArmed` / `roarCool` 两个字段 |
+| 面板 | `index.html` 的「音频试听」「吼声加工档」两栏共 10 个按钮，`devtools.js` 对应的 `[data-dev-audio]` 事件块、「终局·追逐」跳转里的手动起拍 |
+| 探针 | `_probe/chasemusic.mjs`（180 条断言，全部针对已删系统） |
+
+`audio.js` 从 1156 行降到 492 行。`musicGain` 现在直接接在 `master` 上——第十轮为了「吼的时候把音乐压下去」插的那道 `musicDuck` 侧链没有调用者了，一起删掉。
+
+### 还剩什么
+
+追逐段不是静音：**drone（48 → 58Hz 跟随压力）、心跳（0.62 → 0.40 秒）、怪物脚步（距离衰减 + 左右脚 ±0.28 声像）、灯灭方波、起跑 stinger，以及抽空环境低频 → 落地的那个「真空 → 冲击」**全部原样保留（`chasefeel.mjs` 18 条组断言仍然逐条过）。所以现在的追逐是「心跳 + 脚步 + 灯一路灭」的纯程序化版本，比第十轮之前少了音乐层，但比第七轮之前多了脚步和心跳。
+
+菜单/关卡底噪 `horror-music.mp4` 不动——那不是追逐音乐，`setMood('chase')` 把它压到 0.035 的逻辑也保留（留着当「跑起来时原曲退后」的底）。
+
+### 怎么重做
+
+删掉的东西都在，不用从记忆里恢复：
+
+- `E:\新建游戏项目\_旧版本\audio_before_cut_roar_chase_2026-11-09.js`——删之前的 `audio.js` 全份；
+- `E:\新建游戏项目\_旧版本\chasemusic_2026-11-09.js`、`probe_chasemusic_2026-11-09.mjs`——节拍器与它的探针；
+- `E:\新建游戏项目\_待删\2026-11-09\`——11 个音频素材（7 天内可原路撤回，台账见 `_待删/日志.md`）；
+- 本文第八到第十三轮——每一版的设计意图、具体数值、以及「为什么小喇叭上听不见」（第九轮那三张频段表）。
+
+重做时建议先定一件事：**追逐段要不要音乐层**。如果要，第十一轮的结论值得先读——「成品曲当床 + 压力只做低通/音量」比「引擎里逐拍合成」更省事，也更难听腻；`roar()` 那条路的问题是它只能合成「有体积的东西在叫」，合成不出人嗓子，所以要么用真人录音，要么干脆不要吼、只靠脚步和心跳逼近。
+
+### 验证
+
+- `node --check`：`src/audio.js`、`src/game.js`、`src/devtools.js` 全通过；`src/` 下 25 个 js 逐个复检。
+- `_probe/` 现在 **18 个可执行探针 + 1 个共用假音频模块**，全部 exit 0。
+- 全项目再搜一遍 `roar` / `ChaseMusic` / `chase-bed` / `data-dev-audio`：只剩 `game.js` 第五关拍照那一下的内联低频重击（本地 `const roar = () => burst + tone`，**不是**已删的 `audio.roar()`，属于第五关结局反馈），其余零残留。
+- `127.0.0.1:5173` 返回 200，`index.html` 与 `src/*.js` 都能正常加载。
+
 ## 已知限制
 
 - 只有一间教室和一条循环走廊，五处异常都叠在这间教室里
@@ -760,10 +801,9 @@ python generate_furniture_glb.py
 - 演示为了能在一分钟内看完，只拍第一处异常，然后直接进入终局。自己玩会走完五处
 - 没有触屏操作
 - 终局必须按住 `Shift`。只走路会被那双眼睛追上
-- 追逐段音乐默认放的是 `assets/audio/` 里的成品曲（CC0），压力只做低通与音量的明暗；`src/chasemusic.js` 顶部的 `CHASE_MUSIC` 那张表管的是**兜底用的合成版**，想换风格这里和 `CHASE_BEDS` 都改
-- 采样素材是**异步加载**的：进游戏后第一声吼大概率已经是采样，断网或 `file://` 直开会退回合成版（音色差别明显，但不会没声）
-- 两条追逐床解码后各占 ≈31 MB 内存（88.68 s / 92.50 s 的 48 kHz 立体声 float32）。所以 `assets/audio/chase-wasteland.ogg`（14.2 MB、5 分 24 秒）**刻意没有接进代码**——它解码要 ≈114 MB，为一段 20 秒的追逐不值得
+- 追逐段目前**没有音乐层**：只有 drone / 心跳 / 脚步 / 灯灭。吼叫与追逐曲在第十四轮整套下线，重做计划见该节
+- 第五关拍照那一下的低频重击是 `game.js` 里内联的 `burst + tone`，与已删的 `audio.roar()` 无关，声音偏「闷响」不是「吼」
 
 ## AI 使用说明
 
-脚手架、Three.js 场景、状态机、合成音效和演示模式是在 Cursor 里用 Grok 4.7 生成的。**第十一轮和第十二轮的 8 个音频素材不是 AI 生成的**（其中 5 个已在第十二轮被否、只作历史保留），是 Freesound / OpenGameArt 上的 CC0 真人录音（出处见上文两张表）。小组提交前请自己跑一遍操作、拍照、静音、演示和重开，再决定哪些改动留下。报告 `W05_GroupID.md` 里的试玩记录、迭代记录和学习总结不要用 AI 代写。
+脚手架、Three.js 场景、状态机、合成音效和演示模式是在 Cursor 里用 Grok 4.7 生成的。**第十一轮和第十二轮的 8 个音频素材不是 AI 生成的**（其中 5 个已在第十二轮被否、只作历史保留，整套素材又已在第十四轮下线），是 Freesound / OpenGameArt 上的 CC0 真人录音（出处见上文两张表）。小组提交前请自己跑一遍操作、拍照、静音、演示和重开，再决定哪些改动留下。报告 `W05_GroupID.md` 里的试玩记录、迭代记录和学习总结不要用 AI 代写。
