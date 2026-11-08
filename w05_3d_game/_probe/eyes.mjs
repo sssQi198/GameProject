@@ -26,6 +26,7 @@ function makeCtx() {
   return c;
 }
 globalThis.document = {
+  body: { dataset: {} },
   createElement(tag) {
     const el = { tagName: tag, width: 512, height: 512, style: {} };
     el.getContext = () => makeCtx();
@@ -34,6 +35,22 @@ globalThis.document = {
   createElementNS(ns, tag) { return this.createElement(tag); },
 };
 globalThis.window = globalThis;
+
+// 这个 probe 量的是**程序化**那版裂缝/牙，不加载四个 glb：
+// 让 /assets/... 一律 404，anomalies.js 的 catch 会保留程序化几何。
+const RealRequest = globalThis.Request;
+const RealFetch = globalThis.fetch;
+globalThis.Request = class extends RealRequest {
+  constructor(input, init) {
+    if (typeof input === 'string' && input.startsWith('/')) input = 'http://local' + input;
+    super(input, init);
+  }
+};
+globalThis.fetch = async (input, init) => {
+  const url = typeof input === 'string' ? input : input.url;
+  if (url.startsWith('http://local/assets/')) return new Response('not found', { status: 404 });
+  return RealFetch(input, init);
+};
 
 const THREE = await import('../vendor/three.module.js');
 const { createAnomaly } = await import('../src/anomalies.js');
@@ -316,3 +333,5 @@ if (eyeRoot) {
 log('');
 log(fails === 0 ? '全部通过' : ('有 ' + fails + ' 项未通过'));
 console.log(out.join('\n'));
+// 这个 probe 故意让四个 glb 走 404 回退；异步的 catch 日志不算失败，强制按断言退出。
+process.exit(fails === 0 ? 0 : 1);

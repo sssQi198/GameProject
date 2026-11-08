@@ -4,7 +4,7 @@
  * 只在桌面、地面、墙面加很淡的痕迹（污渍、抓痕、手印），用来把教室"弄脏"，
  * 不参与玩法：
  * - 全部标记 userData.noRay，拍照射线会直接跳过，不会挡住异常判定；
- * - 不写任何文字、不画脸和眼睛，避免和黑板异常、窗帘脸混淆；
+ * - 不写任何文字、不画脸和眼睛，避免和黑板异常、通灵阵混淆；
  * - 与每个异常锚点、每处拍照站位都保留安全距离，保证异常始终是最显眼的那一个；
  * - 用 InstancedMesh 合批，总共 4 个 draw call。
  *
@@ -15,7 +15,7 @@
 const ANOMALY_ANCHORS = [
   { x: -7.85, z: 4.0, r: 2.0, note: 'level 1 seated figure' },
   { x: 9.84, z: 0, r: 2.2, note: 'level 2 blackboard' },
-  { x: 2.08, z: 5.78, r: 1.8, note: 'level 3 curtain face' },
+  { x: 0, z: 0, r: 2.8, note: 'level 3 summoning circle' },
   { x: 0.2, z: -2.75, r: 1.6, note: 'level 4 second camera' },
   { x: 0, z: 6.0, r: 2.2, note: 'level 5 door gap' },
 ];
@@ -23,7 +23,7 @@ const ANOMALY_ANCHORS = [
 const PHOTO_STANDS = [
   { x: -6.0, z: 2.75, r: 1.3 },
   { x: 6.2, z: 0, r: 1.3 },
-  { x: 2.08, z: 2.75, r: 1.3 },
+  { x: 0, z: 3.5, r: 1.3 },
   { x: -1.05, z: -2.75, r: 1.3 },
   { x: 0, z: 4.2, r: 1.3 },
 ];

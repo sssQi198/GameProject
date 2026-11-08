@@ -32,6 +32,8 @@ export const LAYOUT = {
   /** 靠门右侧第一扇窗的窗帘上 */
   curtainFace: { x: 2.08, y: 1.56, z: 5.78 },
   echo: { x: 0.2, z: -2.75 },
+  /** 第 3 关通灵阵。环和蜡烛半径都从教室中心量。 */
+  ritual: { x: 0, z: 0, ring: 1.72, candle: 2.04 },
   desks: {
     /** 沿 Z，与黑板平行 */
     across: [-4.0, -1.5, 1.5, 4.0],
@@ -41,5 +43,41 @@ export const LAYOUT = {
     topD: 0.62,
     topH: 0.78,
   },
+  /**
+   * 第 3 关从教室正中拖开的四套桌椅。只在地面上转 yaw，四脚着地。
+   * 姿态要和 generate_furniture_glb.py 里的 DESK_PILES / CHAIR_PILES 一致。
+   */
+  ritualCenterDesks: [
+    { x: -1.8, z: -1.5 },
+    { x: -1.8, z: 1.5 },
+    { x: 1.8, z: -1.5 },
+    { x: 1.8, z: 1.5 },
+  ],
+  ritualDeskPiles: [
+    { x: -2.72, z: -2.05, pitch: 0, yaw: 0.38, roll: 0 },
+    { x: -2.78, z: 2.05, pitch: 0, yaw: -0.46, roll: 0 },
+    { x: 2.75, z: -2.08, pitch: 0, yaw: 0.52, roll: 0 },
+    { x: 2.68, z: 2.02, pitch: 0, yaw: -0.33, roll: 0 },
+  ],
+  ritualChairPiles: [
+    { x: -3.88, z: -2.82, pitch: 0, yaw: 2.15, roll: 0 },
+    { x: -3.92, z: 2.82, pitch: 0, yaw: -0.85, roll: 0 },
+    { x: 3.88, z: -2.88, pitch: 0, yaw: 1.65, roll: 0 },
+    { x: 3.82, z: 2.78, pitch: 0, yaw: -2.35, roll: 0 },
+  ],
   spawn: { x: -8.2, z: 8.6, yaw: -Math.PI / 2 },
 };
+
+/** 五支蜡烛，放在五芒星朝上的五个顶点外侧。 */
+export function ritualCandles() {
+  const { x, z, candle } = LAYOUT.ritual;
+  const spots = [];
+  for (let i = 0; i < 5; i += 1) {
+    const angle = -Math.PI / 2 + i * (Math.PI * 2 / 5);
+    spots.push({
+      x: x + Math.cos(angle) * candle,
+      z: z + Math.sin(angle) * candle,
+    });
+  }
+  return spots;
+}
