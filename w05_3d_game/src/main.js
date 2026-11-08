@@ -61,6 +61,28 @@ try {
 
   document.addEventListener('pointerlockchange', () => game.onPointerLockChange());
   window.addEventListener('keydown', (event) => game.onKey(event.code));
+
+  // 调试入口：?ending 直接播放尾声，方便检查同学回头与红眼
+  const endingParam = new URLSearchParams(location.search).get('ending');
+  if (endingParam !== null) {
+    setTimeout(() => {
+      if (endingParam === 'sim') {
+        game.debugSimulateEnding();
+        return;
+      }
+      game.debugPlayEnding(endingParam);
+      // 无头环境 rAF 不一定会跑到下一帧，这里同步推进并画一帧，便于截图核对
+      game.update(0.016);
+      renderer.render(scene, camera);
+    }, 600);
+  }
+  // 把运行时错误留在 DOM 上，便于无头环境排查
+  window.addEventListener('error', (event) => {
+    document.body.dataset.lastError = String(event.message || 'error');
+  });
+  window.addEventListener('unhandledrejection', (event) => {
+    document.body.dataset.lastError = 'rejection: ' + String(event.reason && event.reason.message || event.reason);
+  });
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / Math.max(window.innerHeight, 1);
     camera.updateProjectionMatrix();

@@ -77,6 +77,8 @@ export class Game {
     this.photoLock = 0;
     this.lookT = 0;
     this.epilogueT = 0;
+    this.epiStage = 0;
+    this.epiStageT = 0;
     this.endingFade = 0;
     this.saidEnd = false;
     this.notedNpc = false;
@@ -322,7 +324,8 @@ export class Game {
 
   npcMode() {
     if (this.phase === 'intro') return 'idle';
-    if (this.phase === 'epilogue' || this.phase === 'win') return 'ending';
+    // 追逐开始后同学就站在走廊尽头等着，这样结尾「眼睛遇到他」才看得见
+    if (this.phase === 'finaleChase' || this.phase === 'epilogue' || this.phase === 'win') return 'ending';
     if ((this.phase === 'prologue' || (this.phase === 'entering' && this.levelIndex === 0)) && !this.level.npcDone) {
       return 'walk';
     }
@@ -574,22 +577,80 @@ export class Game {
       this.player.x - this.level.entity.position.x,
       this.player.z - this.level.entity.position.z,
     );
+    // 眼睛先够到走廊尽头的同学 —— 追逐就地结束
+    const mateDist = Math.hypot(
+      this.level.entity.position.x - LAYOUT.classmateEnd.x,
+      this.level.entity.position.z - LAYOUT.classmateEnd.z,
+    );
+    // 玩家跑到同学跟前也算到达（同学现在站在 EXIT 牌下方，比触发线更靠里）
+    const playerToMate = Math.hypot(
+      this.player.x - LAYOUT.classmateEnd.x,
+      this.player.z - LAYOUT.classmateEnd.z,
+    );
     if (dist < CONFIG.entityCatch) this.lose();
+    else if (mateDist < 2.2 || playerToMate < 2.8) this.beginEpilogue();
     else if (this.player.x >= LAYOUT.exitX && this.player.z < LAYOUT.hall.maxZ + 0.4) this.beginEpilogue();
   }
 
   updateEpilogue(dt) {
+    if (this.debugHold) return;
     this.epilogueT += dt;
-    const dx = this.player.x - LAYOUT.classmateEnd.x;
-    const dz = this.player.z - LAYOUT.classmateEnd.z;
-    if (Math.hypot(dx, dz) < 2.8 || this.epilogueT > 6.5) {
-      this.endingFade = Math.min(1, this.endingFade + dt * 0.55);
+    this.epiStageT += dt;
+    // 演示模式把整段尾声压缩，避免 Watch Demo 停在最后等十几秒
+    let k = this.demoActive ? 0.45 : 1;
+    if (this.debugFast) k *= 0.02;
+
+    // 0：眼睛自己飞到同学身上
+    if (this.epiStage === 0) {
+      const remain = this.level.homeEntityTo(
+        LAYOUT.classmateEnd.x,
+        LAYOUT.classmateEnd.z,
+        dt,
+        5.2 * (this.debugFast ? 4 : 1),
+      );
+      if (remain < 0.75) {
+        this.level.fadeEntity();
+        this.epiStage = 1;
+        this.epiStageT = 0;
+      }
+      return;
     }
-    if (this.endingFade > 0.15 && !this.saidEnd) {
-      this.saidEnd = true;
-      this.say(copy.stillAhead, 4);
+    // 1：等眼睛真正消失，再开口说话
+    if (this.epiStage === 1) {
+      if (!this.level.entityFading && !this.level.entity.visible) {
+        this.say(copy.stillAhead, 3.0 * k);
+        this.epiStage = 2;
+        this.epiStageT = 0;
+      }
+      return;
     }
-    if (this.endingFade >= 1 && this.epilogueT > 2) this.win();
+    // 2：第二句台词
+    if (this.epiStage === 2 && this.epiStageT > 2.8 * k) {
+      this.say(copy.whereAreYou, 3.4 * k);
+      this.epiStage = 3;
+      this.epiStageT = 0;
+      return;
+    }
+    // 3：同学回头
+    if (this.epiStage === 3 && this.epiStageT > 3.0 * k) {
+      this.level.turnClassmate(true);
+      this.epiStage = 4;
+      this.epiStageT = 0;
+      return;
+    }
+    // 4：脸上出现和刚才一样的红眼
+    if (this.epiStage === 4 && this.epiStageT > 1.2 * k) {
+      this.level.showClassmateEyes(true);
+      this.audio.startHeartbeat?.();
+      this.epiStage = 5;
+      this.epiStageT = 0;
+      return;
+    }
+    // 5：结束
+    if (this.epiStage === 5 && this.epiStageT > 2.0 * k) {
+      this.epiStage = 6;
+      this.win();
+    }
   }
 
   setCameraState(state) {
@@ -707,7 +768,7 @@ export class Game {
     this.hud.setChase(false);
     this.hud.setDanger(0);
     if (this.cameraState !== 'none') this.setCameraState('holstered');
-    this.hud.showPanel('win', copy.winTitle, copy.stillAhead);
+    this.hud.showPanel('win', copy.winTitle, copy.eyesOnYou);
   }
 
   lose() {
@@ -764,13 +825,82 @@ export class Game {
     }
   }
 
+  /** 调试：直接进入尾声，用来检查「同学回头 + 红眼」这段演出（?ending）。 */
+  debugPlayEnding(mode = '') {
+    this.demoActive = false;
+    this.paused = false;
+    this.hasCamera = true;
+    this.endingFade = 0;
+    this.debugHold = false;
+    this.debugFast = false;
+    this.level.reset();
+    this.level.showExit(true);
+    this.level.setExitGlow(0.16);
+    this.level.loopEnabled = false;
+    this.player.setScripted(false);
+    this.player.setControl(false);
+    this.player.reset(LAYOUT.classmateEnd.x - 2.4, LAYOUT.classmateEnd.z, -Math.PI / 2);
+    this.hud.showPlay();
+    this.hud.setRecord(5, 5);
+    this.phase = 'epilogue';
+    this.epilogueT = 0;
+    this.epiStage = 0;
+    this.epiStageT = 0;
+    this.level.turnClassmate(false);
+    this.level.showClassmateEyes(false);
+    // 调试时把眼睛放到同学附近，快速看到「飞过去 → 消失」
+    this.level.entity.visible = true;
+    this.level.entityLight.intensity = 12;
+
+    if (mode === 'eyes') {
+      // 停在「回头看 + 红眼」这一帧，方便截图检查
+      this.level.entity.visible = false;
+      this.level.entityLight.intensity = 0;
+      this.level.turnClassmate(true);
+      this.level.showClassmateEyes(true);
+      this.level.npcEndingYaw = -Math.PI / 2;
+      this.level.npcSmoothYaw = -Math.PI / 2;
+      this.hud.setSubtitle(copy.whereAreYou);
+      this.debugHold = true;
+      return;
+    }
+    if (mode === 'fast') this.debugFast = true;
+  }
+
+  /** 调试：用固定步长把尾声跑完，记录阶段变化（?ending=sim，不需要真实渲染）。 */
+  debugSimulateEnding() {
+    this.debugPlayEnding('');
+    const trace = [];
+    let last = -1;
+    for (let i = 0; i < 900; i += 1) {
+      this.updateEpilogue(0.05);
+      // 眼睛的缩小/熄灭在 level.update 里推进，模拟时必须一起跑
+      this.level.update(0.05, this.env());
+      if (this.epiStage !== last) {
+        last = this.epiStage;
+        trace.push(`${i}:${this.epiStage}`);
+      }
+      if (this.phase === 'win') break;
+    }
+    document.body.dataset.epiTrace = trace.join(',');
+    document.body.dataset.epiFinal = `phase=${this.phase}`
+      + ` eyes=${this.level.npcEyes ? this.level.npcEyes.visible : 'none'}`
+      + ` yaw=${Number(this.level.npcEndingYaw).toFixed(2)}`
+      + ` npc=${this.level.npc.visible}`;
+  }
+
   beginEpilogue() {
     if (this.phase === 'epilogue' || this.phase === 'win') return;
     this.phase = 'epilogue';
     this.epilogueT = 0;
+    this.epiStage = 0;
+    this.epiStageT = 0;
     this.endingFade = 0;
     this.saidEnd = false;
-    this.level.hideEntity();
+    // 同学先背对玩家；眼睛自己飞过去，碰到他才消散
+    this.level.setExitGlow(0.16);
+    this.level.turnClassmate(false);
+    this.level.showClassmateEyes(false);
     this.audio.stopHeartbeat();
     this.audio.setMood('calm');
     this.hud.setChase(false);

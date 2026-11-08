@@ -520,6 +520,40 @@ export class Level {
     prop.mesh.quaternion.set(prop.qx, prop.qy, prop.qz, prop.qw);
   }
 
+  /** 尾声：同学是否转身面对玩家（false = 背对）。朝向由玩家位置实时计算。 */
+  turnClassmate(toPlayer = true) {
+    this.npcFacingPlayer = !!toPlayer;
+  }
+
+  /** 尾声：同学脸上的红眼开 / 关。 */
+  showClassmateEyes(on) {
+    if (!this.npcEyes) return;
+    const visible = !!on;
+    this.npcEyes.visible = visible;
+    if (this.npcEyeLight) this.npcEyeLight.intensity = visible ? 0.45 : 0;
+  }
+
+  /** 追逐的最后：让眼睛自己飞到同学身上，返回还差多远。 */
+  homeEntityTo(targetX, targetZ, dt, speed = 5.2) {
+    const dx = targetX - this.entity.position.x;
+    const dz = targetZ - this.entity.position.z;
+    const dist = Math.hypot(dx, dz) || 1;
+    const step = Math.min(speed * dt, dist);
+    this.entity.visible = true;
+    this.entity.position.x += (dx / dist) * step;
+    this.entity.position.z += (dz / dist) * step;
+    this.entityLight.intensity = 12;
+    return dist - step;
+  }
+
+  /** 眼睛接触同学后缩小熄灭。 */
+  fadeEntity() {
+    if (this.entityFading) return;
+    this.entity.scale.setScalar(1);
+    this.entityFading = true;
+    this.entityFadeT = 0;
+  }
+
   placeEntity(x, z) {
     this.entity.visible = true;
     this.entity.position.set(x, 0, z);
@@ -558,10 +592,29 @@ export class Level {
 
   showExit(on) {
     this.exitSign.visible = on;
-    this.exitLight.intensity = on ? 80 : 0;
+    this.exitLight.intensity = on ? 80 * (this.exitGlow ?? 1) : 0;
+  }
+
+  /** 尾声把 EXIT 的绿光压暗，避免整条走廊发绿、盖住脸上的红眼。 */
+  setExitGlow(scale) {
+    this.exitGlow = scale;
+    if (this.exitSign.visible) this.exitLight.intensity = 80 * scale;
   }
 
   update(dt, env) {
+    // 眼睛消散：扑到同学身上后缩掉，然后彻底隐藏
+    if (this.entityFading) {
+      this.entityFadeT += dt;
+      const t = Math.min(1, this.entityFadeT / 0.55);
+      this.entity.scale.setScalar(1 - t * 0.94);
+      this.entityLight.intensity = 12 * (1 - t);
+      if (t >= 1) {
+        this.entityFading = false;
+        this.entity.scale.setScalar(1);
+        this.hideEntity();
+      }
+    }
+
     const target = this.doorOpen ? 1.42 : 0;
     this.doorAngle += (target - this.doorAngle) * Math.min(1, dt * 4);
     this.doorPivot.rotation.y = this.doorAngle;
@@ -633,13 +686,33 @@ export class Level {
       return;
     }
     if (env.npcMode === 'ending') {
+      // 朝向按玩家实际位置算，而不是写死 ±π/2。
+      // 玩家冲过头、站在哪一侧都不会让「正对/背对」反过来。
+      if (this.npcBodyWrap) this.npcBodyWrap.rotation.y = 0;
+      const wasHidden = !this.npc.visible;
       this.npc.visible = true;
       this.npc.position.set(LAYOUT.classmateEnd.x, 0, LAYOUT.classmateEnd.z);
-      this.npc.rotation.y = Math.PI / 2;
+
+      const px = Number(env.playerX);
+      const pz = Number(env.playerZ);
+      let targetYaw;
+      if (Number.isFinite(px) && Number.isFinite(pz)) {
+        // 模型脸在 +Z，所以「+Z 指向玩家」这个角就是正对玩家
+        const toPlayer = Math.atan2(px - this.npc.position.x, pz - this.npc.position.z);
+        targetYaw = this.npcFacingPlayer ? toPlayer : toPlayer + Math.PI;
+      } else {
+        targetYaw = typeof this.npcEndingYaw === 'number' ? this.npcEndingYaw : Math.PI / 2;
+      }
+      this.npcEndingYaw = targetYaw;
+
+      if (typeof this.npcSmoothYaw !== 'number' || wasHidden) this.npcSmoothYaw = targetYaw;
+      this.npcSmoothYaw = shortestTurn(this.npcSmoothYaw, targetYaw, dt * 2.4);
+      this.npc.rotation.y = this.npcSmoothYaw;
       this.setNpcOpacity(1 - (env.classmateFade || 0));
       return;
     }
     if (this.npcDone) return;
+    if (this.npcBodyWrap) this.npcBodyWrap.rotation.y = 0;
     const speed = 1.3 * (env.npcRate || 1);
 
     // ===== 空闲状态 — 序章NPC刚出现，站在位置面向玩家 =====
@@ -1195,8 +1268,38 @@ export class Level {
     ];
     this.npcStandPos = new THREE.Vector3(-6.7, 0, LAYOUT.hall.z);
     markNoRay(this.npc);
+    // 模型本体加一层包裹，供尾声整体转 180° 用（平时保持 0，序章走路不受影响）
+    const bodyWrap = new THREE.Group();
+    bodyWrap.name = 'npcBodyWrap';
+    bodyWrap.rotation.y = 0;
+    while (this.npc.children.length > 0) bodyWrap.add(this.npc.children[0]);
+    this.npc.add(bodyWrap);
+    this.npcBodyWrap = bodyWrap;
     this.npc.visible = false;
     this.scene.add(this.npc);
+
+    // 尾声：同学回头后脸上浮现的红眼，和追逐实体同色。
+    // z 必须大于头球在该高度的表面（≈0.155），否则眼睛会埋进头壳里看不见。
+    const mateEyeMat = new THREE.MeshBasicMaterial({ color: 0xff2438, toneMapped: false });
+    this.npcEyes = new THREE.Group();
+    const mateEyeL = new THREE.Mesh(new THREE.SphereGeometry(0.038, 16, 12), mateEyeMat);
+    mateEyeL.position.set(-0.062, 1.600, 0.182);
+    const mateEyeR = mateEyeL.clone();
+    mateEyeR.position.set(0.062, 1.600, 0.182);
+    mateEyeL.frustumCulled = false;
+    mateEyeR.frustumCulled = false;
+    this.npcEyes.add(mateEyeL, mateEyeR);
+    this.npcEyes.visible = false;
+    markNoRay(this.npcEyes);
+    this.npc.add(this.npcEyes);
+    // 红眼自带的微光，只做一点轮廓，别把整张脸照红
+    this.npcEyeLight = new THREE.PointLight(0xff2233, 0, 1.0, 2);
+    this.npcEyeLight.position.set(0, 1.60, 0.46);
+    this.npc.add(this.npcEyeLight);
+    this.npcEndingYaw = Math.PI / 2;   // 背对玩家（书包朝玩家）
+    this.npcFacingPlayer = false;
+    this.entityFading = false;
+    this.entityFadeT = 0;
 
     this.entity = new THREE.Group();
     const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2438 });
@@ -1957,6 +2060,14 @@ function seededRandom(seed) {
     s = (s * 1664525 + 1013904223) >>> 0;
     return s / 4294967296;
   };
+}
+
+/** 朝目标角插值，走最短弧，避免绕远路转一圈。 */
+function shortestTurn(current, target, t) {
+  let delta = target - current;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  return current + delta * Math.min(1, t);
 }
 
 function flagged(object, key) {

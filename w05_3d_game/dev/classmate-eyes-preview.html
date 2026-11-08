@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>classmate ending preview</title>
+    <style>
+      body { margin: 0; background: #05070a; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="700" height="520"></canvas>
+    <script type="module">
+      const THREE = await import('../../vendor/three.module.js');
+      const { createClassmate } = await import('../../src/team/m2.js');
+
+      const renderer = new THREE.WebGLRenderer({ canvas: document.querySelector('#c'), antialias: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(700, 520, false);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.95;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x07090c);
+
+      // Same setup as the epilogue: classmate at origin, turned to face -X (the player).
+      const mate = createClassmate(THREE);
+      const back = new URLSearchParams(location.search).has('back');
+      mate.rotation.y = back ? Math.PI / 2 : -Math.PI / 2;
+      scene.add(mate);
+
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2438, toneMapped: false });
+      const eyes = new THREE.Group();
+      const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.032, 14, 10), eyeMat);
+      eyeL.position.set(-0.058, 1.600, 0.172);
+      const eyeR = eyeL.clone();
+      eyeR.position.set(0.058, 1.600, 0.172);
+      eyes.add(eyeL, eyeR);
+      mate.add(eyes);
+
+      const eyeLight = new THREE.PointLight(0xff2233, 0.45, 1.1, 2);
+      eyeLight.position.set(0, 1.60, 0.40);
+      mate.add(eyeLight);
+
+      // Dim corridor lighting like the calm ending mood.
+      scene.add(new THREE.AmbientLight(0x8899aa, 0.8));
+      const hall = new THREE.PointLight(0x8ea0c0, 14, 12, 2);
+      hall.position.set(-2.5, 2.6, 0);
+      scene.add(hall);
+
+      const camera = new THREE.PerspectiveCamera(38, 700 / 520, 0.02, 20);
+      camera.position.set(-2.4, 1.62, 0);
+      camera.lookAt(0, 1.58, 0);
+      renderer.render(scene, camera);
+
+      document.body.dataset.preview = 'ok';
+    </script>
+  </body>
+</html>

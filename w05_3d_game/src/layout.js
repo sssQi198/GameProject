@@ -18,7 +18,8 @@ export const LAYOUT = {
   /** 追逐终点：北墙开口（转角）前的触发线 */
   exitX: 52.2,
   alcove: { minX: 51.4, maxX: 56.8, backZ: 14.1 },
-  classmateEnd: { x: 56.4, z: 8.6 },
+  /** 尾声：同学站在 EXIT 牌下方、稍微往走廊尽头一点 */
+  classmateEnd: { x: 51.9, z: 8.6 },
   /** 走廊循环：走到 +20 送到 −20，走到 −20 送到 +20 */
   loopMax: 20,
   loopMin: -20,

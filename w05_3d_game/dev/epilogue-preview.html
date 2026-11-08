@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>epilogue staging preview</title>
+    <style>
+      body { margin: 0; background: #05070a; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c" width="960" height="540"></canvas>
+    <script type="module">
+      const THREE = await import('../../vendor/three.module.js');
+      const { Level } = await import('../../src/level.js');
+      const { LAYOUT } = await import('../../src/layout.js');
+
+      const renderer = new THREE.WebGLRenderer({ canvas: document.querySelector('#c'), antialias: true });
+      renderer.setPixelRatio(1);
+      renderer.setSize(960, 540, false);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 0.95;
+
+      const scene = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(62, 960 / 540, 0.05, 200);
+      scene.add(camera);
+
+      const level = new Level(scene);
+      level.showExit(true);
+      level.setExitGlow(0.16);
+      level.turnClassmate(false);           // back to the player
+      level.npcEndingYaw = Math.PI / 2;
+      level.npcSmoothYaw = Math.PI / 2;
+
+      const playerX = LAYOUT.classmateEnd.x - 3.0;
+      const playerZ = LAYOUT.classmateEnd.z;
+      const env = {
+        mood: 'calm', time: 1, phase: 'epilogue', npcMode: 'ending', classmateFade: 0, levelIndex: 5,
+        playerX, playerZ,
+      };
+      // drive a few frames so the npc/lights settle
+      for (let i = 0; i < 30; i += 1) level.update(0.033, env);
+
+      if (location.search.includes('eyes')) {
+        level.turnClassmate(true);
+        level.showClassmateEyes(true);
+        for (let i = 0; i < 90; i += 1) level.update(0.033, env); // let the turn finish
+      }
+
+      // stand where the player would be, 3 m in front of him
+      camera.position.set(playerX, 1.62, playerZ);
+      camera.rotation.order = 'YXZ';
+      camera.rotation.y = -Math.PI / 2;
+      camera.rotation.x = 0;
+      renderer.render(scene, camera);
+
+      document.body.dataset.preview = level.npc.visible ? 'npc-visible' : 'npc-hidden';
+    </script>
+  </body>
+</html>

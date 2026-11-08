@@ -46,6 +46,8 @@ export const copy = {
   itCame: '它来了。',
   turnAndSprint: '反方向。按住 Shift。',
   stillAhead: '……他还在前面吗？',
+  whereAreYou: '你去哪里了？我到处在找你。',
+  eyesOnYou: '他回头看你的那双眼睛，和你刚才逃的一模一样。',
   photoHint: 'E  拿出相机 · F  拍摄',
   photoMiss: '没有记录到新异常。',
   doorOpen: '门开了',
