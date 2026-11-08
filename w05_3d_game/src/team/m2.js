@@ -5,9 +5,11 @@
  * group 必须用 tagAnomaly(group, level, id) 打过标记，否则拍不到。
  * parent === 'door' 时会挂到门轴上，随门打开。
  *
- * createClassmate / createEyes 返回 null 就继续用程序化模型。
+ * createClassmate 加载 assets/models/classmate_v01.glb，失败才退回程序化模型。
  * 同学：脚底在原点。userData.legs = [左腿, 右腿]，userData.arms = [左上臂, 右上臂]，
- *   userData.torso = 躯干网格（用于呼吸缩放），userData.materials 用于尾声淡出。
+ *   userData.torso = 身体（用于呼吸缩放），userData.materials 用于尾声淡出。
+ *   这四项在 glb 加载完成前是空的，加载后填进同一批数组。
+ * createEyes 返回 null 就继续用程序化眼睛。
  * 眼睛：本地高度约 1.62。userData.eyeL / eyeR 会跟着心跳缩放。
  *   造型与第五关裂缝里那张脸同源（黑脸板 + 加性光晕 + 17 颗咧嘴尖牙），
  *   坐标系是实体本地：眼 z = 0.02，脸/牙朝 +Z。
@@ -15,16 +17,74 @@
  *   身后那团半透明黑球退到 z = -1.62，避免 depthWrite:false 的它在脸和牙上再糊一层黑。
  */
 import * as THREE from '../../vendor/three.module.js';
+import { disposeCharacter, loadCharacter } from '../character-model.js';
 
 // 空着就用 anomalies.js 里 52162af 那套异常模型。
 // 要替换某一关，把对应函数填进来。
 export const anomalyFactory = {};
 
+const CLASSMATE_URL = '/assets/models/classmate_v01.glb';
+
 /**
- * 多部件同学 v2（约 16 网格）
- * 规格：序章优化规划书 §4.2
+ * 序章 / 尾声的同学。先交出空组，glb 到了再把关节填进原来的数组。
  */
-export function createClassmate(THREE) {
+export function createClassmate(THREE, hooks = {}) {
+  const group = new THREE.Group();
+  group.name = 'Classmate';
+  group.userData.legs = [];
+  group.userData.arms = [];
+  group.userData.torso = null;
+  group.userData.materials = [];
+
+  loadCharacter(CLASSMATE_URL).then((bound) => {
+    if (group.userData.disposed) {
+      disposeCharacter(bound);
+      return;
+    }
+    mountCharacter(group, bound);
+    document.body.dataset.classmateModel = 'glb';
+    hooks.onReady?.();
+  }).catch((error) => {
+    console.warn('同学 GLB 加载失败，改用程序化模型。', error);
+    if (!group.userData.disposed) adoptProcedural(group, THREE);
+    document.body.dataset.classmateModel = 'fallback';
+    hooks.onReady?.();
+  });
+  return group;
+}
+
+function mountCharacter(group, bound) {
+  group.add(bound.root);
+  group.userData.legs.push(...bound.legs);
+  group.userData.arms.push(...bound.arms);
+  group.userData.materials.push(...bound.materials);
+  group.userData.torso = bound.body ?? null;
+  applyOpacity(group);
+}
+
+function applyOpacity(group) {
+  const value = group.userData.opacity;
+  if (typeof value !== 'number') return;
+  for (const material of group.userData.materials) {
+    material.transparent = value < 0.99;
+    material.opacity = value;
+  }
+}
+
+function adoptProcedural(group, THREE) {
+  const built = buildProceduralClassmate(THREE);
+  while (built.children.length) group.add(built.children[0]);
+  group.userData.legs.push(...built.userData.legs);
+  group.userData.arms.push(...built.userData.arms);
+  group.userData.materials.push(...built.userData.materials);
+  group.userData.torso = built.userData.torso ?? null;
+  applyOpacity(group);
+}
+
+/**
+ * 同学 glb 读不到时的备用体。规格仍是序章那套分件。
+ */
+function buildProceduralClassmate(THREE) {
   const group = new THREE.Group();
 
   // ── 材质 ──

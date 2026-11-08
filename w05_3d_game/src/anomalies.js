@@ -1,8 +1,9 @@
 import * as THREE from '../vendor/three.module.js';
-import { LAYOUT } from './layout.js';
+import { LAYOUT, ritualCandles } from './layout.js';
 import { hints, successLines } from './team/p1.js';
 import { anomalyFactory } from './team/m2.js';
 import { tagAnomaly } from './team/contract.js';
+import { disposeCharacter, loadCharacter } from './character-model.js';
 
 export function anomalyHint(level) {
   return hints[level] ?? '';
@@ -22,7 +23,7 @@ export function createAnomaly(level) {
   switch (level) {
     case 1: return createSeat();
     case 2: return createBoard();
-    case 3: return createCurtain();
+    case 3: return createSummoningCircle();
     case 4: return createRedDoll();
     case 5: return createFleshWall();
     default: throw new Error(`没有第 ${level} 关异常`);
@@ -326,458 +327,510 @@ function createBoard() {
 
 /* ---------------------------------------------------------------- 第 3 关 */
 
-/** 布料霉斑贴图：白底加深色溃烂斑，配合布料颜色相乘。 */
-function rotTexture(THREE) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d');
-  const rand = seeded(4242);
-
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, 256, 256);
-
-  // 大块的溃烂
-  for (let i = 0; i < 9; i += 1) {
-    const x = rand() * 256;
-    const y = rand() * 256;
-    const r = 12 + rand() * 26;
-    const g = ctx.createRadialGradient(x, y, 1, x, y, r);
-    const dark = 0.10 + rand() * 0.16;
-    g.addColorStop(0, `rgba(40,32,28,${dark})`);
-    g.addColorStop(0.6, `rgba(58,44,36,${dark * 0.45})`);
-    g.addColorStop(1, 'rgba(58,44,36,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // 细小霉点
-  for (let i = 0; i < 160; i += 1) {
-    ctx.fillStyle = `rgba(30,26,22,${0.12 + rand() * 0.3})`;
-    ctx.beginPath();
-    ctx.arc(rand() * 256, rand() * 256, 0.6 + rand() * 2, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // 织物经纬
-  ctx.globalAlpha = 0.08;
-  ctx.strokeStyle = '#000000';
-  for (let i = 0; i < 256; i += 4) {
-    ctx.beginPath();
-    ctx.moveTo(0, i);
-    ctx.lineTo(256, i);
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  return texture;
-}
-
 /**
- * 霉斑贴图：软边、多孔，贴在布面上不会像硬圆片。
+ * 通灵阵。正中一块红色五芒星，五支蜡烛点在星角外侧。
+ * 圈、星和蜡烛的摆法参照恐鬼症的召唤阵，线画成手绘红粉笔。
  */
-function moldTexture(THREE) {
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  const rand = seeded(777);
-
-  ctx.clearRect(0, 0, 128, 128);
-  for (let i = 0; i < 16; i += 1) {
-    const x = 22 + rand() * 84;
-    const y = 22 + rand() * 84;
-    const r = 10 + rand() * 26;
-    const g = ctx.createRadialGradient(x, y, 1, x, y, r);
-    g.addColorStop(0, 'rgba(255,255,255,0.85)');
-    g.addColorStop(0.45, 'rgba(255,255,255,0.45)');
-    g.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // 咬出小洞，边缘不整齐
-  ctx.globalCompositeOperation = 'destination-out';
-  for (let i = 0; i < 26; i += 1) {
-    ctx.fillStyle = `rgba(0,0,0,${0.4 + rand() * 0.5})`;
-    ctx.beginPath();
-    ctx.arc(rand() * 128, rand() * 128, 1 + rand() * 5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalCompositeOperation = 'source-over';
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
-/**
- * 窗帘后顶出来的脸。左半边塌陷、眼窝深、嘴角烂开，布面有霉斑和破洞。
- * 局部 +Z 朝向房间（group 转 π），原点贴在窗帘上。
- */
-function createCurtain() {
+function createSummoningCircle() {
   const group = new THREE.Group();
-  group.position.set(LAYOUT.curtainFace.x, LAYOUT.curtainFace.y, LAYOUT.curtainFace.z);
+  group.position.set(LAYOUT.ritual.x, 0, LAYOUT.ritual.z);
 
-  const cloth = new THREE.MeshStandardMaterial({
-    color: 0x7f4440,
-    map: rotTexture(THREE),
-    roughness: 0.97,
-    side: THREE.DoubleSide,
-  });
-  const clothDark = new THREE.MeshStandardMaterial({
-    color: 0x3a181b,
-    roughness: 0.98,
-    side: THREE.DoubleSide,
-  });
-  const bone = new THREE.MeshStandardMaterial({ color: 0xc9c0a6, roughness: 0.62 });
-  const socket = new THREE.MeshBasicMaterial({ color: 0x090405 });
-  socket.toneMapped = false;
-  const eyeWhite = new THREE.MeshBasicMaterial({ color: 0xd9d3c4 });
-  eyeWhite.toneMapped = false;
-  const iris = new THREE.MeshBasicMaterial({ color: 0x241013 });
-  iris.toneMapped = false;
-  const mold = new THREE.MeshBasicMaterial({
-    map: moldTexture(THREE),
-    color: 0x2b3126,
+  const meshRadius = 2.35;
+  const decalMat = new THREE.MeshBasicMaterial({
+    map: summoningCircleTexture(meshRadius),
     transparent: true,
-    opacity: 0.62,
     depthWrite: false,
+    toneMapped: false,
   });
+  decalMat.polygonOffset = true;
+  decalMat.polygonOffsetFactor = -2;
+  decalMat.polygonOffsetUnits = -2;
+  const decal = new THREE.Mesh(new THREE.CircleGeometry(meshRadius, 72), decalMat);
+  decal.rotation.x = -Math.PI / 2;
+  decal.position.y = 0.046;
+  decal.renderOrder = 2;
 
-  // 头和下巴：三块不等大的球叠出不对称轮廓
-  const head = addSphere(group, cloth, 0.30, 0, 0, 0, [0.78, 1.04, 0.60]);
-  const temple = addSphere(group, cloth, 0.17, -0.15, 0.10, -0.01, [0.94, 1.05, 0.82]);
-  const jaw = addSphere(group, cloth, 0.16, 0.13, -0.17, 0.01, [0.88, 1.0, 0.86]);
-  head.rotation.z = 0.04;
-  temple.rotation.z = -0.12;
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0xff140c,
+    transparent: true,
+    opacity: 0.2,
+    depthWrite: false,
+    toneMapped: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const glow = new THREE.Mesh(new THREE.CircleGeometry(1.85, 48), glowMat);
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.y = 0.044;
+  glow.renderOrder = 1;
 
-  // 眼窝：压在布面上的一圈暗，一边深一边塌
-  const socketL = addSphere(group, socket, 0.082, -0.105, 0.085, 0.150, [1, 0.86, 0.32]);
-  const socketR = addSphere(group, socket, 0.072, 0.108, 0.045, 0.152, [1, 0.94, 0.32]);
-  socketL.rotation.z = 0.2;
-  socketR.rotation.z = -0.12;
+  const heart = new THREE.PointLight(0xff2218, 6, 4.8, 2);
+  heart.position.set(0, 0.42, 0);
 
-  // 眼球：左眼半闭，右眼瞪大，瞳孔看向不同方向
-  const eyeL = addSphere(group, eyeWhite, 0.034, -0.105, 0.080, 0.172, [1, 0.62, 0.45]);
-  const eyeR = addSphere(group, eyeWhite, 0.041, 0.108, 0.044, 0.174, [1, 0.96, 0.45]);
-  const pupilL = addSphere(group, iris, 0.016, -0.113, 0.076, 0.190, [1, 0.85, 0.4]);
-  const pupilR = addSphere(group, iris, 0.019, 0.116, 0.041, 0.192, [1, 1, 0.4]);
-  // 上眼睑压住眼球上缘，别让它瞪成两个白圆
-  addBox(group, clothDark, 0.085, 0.016, 0.03, -0.105, 0.105, 0.178, 0.14);
-  addBox(group, clothDark, 0.098, 0.018, 0.03, 0.108, 0.072, 0.180, -0.08);
+  const candles = ritualCandles().map((spot, index) => addRitualCandle(
+    group,
+    spot.x - LAYOUT.ritual.x,
+    spot.z - LAYOUT.ritual.z,
+    index,
+  ));
 
-  // 眉骨：两道不等长、不等角度
-  const browL = addBox(group, clothDark, 0.115, 0.022, 0.03, -0.108, 0.148, 0.172, 0.22);
-  const browR = addBox(group, clothDark, 0.09, 0.018, 0.03, 0.112, 0.111, 0.174, -0.34);
-
-  // 鼻梁与鼻孔
-  addBox(group, cloth, 0.052, 0.155, 0.045, 0.002, 0.005, 0.196, 0.07);
-  addSphere(group, socket, 0.016, -0.030, -0.050, 0.204, [1, 0.7, 0.5]);
-  addSphere(group, socket, 0.014, 0.034, -0.058, 0.202, [1, 0.7, 0.5]);
-
-  // 嘴：五段错开的破口，嘴角往右下烂开
-  const mouthY = -0.115;
-  const segments = [
-    { w: 0.052, h: 0.028, x: -0.088, y: mouthY + 0.004, r: 0.12 },
-    { w: 0.044, h: 0.036, x: -0.040, y: mouthY - 0.004, r: -0.06 },
-    { w: 0.050, h: 0.030, x: 0.004, y: mouthY + 0.002, r: 0.05 },
-    { w: 0.036, h: 0.040, x: 0.044, y: mouthY - 0.010, r: -0.12 },
-    { w: 0.030, h: 0.030, x: 0.078, y: mouthY - 0.026, r: -0.3 },
-  ];
-  const mouthSegs = [];
-  for (const s of segments) {
-    mouthSegs.push(addBox(group, socket, s.w, s.h, 0.03, s.x, s.y, 0.186, s.r));
-  }
-  // 牙：大小不一、有缝的几颗，卡在破口上
-  const teeth = [
-    { w: 0.012, h: 0.020, x: -0.074, y: mouthY + 0.015, r: 0.10 },
-    { w: 0.009, h: 0.014, x: -0.044, y: mouthY + 0.012, r: -0.16 },
-    { w: 0.015, h: 0.024, x: -0.010, y: mouthY + 0.014, r: 0.04 },
-    { w: 0.008, h: 0.011, x: 0.020, y: mouthY + 0.009, r: -0.22 },
-    { w: 0.011, h: 0.017, x: 0.050, y: mouthY + 0.004, r: -0.12 },
-    { w: 0.007, h: 0.010, x: 0.074, y: mouthY - 0.010, r: -0.34 },
-  ];
-  for (const t of teeth) {
-    addBox(group, bone, t.w, t.h, 0.012, t.x, t.y, 0.199, t.r);
-  }
-
-  // 腐烂：脸颊和额头的霉斑、两处破洞
-  const patches = [
-    { x: -0.150, y: -0.060, s: 0.085 },
-    { x: 0.128, y: 0.140, s: 0.070 },
-    { x: 0.036, y: -0.212, s: 0.058 },
-    { x: -0.058, y: 0.218, s: 0.062 },
-    { x: 0.182, y: -0.092, s: 0.050 },
-    { x: -0.205, y: 0.060, s: 0.045 },
-  ];
-  for (const p of patches) {
-    const patch = new THREE.Mesh(new THREE.CircleGeometry(p.s, 12), mold);
-    patch.position.set(p.x, p.y, 0.189);
-    patch.scale.set(1, 0.82 + (p.x > 0 ? 0.2 : 0), 1);
-    patch.rotation.z = p.x * 2;
-    group.add(patch);
-  }
-  // 破洞：透出后面的黑
-  for (const hole of [
-    { x: -0.196, y: 0.020, r: 0.026 },
-    { x: 0.074, y: 0.206, r: 0.020 },
-  ]) {
-    const h = new THREE.Mesh(new THREE.CircleGeometry(hole.r, 10), socket);
-    h.position.set(hole.x, hole.y, 0.196);
-    group.add(h);
-  }
-
-  // 干裂的布纹：贴着头壳走，别浮在轮廓外
-  for (let i = 0; i < 3; i += 1) {
-    const crack = addBox(group, clothDark, 0.005, 0.10 + (i % 2) * 0.04, 0.008,
-      -0.085 + i * 0.085, -0.005 + (i % 2) * 0.115, 0.176, (i - 1) * 0.12);
-    crack.rotation.x = 0.2;
-  }
-
-  // 指尖顶住布面：只露出一点，贴在脸的下缘
-  const fingers = [];
-  for (let i = 0; i < 4; i += 1) {
-    const len = 0.075 + (i % 2) * 0.02;
-    const finger = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.016, len, 8), clothDark);
-    finger.rotation.x = Math.PI / 2;
-    finger.rotation.z = (i - 1.5) * 0.12;
-    finger.position.set(-0.165 + i * 0.052, -0.175 - (i === 3 ? 0.012 : 0), 0.108);
-    group.add(finger);
-    fingers.push(finger);
-  }
-
-  // 布料褶皱：藏在轮廓内侧，只露出一道竖向阴影
-  const folds = [];
-  for (let i = 0; i < 3; i += 1) {
-    const fold = addBox(group, clothDark, 0.016, 0.30, 0.014, -0.20 + i * 0.20, -0.03, 0.045);
-    fold.rotation.z = (i - 1) * 0.10;
-    folds.push(fold);
-  }
-
-  group.rotation.y = Math.PI;
-  tag(group, 3, 'curtain');
+  group.add(glow, decal, heart);
+  tag(group, 3, 'ritual');
 
   return {
     level: 3,
-    id: 'curtain',
+    id: 'ritual',
     group,
-    stand: { x: 2.08, z: 2.75 },
-    aimY: 0,
-    update(dt, env) {
-      // 灯闪时两只眼睛睁开，但左眼始终睁不满
-      const blinkL = env.flickerDark ? 0.72 : 0.1;
-      const blinkR = env.flickerDark ? 1 : 0.12;
-      eyeL.scale.y += (blinkL - eyeL.scale.y) * Math.min(1, dt * 11);
-      eyeR.scale.y += (blinkR - eyeR.scale.y) * Math.min(1, dt * 11);
-      pupilL.scale.setScalar(0.7 + Math.sin(env.time * 1.9) * 0.14);
-      pupilR.scale.setScalar(0.75 + Math.sin(env.time * 1.3 + 1.7) * 0.18);
-
-      // 布面呼吸，破口跟着一张一合（幅度收小，避免五官浮出布面）
-      const breathe = 0.60 + Math.sin(env.time * 1.7) * 0.015 + (env.flickerDark ? 0.02 : 0);
-      head.scale.z = breathe;
-      head.scale.x = 0.80 + Math.sin(env.time * 1.7) * 0.012;
-      jaw.scale.z = breathe * 0.92;
-      const open = env.flickerDark ? 1.55 : 1;
-      for (const seg of mouthSegs) {
-        seg.scale.y += (open - seg.scale.y) * Math.min(1, dt * 8);
+    stand: { x: LAYOUT.ritual.x, z: LAYOUT.ritual.z + 3.5 },
+    aim: { x: 0, y: 0.28, z: 0 },
+    update(_dt, env) {
+      const dark = env.flickerDark ? 1 : 0;
+      const pulse = 0.16 + Math.sin(env.time * 1.7) * 0.05 + dark * 0.22;
+      glowMat.opacity = pulse;
+      heart.intensity = 4.5 + Math.sin(env.time * 2.1) * 0.8 + dark * 4;
+      for (const candle of candles) {
+        const flick = 0.72
+          + Math.sin(env.time * 13 + candle.phase) * 0.16
+          + Math.sin(env.time * 27 + candle.phase * 1.7) * 0.08;
+        candle.flame.scale.y = 1.15 + flick * 0.55;
+        candle.flame.position.y = candle.flameBase + Math.sin(env.time * 17 + candle.phase) * 0.004;
+        candle.glow.scale.setScalar(0.85 + flick * 0.35);
+        candle.light.intensity = (3.2 + flick * 2.2) * (1 + dark * 0.65);
       }
-
-      fingers.forEach((finger, i) => {
-        finger.position.z = 0.108 + Math.sin(env.time * 2.3 + i * 0.7) * 0.010
-          + (env.flickerDark ? 0.022 : 0);
-      });
-      mold.opacity = 0.6 + Math.sin(env.time * 0.8) * 0.09;
-      browL.rotation.z = 0.22 + Math.sin(env.time * 0.6) * 0.02;
-      browR.rotation.z = -0.34 + Math.sin(env.time * 0.5 + 1) * 0.03;
     },
   };
+}
+
+function addRitualCandle(group, x, z, index) {
+  const height = [0.16, 0.12, 0.18, 0.11, 0.15][index];
+  const wax = new THREE.MeshStandardMaterial({ color: 0xd9cdb8, roughness: 0.74 });
+  const waxDark = new THREE.MeshStandardMaterial({ color: 0xb7a78e, roughness: 0.8 });
+  const wickMat = new THREE.MeshStandardMaterial({ color: 0x1a120c, roughness: 0.9 });
+  const flameMat = new THREE.MeshBasicMaterial({ color: 0xffc56a, toneMapped: false });
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: 0xff5a18,
+    transparent: true,
+    opacity: 0.38,
+    depthWrite: false,
+    toneMapped: false,
+  });
+
+  const candle = new THREE.Group();
+  candle.position.set(x, 0, z);
+  candle.rotation.y = index * 0.9;
+  candle.rotation.z = (index % 2 === 0 ? 1 : -1) * 0.05;
+
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.036, height, 8), wax);
+  body.position.y = height / 2;
+  const melt = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 5), waxDark);
+  melt.scale.set(0.75, 1.35, 0.75);
+  melt.position.set(0.02, height * 0.62, 0);
+  const lip = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.03, 0.018, 8), waxDark);
+  lip.position.y = height - 0.006;
+  const wick = new THREE.Mesh(new THREE.CylinderGeometry(0.0035, 0.0035, 0.022, 4), wickMat);
+  wick.position.y = height + 0.012;
+  const flame = new THREE.Mesh(new THREE.SphereGeometry(0.016, 6, 5), flameMat);
+  flame.scale.set(0.65, 1.45, 0.65);
+  const flameBase = height + 0.032;
+  flame.position.y = flameBase;
+  const glow = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 5), glowMat);
+  glow.position.y = flameBase;
+  const light = new THREE.PointLight(0xff9340, 4.2, 2.1, 2);
+  light.position.y = height + 0.05;
+  const puddle = new THREE.Mesh(
+    new THREE.CircleGeometry(0.055, 8),
+    new THREE.MeshStandardMaterial({ color: 0x6d5b46, roughness: 0.92 }),
+  );
+  puddle.rotation.x = -Math.PI / 2;
+  puddle.position.y = 0.047;
+
+  candle.add(body, melt, lip, wick, flame, glow, light, puddle);
+  group.add(candle);
+  return { flame, glow, light, phase: index * 1.3, flameBase };
+}
+
+function summoningCircleTexture(meshRadius) {
+  const size = 1024;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const rand = seeded(3107);
+  const cx = size / 2;
+  const cy = size / 2;
+  const ppm = (size / 2) / meshRadius;
+  const ring = LAYOUT.ritual.ring * ppm;
+
+  const strokeRing = (radius, width, color, amp) => {
+    ctx.beginPath();
+    const steps = 220;
+    for (let i = 0; i <= steps; i += 1) {
+      const t = (i / steps) * Math.PI * 2;
+      const wobble = Math.sin(t * 5 + 0.4) * amp + Math.sin(t * 11 + 1.7) * amp * 0.45;
+      const r = radius + wobble;
+      const x = cx + Math.cos(t) * r;
+      const y = cy + Math.sin(t) * r;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  };
+
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  strokeRing(ring * 1.12, 26, 'rgba(90, 0, 8, 0.28)', 2.4);
+  strokeRing(ring * 1.12, 5, 'rgba(196, 28, 32, 0.75)', 2.2);
+  strokeRing(ring, 34, 'rgba(110, 6, 10, 0.38)', 2.8);
+  strokeRing(ring, 14, 'rgba(196, 22, 28, 0.96)', 2.6);
+  strokeRing(ring, 4, 'rgba(255, 92, 84, 0.9)', 2.4);
+
+  const inner = ring * 0.382;
+  strokeRing(inner, 16, 'rgba(120, 8, 12, 0.4)', 1.4);
+  strokeRing(inner, 6, 'rgba(210, 30, 34, 0.92)', 1.3);
+  strokeRing(inner, 2, 'rgba(255, 120, 110, 0.75)', 1.2);
+
+  const points = [];
+  for (let i = 0; i < 5; i += 1) {
+    const angle = -Math.PI / 2 + i * (Math.PI * 2 / 5);
+    points.push([cx + Math.cos(angle) * ring, cy + Math.sin(angle) * ring]);
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(points[0][0], points[0][1]);
+  for (let i = 1; i <= 5; i += 1) {
+    const point = points[(i * 2) % 5];
+    ctx.lineTo(point[0], point[1]);
+  }
+  ctx.fillStyle = 'rgba(70, 0, 6, 0.28)';
+  ctx.fill('evenodd');
+
+  const chalkLine = (a, b, width, color) => {
+    ctx.beginPath();
+    const steps = 16;
+    for (let i = 0; i <= steps; i += 1) {
+      const t = i / steps;
+      const x = a[0] + (b[0] - a[0]) * t + (rand() - 0.5) * 2.4;
+      const y = a[1] + (b[1] - a[1]) * t + (rand() - 0.5) * 2.4;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+  };
+
+  for (let i = 0; i < 5; i += 1) {
+    const a = points[i];
+    const b = points[(i + 2) % 5];
+    chalkLine(a, b, 18, 'rgba(120, 8, 12, 0.35)');
+    chalkLine(a, b, 9, 'rgba(188, 18, 24, 0.96)');
+    chalkLine(a, b, 2.6, 'rgba(255, 86, 78, 0.88)');
+  }
+
+  for (let i = 0; i < 5; i += 1) {
+    const angle = -Math.PI / 2 + (i + 0.5) * (Math.PI * 2 / 5);
+    drawRitualGlyph(
+      ctx,
+      cx + Math.cos(angle) * ring * 1.06,
+      cy + Math.sin(angle) * ring * 1.06,
+      angle,
+      i,
+    );
+  }
+
+  ctx.fillStyle = 'rgba(176, 16, 22, 0.8)';
+  for (let i = 0; i < 46; i += 1) {
+    const angle = rand() * Math.PI * 2;
+    const radius = ring * (0.92 + rand() * 0.22);
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius, 1 + rand() * 2.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  return texture;
+}
+
+function drawRitualGlyph(ctx, x, y, angle, kind) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle + Math.PI / 2);
+  ctx.strokeStyle = 'rgba(214, 36, 40, 0.92)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  if (kind === 0) {
+    ctx.arc(0, 0, 11, 0, Math.PI * 2);
+    ctx.moveTo(0, -11);
+    ctx.lineTo(0, 11);
+  } else if (kind === 1) {
+    for (const dx of [-8, 0, 8]) {
+      ctx.moveTo(dx, -10);
+      ctx.lineTo(dx, 10);
+    }
+  } else if (kind === 2) {
+    ctx.moveTo(-10, 6);
+    ctx.lineTo(0, -8);
+    ctx.lineTo(10, 6);
+  } else if (kind === 3) {
+    ctx.arc(0, 0, 8, 0, Math.PI * 2);
+    ctx.moveTo(-12, 0);
+    ctx.lineTo(12, 0);
+    ctx.moveTo(0, -12);
+    ctx.lineTo(0, 12);
+  } else {
+    ctx.moveTo(-8, -8);
+    ctx.bezierCurveTo(8, -8, -8, 8, 8, 8);
+  }
+  ctx.stroke();
+  ctx.restore();
 }
 
 /* ---------------------------------------------------------------- 第 4 关 */
 
 /**
- * 红色人偶瞬移惊吓异常 —— 基于序章同学建模改造。
- * - 复用序章同学的几何结构（躯干/四肢），材质改为干涸深红（0x5a0a14）
- * - 眼部高度 1.62m 与玩家平视，脚底落地在 Y=0
- * - 面部：纯黑两点（眼睛）+ 一条弧线（笑脸）+ 墨水下流线条
- * - 每 4 次灯灭触发一次瞬移（间隔为原 2 次的两倍）
- * - 第 3/6/9… 次瞬移为"冲刺贴脸"：从玩家视野前方约 2m 处以 4.5m/s 冲向玩家面前急停
- * - 冲刺时播放渐强音效 + 腿部摆动动画（参考序章 NPC 行走）
- * - 其余瞬移瞬移到角落，每帧保持面向玩家（不仅瞬移时）
+ * 木偶关节。球关节能撑住姿势，但身体必须落在脚上：
+ * 两只鞋底同时着地，重心在两脚之间。髋不往侧边踢，身体不绕脚底转，
+ * 否则髋球会离开腿，或者整个人悬空。
+ * 不冲刺时停在一副姿势上，直到下一次瞬移才换成下一副。
+ * 冲刺是原地换步：支撑腿伸直踩地，另一条腿屈膝前摆，手臂随步摆动。
+ * 面向玩家时局部 +Z 朝前。rotation.x > 0 把下垂的肢体拨向身后，头的 rotation.x > 0 是低头。
+ * 肩和髋单轴不超过 ±0.8，关节球才不会转出坑。头、肘、腕、膝可以再弯一些。
+ */
+const PUPPET_KEYS = [
+  'legL', 'legR', 'shinL', 'shinR', 'footL', 'footR',
+  'armL', 'armR', 'foreL', 'foreR', 'handL', 'handR',
+  'head', 'body',
+];
+const PUPPET_LIMIT = {
+  legL: 0.8, legR: 0.8, armL: 0.8, armR: 0.8, body: 0.04, head: 1.05,
+  shinL: 1.35, shinR: 1.35, footL: 0.85, footR: 0.85,
+  foreL: 1.45, foreR: 1.45, handL: 1.2, handR: 1.2,
+};
+const PUPPET_HOLDS = ['cock', 'slack', 'reach', 'bow', 'cockRight', 'reachRight', 'twitch', 'freeze'];
+
+function makePuppetPose() {
+  const pose = {};
+  for (const key of PUPPET_KEYS) pose[key] = [0, 0, 0];
+  return pose;
+}
+
+function zeroPuppetPose(pose) {
+  for (const key of PUPPET_KEYS) {
+    const row = pose[key];
+    row[0] = 0;
+    row[1] = 0;
+    row[2] = 0;
+  }
+}
+
+function setPuppet(pose, key, x, y, z) {
+  const row = pose[key];
+  row[0] = x;
+  row[1] = y;
+  row[2] = z;
+}
+
+function clampPuppet(value, limit) {
+  if (value > limit) return limit;
+  if (value < -limit) return -limit;
+  return value;
+}
+
+function applyPuppetPose(limbs, pose) {
+  for (const key of PUPPET_KEYS) {
+    const node = limbs[key];
+    if (!node) continue;
+    const row = pose[key];
+    const limit = PUPPET_LIMIT[key];
+    node.rotation.set(
+      clampPuppet(row[0], limit),
+      clampPuppet(row[1], limit),
+      clampPuppet(row[2], limit),
+    );
+  }
+}
+
+/**
+ * 静止姿势。返回值是整个人要下降的高度，用来把抬起的鞋底重新踩回地面。
+ * 双脚站立时膝只向前弯，两条腿保持平行。单脚姿势把一条腿抬向外侧，另一只脚踩实。
+ * 肘弯在前臂的 z 上，从正面能看见小臂垂下来。脚的 x 把鞋底转平。
+ */
+function sampleHeld(id, pose) {
+  zeroPuppetPose(pose);
+  if (id === 'cock') {
+    setPuppet(pose, 'armL', 0, 0, -0.72);
+    setPuppet(pose, 'foreL', -0.2, 0, 1.4);
+    setPuppet(pose, 'handL', 0.55, 0.45, 0.7);
+    setPuppet(pose, 'armR', 0, 0, 0.4);
+    setPuppet(pose, 'foreR', -0.15, 0, -0.85);
+    setPuppet(pose, 'handR', -0.45, -0.35, -0.55);
+    setPuppet(pose, 'head', 0.2, -0.6, 1.02);
+    return 0;
+  }
+  if (id === 'slack') {
+    setPuppet(pose, 'legL', -0.68, 0, 0);
+    setPuppet(pose, 'legR', -0.68, 0, 0);
+    setPuppet(pose, 'shinL', 1.22, 0, 0);
+    setPuppet(pose, 'shinR', 1.22, 0, 0);
+    setPuppet(pose, 'footL', -0.54, 0, 0);
+    setPuppet(pose, 'footR', -0.54, 0, 0);
+    setPuppet(pose, 'armL', 0, 0, -0.38);
+    setPuppet(pose, 'armR', 0, 0, 0.34);
+    setPuppet(pose, 'foreL', -0.15, 0, 1.4);
+    setPuppet(pose, 'foreR', -0.15, 0, -1.35);
+    setPuppet(pose, 'handL', 0.7, 0.4, 0.65);
+    setPuppet(pose, 'handR', -0.55, -0.35, -0.6);
+    setPuppet(pose, 'head', 0.9, 0.4, 0.6);
+    return 0.154;
+  }
+  if (id === 'reach') {
+    setPuppet(pose, 'legL', 0, 0, -0.78);
+    setPuppet(pose, 'shinL', 0, 0, 1.28);
+    setPuppet(pose, 'footL', 0, 0, -0.52);
+    setPuppet(pose, 'armL', 0, 0, -0.78);
+    setPuppet(pose, 'foreL', -0.1, 0, 0.75);
+    setPuppet(pose, 'handL', 0.4, 0.3, 0.45);
+    setPuppet(pose, 'armR', 0, 0, 0.22);
+    setPuppet(pose, 'foreR', -0.15, 0, -1.4);
+    setPuppet(pose, 'handR', 0.35, -0.4, -0.5);
+    setPuppet(pose, 'head', 0.25, 0.5, 0.9);
+    return 0;
+  }
+  if (id === 'bow') {
+    setPuppet(pose, 'legL', -0.78, 0, 0);
+    setPuppet(pose, 'legR', -0.78, 0, 0);
+    setPuppet(pose, 'shinL', 1.35, 0, 0);
+    setPuppet(pose, 'shinR', 1.35, 0, 0);
+    setPuppet(pose, 'footL', -0.57, 0, 0);
+    setPuppet(pose, 'footR', -0.57, 0, 0);
+    setPuppet(pose, 'armL', 0, 0, -0.22);
+    setPuppet(pose, 'armR', 0, 0, 0.2);
+    setPuppet(pose, 'foreL', -0.12, 0, 1.42);
+    setPuppet(pose, 'foreR', -0.12, 0, -1.38);
+    setPuppet(pose, 'handL', 0.65, 0.35, 0.55);
+    setPuppet(pose, 'handR', -0.5, -0.3, -0.5);
+    setPuppet(pose, 'head', 1.02, 0.2, 0.4);
+    return 0.189;
+  }
+  if (id === 'cockRight') {
+    setPuppet(pose, 'armL', 0, 0, -0.28);
+    setPuppet(pose, 'foreL', -0.12, 0, 0.55);
+    setPuppet(pose, 'handL', 0.3, 0.2, 0.25);
+    setPuppet(pose, 'armR', 0, 0, 0.72);
+    setPuppet(pose, 'foreR', -0.2, 0, -1.4);
+    setPuppet(pose, 'handR', -0.55, -0.45, -0.7);
+    setPuppet(pose, 'head', 0.2, 0.6, -1.02);
+    return 0;
+  }
+  if (id === 'reachRight') {
+    setPuppet(pose, 'legR', 0, 0, 0.78);
+    setPuppet(pose, 'shinR', 0, 0, -1.28);
+    setPuppet(pose, 'footR', 0, 0, 0.52);
+    setPuppet(pose, 'armR', 0, 0, 0.78);
+    setPuppet(pose, 'foreR', -0.1, 0, -0.75);
+    setPuppet(pose, 'handR', 0.4, -0.3, -0.45);
+    setPuppet(pose, 'armL', 0, 0, -0.22);
+    setPuppet(pose, 'foreL', -0.15, 0, 1.4);
+    setPuppet(pose, 'handL', 0.35, 0.4, 0.5);
+    setPuppet(pose, 'head', 0.25, -0.5, -0.9);
+    return 0;
+  }
+  if (id === 'twitch') {
+    setPuppet(pose, 'legL', 0, 0, -0.72);
+    setPuppet(pose, 'shinL', 0, 0, 1.2);
+    setPuppet(pose, 'footL', 0, 0, -0.48);
+    setPuppet(pose, 'armL', 0, 0, -0.75);
+    setPuppet(pose, 'foreL', -0.12, 0, 1.42);
+    setPuppet(pose, 'handL', 0.5, 0.2, 0.55);
+    setPuppet(pose, 'armR', 0.62, 0, 0.18);
+    setPuppet(pose, 'foreR', -0.1, 0, -0.3);
+    setPuppet(pose, 'handR', -0.3, 0.4, -0.4);
+    setPuppet(pose, 'head', -0.5, 0.65, -1.0);
+    return 0;
+  }
+  if (id === 'freeze') {
+    setPuppet(pose, 'armL', 0, 0, -0.78);
+    setPuppet(pose, 'armR', 0, 0, 0.78);
+    setPuppet(pose, 'foreL', -0.1, 0, 1.15);
+    setPuppet(pose, 'foreR', -0.1, 0, -1.15);
+    setPuppet(pose, 'handL', 0.45, 0.35, 0.5);
+    setPuppet(pose, 'handR', -0.4, -0.3, -0.5);
+    setPuppet(pose, 'head', 0.25, -0.45, 0.98);
+    return 0;
+  }
+  setPuppet(pose, 'head', 0.2, 0, 0.45);
+  return 0;
+}
+
+function sampleCharge(phase, pose) {
+  zeroPuppetPose(pose);
+  const liftL = Math.max(0, Math.sin(phase));
+  const liftR = Math.max(0, Math.sin(phase + Math.PI));
+  const arm = Math.sin(phase - 0.7);
+  setPuppet(pose, 'legL', -liftL * 0.72, 0, 0);
+  setPuppet(pose, 'legR', -liftR * 0.72, 0, 0);
+  setPuppet(pose, 'shinL', liftL * 1.1, 0, 0);
+  setPuppet(pose, 'shinR', liftR * 1.1, 0, 0);
+  setPuppet(pose, 'footL', liftL * 0.42, 0, 0);
+  setPuppet(pose, 'footR', liftR * 0.42, 0, 0);
+  setPuppet(pose, 'armL', -0.12 + arm * 0.55, 0, 0.28);
+  setPuppet(pose, 'armR', -0.12 - arm * 0.55, 0, -0.28);
+  setPuppet(pose, 'foreL', -0.22, 0, 0.55 + Math.max(0, -arm) * 0.7);
+  setPuppet(pose, 'foreR', -0.22, 0, -(0.55 + Math.max(0, arm) * 0.7));
+  setPuppet(pose, 'handL', 0.55, 0, Math.sin(phase) * 0.4);
+  setPuppet(pose, 'handR', 0.5, 0, -Math.sin(phase) * 0.38);
+  setPuppet(pose, 'head', 0.15 + Math.abs(Math.sin(phase)) * 0.22, 0, Math.sin(phase) * 0.48);
+}
+
+/**
+ * 红色人偶瞬移惊吓异常。外形用 assets/models/puppet_v03.glb（木人偶），
+ * 脚底在本地 Y=0。瞬移和冲刺的时机不变。
+ * - 每 4 次灯灭触发一次瞬移
+ * - 第 3/6/9… 次瞬移为"冲刺贴脸"：从玩家视野前方约 2m 处以 3.4m/s 冲向玩家面前急停
+ * - 不冲刺时姿势不动。每次瞬移到新位置才换下一副静止姿势
+ * - 冲刺时支撑脚踩地，另一条腿屈膝前摆，停下后停在这次换好的姿势上
+ * - 躯干不跟着玩家转。只有头在脖子限度内转向玩家
  */
 function createRedDoll() {
-  const EYE_H = 1.62;  // 玩家平视高度
+  const EYE_H = 1.62;
+  const groundY = 0;
   const group = new THREE.Group();
+  const limbs = {
+    legL: null, legR: null, shinL: null, shinR: null, footL: null, footR: null,
+    armL: null, armR: null, foreL: null, foreR: null, handL: null, handR: null,
+    head: null, body: null,
+  };
+  const pose = makePuppetPose();
 
-  // ── 材质：干涸血液深红，比之前更深 ──
-  const clothMat = new THREE.MeshStandardMaterial({ color: 0x5a0a14, roughness: 0.92 });
-  const darkMat  = new THREE.MeshStandardMaterial({ color: 0x3d060e, roughness: 0.95 });
-  const inkMat   = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
-  const inkMatThick = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
-
-  // ── 头部（球体） ──
-  const headR = 0.165;
-  const head = new THREE.Mesh(new THREE.SphereGeometry(headR, 20, 16), clothMat);
-  head.position.y = EYE_H;
-  group.add(head);
-
-  // ── 颈 ──
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.07, 0.1, 10), clothMat);
-  neck.position.y = EYE_H - headR - 0.05;
-  group.add(neck);
-
-  // ── 躯干（4 段圆柱锥化，更瘦高） ──
-  // 肩部 Y = EYE_H - headR - 0.1 = 1.355
-  const torso = new THREE.Group();
-  const segCount = 4;
-  const segH = 0.17;
-  const shoulderY = EYE_H - headR - 0.1;
-  for (let i = 0; i < segCount; i++) {
-    const t = i / (segCount - 1);
-    const radius = 0.16 - t * 0.06; // 更瘦：0.16→0.10
-    const seg = new THREE.Mesh(
-      new THREE.CylinderGeometry(radius, radius - 0.02, segH, 10),
-      clothMat,
-    );
-    seg.scale.z = 0.7;
-    seg.position.y = shoulderY - i * segH;
-    torso.add(seg);
-  }
-  group.add(torso);
-
-  // ── 胯 ──
-  const hipY = shoulderY - 3 * segH - 0.0; // 躯干底部
-  const hip = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.10, 0.14), darkMat); // 更窄
-  hip.position.y = hipY;
-  group.add(hip);
-
-  // ── 腿（与序章同学布局一致，pivot 在髋部下方） ──
-  const legLen = 0.72;
-  const legGeo = new THREE.BoxGeometry(0.09, legLen, 0.10); // 更细
-  legGeo.translate(0, -legLen / 2, 0);
-  const legL = new THREE.Mesh(legGeo, darkMat);
-  const legR = new THREE.Mesh(legGeo, darkMat);
-  const legPivotY = hipY - 0.06;
-  legL.position.set(-0.09, legPivotY, 0);
-  legR.position.set(0.09, legPivotY, 0);
-  group.add(legL, legR);
-
-  // ── 鞋 ──
-  const shoeH = 0.06;
-  const shoeGeo = new THREE.BoxGeometry(0.07, shoeH, 0.13); // 更窄
-  const shoeL = new THREE.Mesh(shoeGeo, darkMat);
-  const shoeR = new THREE.Mesh(shoeGeo, darkMat);
-  const shoeY = legPivotY - legLen - 0.035; // 微调使脚底刚好贴地
-  shoeL.position.set(-0.09, shoeY, 0.025);
-  shoeR.position.set(0.09, shoeY, 0.025);
-  group.add(shoeL, shoeR);
-
-  // 脚底位置 = shoeY - shoeH/2
-  const feetBottom = shoeY - shoeH / 2; // ≈ 0.865 - 0.06 - 0.62 - 0.03 = 0.155
-  // group.position.y 调整使脚底 = 0
-  const groundY = -feetBottom;
-
-  // ── 上臂 ──
-  const armGeo = new THREE.CylinderGeometry(0.04, 0.036, 0.30, 8); // 更细
-  armGeo.translate(0, -0.13, 0);
-  const armL = new THREE.Mesh(armGeo, clothMat);
-  const armR = new THREE.Mesh(armGeo, clothMat);
-  armL.position.set(-0.26, shoulderY, 0);
-  armR.position.set(0.26, shoulderY, 0);
-  group.add(armL, armR);
-
-  // ── 前臂 ──
-  const foreGeo = new THREE.CylinderGeometry(0.03, 0.024, 0.28, 8); // 更细
-  foreGeo.translate(0, -0.12, 0);
-  const foreL = new THREE.Mesh(foreGeo, clothMat);
-  const foreR = new THREE.Mesh(foreGeo, clothMat);
-  foreL.position.y = -0.26;
-  foreL.rotation.x = 0.21;
-  foreR.position.y = -0.26;
-  foreR.rotation.x = 0.21;
-  armL.add(foreL);
-  armR.add(foreR);
-
-  // ── 手 ──
-  const handGeo = new THREE.SphereGeometry(0.03, 8, 6);
-  const handL = new THREE.Mesh(handGeo, darkMat);
-  const handR = new THREE.Mesh(handGeo, darkMat);
-  handL.position.set(0, -0.49, 0);
-  handR.position.set(0, -0.49, 0);
-  armL.add(handL);
-  armR.add(handR);
-
-  // ===== 脸部：纯黑两点 + 一条弧线 + 墨水下流 =====
-  const faceZ = headR + 0.003;
-
-  // 左眼
-  const eyeL = new THREE.Mesh(new THREE.CircleGeometry(0.030, 10), inkMat);
-  eyeL.position.set(-0.048, EYE_H + 0.025, faceZ);
-  group.add(eyeL);
-
-  // 右眼
-  const eyeRdot = new THREE.Mesh(new THREE.CircleGeometry(0.030, 10), inkMat);
-  eyeRdot.position.set(0.048, EYE_H + 0.025, faceZ);
-  group.add(eyeRdot);
-
-  // 墨水下流辅助函数
-  function addDrip(x, startY, length, width) {
-    const drip = new THREE.Mesh(
-      new THREE.BoxGeometry(width, length, 0.004),
-      inkMatThick,
-    );
-    drip.position.set(x, startY - length / 2, faceZ);
-    group.add(drip);
-  }
-
-  // 左眼泪墨下流
-  addDrip(-0.048, EYE_H + 0.025 - 0.030, 0.040, 0.005);
-  addDrip(-0.054, EYE_H + 0.025 - 0.030 - 0.035, 0.022, 0.003);
-
-  // 右眼泪墨下流
-  addDrip(0.048, EYE_H + 0.025 - 0.030, 0.032, 0.005);
-  addDrip(0.055, EYE_H + 0.025 - 0.030 - 0.028, 0.015, 0.003);
-
-  // 嘴：笑脸弧线（细分段拼成）
-  const mouthPts = 8;
-  const mouthW = 0.090;
-  const mouthH = 0.030;
-  const mouthY = EYE_H - 0.050;
-  for (let i = 0; i < mouthPts; i++) {
-    const t = i / (mouthPts - 1);
-    const angle = -Math.PI * t + Math.PI;
-    const x = (t - 0.5) * mouthW * 2;
-    const y = -Math.sin(angle) * mouthH;
-    const seg = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.007, 0.005), inkMat);
-    seg.position.set(x, mouthY + y, faceZ);
-    const nt = Math.min(1, (i + 1) / (mouthPts - 1));
-    const na = -Math.PI * nt + Math.PI;
-    const nx = (nt - 0.5) * mouthW * 2;
-    const ny = -Math.sin(na) * mouthH;
-    const dy = ny - y;
-    const dx2 = nx - x;
-    if (Math.abs(dx2) > 0.001 || Math.abs(dy) > 0.001) {
-      seg.rotation.z = -Math.atan2(dy, dx2);
+  const whenReady = loadCharacter('/assets/models/puppet_v03.glb').then((bound) => {
+    if (group.userData.disposed) {
+      disposeCharacter(bound);
+      return;
     }
-    group.add(seg);
-  }
+    group.add(bound.root);
+    limbs.legL = bound.legs[0] ?? null;
+    limbs.legR = bound.legs[1] ?? null;
+    limbs.shinL = bound.shins[0] ?? null;
+    limbs.shinR = bound.shins[1] ?? null;
+    limbs.footL = bound.feet[0] ?? null;
+    limbs.footR = bound.feet[1] ?? null;
+    limbs.armL = bound.arms[0] ?? null;
+    limbs.armR = bound.arms[1] ?? null;
+    limbs.foreL = bound.forearms[0] ?? null;
+    limbs.foreR = bound.forearms[1] ?? null;
+    limbs.handL = bound.hands[0] ?? null;
+    limbs.handR = bound.hands[1] ?? null;
+    limbs.head = bound.head ?? null;
+    limbs.body = bound.body ?? null;
+    document.body.dataset.puppetModel = 'glb';
+  }).catch((error) => {
+    console.warn('木偶 GLB 加载失败，第 4 关人偶没有模型。', error);
+    document.body.dataset.puppetModel = 'fallback';
+  });
 
-  // 嘴角墨水下流
-  addDrip(-0.090, mouthY - 0.030, 0.035, 0.005);
-  addDrip(0.090, mouthY - 0.030, 0.025, 0.004);
-  // 左嘴角长泪痕（向下延伸到嘴角墨水线更下方）
-  addDrip(-0.085, mouthY - 0.030 - 0.035 - 0.012, 0.020, 0.003);
-
-  // ── 全部标记为异常 ──
   tagAnomaly(group, 4, 'doll');
 
   // ── 预定义安全角落位置 ──
@@ -804,9 +857,58 @@ function createRedDoll() {
   let chargeTargetZ = 0;
   let chargeProgress = 0;         // 0..1 归一化进度
   let chargeMaxDist = 0;          // 总距离
-  let lastDollRotation = 0;
-  const CHARGE_SPEED = 4.5;       // m/s 冲刺速度
+  const CHARGE_SPEED = 3.4;       // m/s 冲刺速度
   const LAUNCH_DIST = 1.8;        // 出现距离玩家多远
+
+  // 每次瞬移换一副静止姿势，不冲刺时就停在这一副上
+  let holdI = -1;
+
+  function woodClick(env) {
+    const audio = env.audio;
+    if (!audio?.burst || !group.visible) return;
+    const dist = Math.hypot((env.playerX ?? 0) - group.position.x, (env.playerZ ?? 0) - group.position.z);
+    const gain = 0.09 * Math.max(0, 1 - dist / 8);
+    if (gain < 0.015) return;
+    try {
+      audio.burst({ duration: 0.025, gain, type: 'highpass', freq: 2200, q: 0.9 });
+      audio.tone(210, 0.035, gain * 0.4, 'triangle');
+    } catch (e) { /* 音效出错不影响动作 */ }
+  }
+
+  function advanceHold(env) {
+    holdI = (holdI + 1) % PUPPET_HOLDS.length;
+    woodClick(env);
+  }
+
+  // 躯干朝房间里，不跟着玩家转。
+  function faceIntoRoom(x, z) {
+    group.rotation.y = Math.atan2(-x, -z);
+  }
+
+  // 头的局部 +Z 是脸。只改 yaw，点头和侧倾留在当前姿势上。
+  function lookHead(px, pz) {
+    const head = limbs.head;
+    if (!head || !group.visible) return;
+    let yaw = Math.atan2(px - group.position.x, pz - group.position.z) - group.rotation.y;
+    yaw = Math.atan2(Math.sin(yaw), Math.cos(yaw));
+    const limit = PUPPET_LIMIT.head;
+    head.rotation.y = clampPuppet(yaw, limit);
+  }
+
+  function poseStanding() {
+    if (!group.visible || holdI < 0) {
+      zeroPuppetPose(pose);
+      applyPuppetPose(limbs, pose);
+      group.position.y = groundY;
+      group.userData.puppetAct = 'hidden';
+      return;
+    }
+    const id = PUPPET_HOLDS[holdI];
+    const drop = sampleHeld(id, pose);
+    applyPuppetPose(limbs, pose);
+    group.position.y = groundY - drop;
+    group.userData.puppetAct = id;
+  }
 
   group.visible = false;
   group.scale.setScalar(1.0);
@@ -817,6 +919,7 @@ function createRedDoll() {
     level: 4,
     id: 'doll',
     group,
+    whenReady,
     stand: { x: -1, z: 2.5 },
     aimY: EYE_H,
     update(dt, env) {
@@ -831,9 +934,6 @@ function createRedDoll() {
         if (step >= remaining) {
           // 到达目标（玩家脸前）
           group.position.set(chargeTargetX, groundY, chargeTargetZ);
-          // 到达后仍然面向玩家
-          group.rotation.y = Math.atan2(px - chargeTargetX, pz - chargeTargetZ);
-          lastDollRotation = group.rotation.y;
           charging = false;
           chargeProgress = 1;
         } else {
@@ -844,34 +944,15 @@ function createRedDoll() {
           const cx = chargeFromX + (chargeTargetX - chargeFromX) * easedT;
           const cz = chargeFromZ + (chargeTargetZ - chargeFromZ) * easedT;
           group.position.set(cx, groundY, cz);
-          // 始终面向目标方向（玩家）
-          group.rotation.y = Math.atan2(px - cx, pz - cz);
-          lastDollRotation = group.rotation.y;
-
-          // 腿部摆动（参考序章 NPC 行走：sin(t*8)*0.45）
-          const swing = Math.sin(chargeProgress * chargeMaxDist * 10) * 0.45;
-          legL.rotation.x = swing;
-          legR.rotation.x = -swing;
-          // 手臂跟着摆
-          armL.rotation.x = -swing * 0.5;
-          armR.rotation.x = swing * 0.5;
-          // 身体上下微弹
-          const bounce = Math.sin(chargeProgress * chargeMaxDist * Math.PI * 4) * 0.012;
-          group.position.y = groundY + bounce;
+          const stride = chargeProgress * Math.max(chargeMaxDist, 0.4) * 8;
+          sampleCharge(stride, pose);
+          applyPuppetPose(limbs, pose);
+          group.position.y = groundY;
+          lookHead(px, pz);
+          group.userData.puppetAct = 'charge';
+          return;
         }
-        // 冲刺中仍然持续面向玩家
-        return;
       }
-
-      // 不是冲刺状态，恢复静止姿态
-      legL.rotation.x = 0;
-      legR.rotation.x = 0;
-      armL.rotation.x = 0;
-      armR.rotation.x = 0;
-      group.position.y = groundY;
-      // 静止时仍然面向玩家
-      group.rotation.y = Math.atan2(px - group.position.x, pz - group.position.z);
-      lastDollRotation = group.rotation.y;
 
       // ===== 2. 灯灭上升沿检测 =====
       const flickerRise = env.flickerDark && !lastFlicker;
@@ -885,9 +966,8 @@ function createRedDoll() {
           group.visible = true;
           cornerIndex = 0;
           group.position.set(CORNERS[cornerIndex].x, groundY, CORNERS[cornerIndex].z);
-          group.rotation.y = Math.atan2(px - CORNERS[cornerIndex].x, pz - CORNERS[cornerIndex].z);
-          lastDollRotation = group.rotation.y;
-          return;
+          faceIntoRoom(CORNERS[cornerIndex].x, CORNERS[cornerIndex].z);
+          advanceHold(env);
         }
 
         // 每 4 次灯灭触发一次瞬移
@@ -965,12 +1045,12 @@ function createRedDoll() {
               // 兜底：角落
               cornerIndex = (cornerIndex + 1) % CORNERS.length;
               group.position.set(CORNERS[cornerIndex].x, groundY, CORNERS[cornerIndex].z);
-              group.rotation.y = Math.atan2(px - CORNERS[cornerIndex].x, pz - CORNERS[cornerIndex].z);
+              faceIntoRoom(CORNERS[cornerIndex].x, CORNERS[cornerIndex].z);
+              advanceHold(env);
             } else {
               // 开始冲刺
               group.position.set(launchX, groundY, launchZ);
-              group.rotation.y = Math.atan2(px - launchX, pz - launchZ);
-              lastDollRotation = group.rotation.y;
+              group.rotation.y = Math.atan2(faceX - launchX, faceZ - launchZ);
               group.visible = true;
               charging = true;
               chargeFromX = launchX;
@@ -979,6 +1059,7 @@ function createRedDoll() {
               chargeTargetZ = faceZ;
               chargeProgress = 0;
               chargeMaxDist = Math.hypot(faceX - launchX, faceZ - launchZ);
+              advanceHold(env);
 
               // 播放冲刺音效
               if (audio) {
@@ -994,28 +1075,27 @@ function createRedDoll() {
               }
             }
           } else {
-            // ── 角落瞬移，面向玩家 ──
+            // ── 角落瞬移。躯干朝房间里，不跟着玩家转 ──
             cornerIndex = (cornerIndex + 1) % CORNERS.length;
             group.position.set(CORNERS[cornerIndex].x, groundY, CORNERS[cornerIndex].z);
-            group.rotation.y = Math.atan2(px - CORNERS[cornerIndex].x, pz - CORNERS[cornerIndex].z);
-            lastDollRotation = group.rotation.y;
+            faceIntoRoom(CORNERS[cornerIndex].x, CORNERS[cornerIndex].z);
+            advanceHold(env);
           }
 
           teleportPhase++;
         }
       }
 
-      // ===== 3. 每帧保持面向玩家（仅非冲刺状态） =====
-      if (group.visible && !charging) {
-        group.rotation.y = Math.atan2(px - group.position.x, pz - group.position.z);
-        lastDollRotation = group.rotation.y;
+      // ===== 3. 提线动作。刚起步的冲刺只摆出第一步。头单独转向玩家 =====
+      if (charging) {
+        sampleCharge(0, pose);
+        applyPuppetPose(limbs, pose);
+        lookHead(px, pz);
+        group.userData.puppetAct = 'charge';
+        return;
       }
-
-      // ===== 4. 微小的呼吸浮动（非冲刺时） =====
-      if (group.visible && !charging) {
-        const breath = Math.sin(env.time * 2.1) * 0.006;
-        group.position.y = groundY + breath;
-      }
+      poseStanding();
+      lookHead(px, pz);
     },
   };
 }
@@ -1558,6 +1638,11 @@ function createFleshWall() {
   // 裂缝里那套眼睛的引用。IIFE 内部建好之后挂到这里，
   // 外层的 update() / onPhoto() 才能驱动待机动画和拍后淡出。
   let eyeRig = null;
+  // 眼睛、巨脸、牙、裂缝翻边四个 glb 的加载 Promise；level.js 用它触发一次着色器预编译。
+  let eyesModelReady = null;
+  let faceModelReady = null;
+  let teethModelReady = null;
+  let crackDecorReady = null;
 
   // ---- L 形裂缝本体 + 触手封边（重写版） --------------------------------
   // 上一版有三个硬伤，这里逐条解决：
@@ -1622,8 +1707,14 @@ function createFleshWall() {
       return geo;
     }
 
+    // 程序化翻边 / 触手 / 肉芽都挂在这个 group 里。crack_decor_v01.glb 载入
+    // 成功后整组换掉；深渊（throat）、背板、天花板封口、脸/眼/牙不在里面。
+    const crackDecorRoot = new THREE.Group();
+    crackDecorRoot.name = 'crack-decor-procedural';
+    group.add(crackDecorRoot);
+
     // 把条带按半宽系数放大，并朝相机方向微移，避免共面闪面
-    function addBand(left, right, grow, offZ, offY, mat) {
+    function addBand(left, right, grow, offZ, offY, mat, parent) {
       const l = [];
       const r = [];
       for (let i = 0; i < left.length; i++) {
@@ -1631,7 +1722,7 @@ function createFleshWall() {
         l.push([cx + (left[i][0] - cx) * grow, left[i][1] + offY, left[i][2] + offZ]);
         r.push([cx + (right[i][0] - cx) * grow, right[i][1] + offY, right[i][2] + offZ]);
       }
-      group.add(new THREE.Mesh(ribbonGeometry(l, r), mat));
+      (parent || crackDecorRoot).add(new THREE.Mesh(ribbonGeometry(l, r), mat));
     }
 
     // 环形条带：只画 [gIn, gOut] 这一圈，中间留空。
@@ -1653,8 +1744,8 @@ function createFleshWall() {
         rInner.push([cx + (right[i][0] - cx) * gIn, dy, dz]);
         rOuter.push([cx + (right[i][0] - cx) * gOut, dy, dz]);
       }
-      group.add(new THREE.Mesh(ribbonGeometry(lOuter, lInner), mat));
-      group.add(new THREE.Mesh(ribbonGeometry(rInner, rOuter), mat));
+      crackDecorRoot.add(new THREE.Mesh(ribbonGeometry(lOuter, lInner), mat));
+      crackDecorRoot.add(new THREE.Mesh(ribbonGeometry(rInner, rOuter), mat));
     }
 
     // 把一条边界线按半宽系数缩放（用于生成开口轮廓）
@@ -1762,7 +1853,7 @@ function createFleshWall() {
 
     // 天花板那条臂不挖深渊（眼睛在竖直段），用一条填实的暗带把开口封住，
     // 否则透过开口会看到后面的天花板血肉。
-    addBand(ceilLeftEdge, ceilRightEdge, AP, 0, -0.028, matCore);
+    addBand(ceilLeftEdge, ceilRightEdge, AP, 0, -0.028, matCore, group);
 
     // ---- 触手：从裂缝边缘向外生长，把边界盖住 --------------------------
     function growTentacle(start, dir, len, radius, mat) {
@@ -1808,7 +1899,7 @@ function createFleshWall() {
         vcol[v * 3 + 2] = k;
       }
       geo.setAttribute('color', new THREE.Float32BufferAttribute(vcol, 3));
-      group.add(new THREE.Mesh(geo, mat));
+      crackDecorRoot.add(new THREE.Mesh(geo, mat));
     }
 
     // 材质池：复用，避免每根触手一个材质。
@@ -1920,8 +2011,57 @@ function createFleshWall() {
       const rad = 0.022 + RNG() * 0.038;
       const bump = new THREE.Mesh(new THREE.SphereGeometry(rad, 7, 5), bumpMat);
       bump.position.set(bx, by, bz);
-      group.add(bump);
+      crackDecorRoot.add(bump);
     }
+
+    // ---- 建模稿：L 形三层翻边 + 触手 + 肉芽 --------------------------------
+    // crack_decor_v01.glb 的原点在 L 形转角 = 世界 (0, 3.09, -5.92)，
+    // 墙臂沿 -Y（Blender）/ 世界向下，天花板臂伸进房间；整件放在这里不旋转。
+    // 载入成功就换掉上面那一整组程序化翻边/触手/肉芽；深渊、背板、
+    // 天花板封口、脸、眼睛、牙都不动。失败保留程序化版本。
+    crackDecorReady = loadCharacter('/assets/models/crack_decor_v01.glb').then((bound) => {
+      if (group.userData.disposed) {
+        disposeCharacter(bound);
+        return;
+      }
+      const model = bound.root;
+      model.position.set(0, CRACK_Y, CRACK_Z);
+      const glbMaterials = new Set();
+      const glbTextures = new Set();
+      model.traverse((node) => {
+        if (!node.isMesh) return;
+        const list = Array.isArray(node.material) ? node.material : [node.material];
+        for (const material of list) {
+          if (!material) continue;
+          glbMaterials.add(material);
+          if (material.map) glbTextures.add(material.map);
+        }
+      });
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        vertexColors: true,
+        side: THREE.DoubleSide,
+        fog: false,
+        // 顶点色 + 细节贴图就是最终颜色（暗红到近黑），别让 ACES 再压一遍
+        toneMapped: false,
+        map: glbTextures.values().next().value ?? null,
+      });
+      model.traverse((node) => {
+        if (!node.isMesh) return;
+        node.material = mat;
+      });
+      for (const material of glbMaterials) material.dispose();
+      for (const child of [...crackDecorRoot.children]) {
+        crackDecorRoot.remove(child);
+        if (child.geometry) child.geometry.dispose();
+      }
+      group.remove(crackDecorRoot);
+      group.add(model);
+      if (document.body) document.body.dataset.crackDecor = 'glb';
+    }).catch((error) => {
+      console.warn('裂缝翻边 GLB 加载失败，保留程序化翻边。', error);
+      if (document.body) document.body.dataset.crackDecor = 'fallback';
+    });
 
     // ============ 裂缝深处：黑色巨脸 + 两只红色发光眼 ============
     // 全部塞在开口后面那 9cm 凹槽里，最靠前的点不超过 FACE_FRONT(-5.941)；
@@ -2014,6 +2154,47 @@ function createFleshWall() {
     // 下颌：加宽到 0.95，让那条咧嘴正好落在颌骨上
     faceBox(0.95, 0.20, 0.018, 0, 1.92, -5.956);
 
+    // 建模稿 assets/models/face_v01.glb：原点在脸心，正面朝 +Z，
+    // 1.15 × 1.7 × 0.04 m。放到 (0, 2.45, -5.9635)，最前面落在 z=-5.945，
+    // 仍在开口后面。faceRoot 只负责前后呼吸，不要把基准 z 写在它身上。
+    // 材质改成不吃光、不进雾的顶点色，否则近黑会被 ACES 和雾洗没。
+    const proceduralFace = faceRoot.children.slice();
+    faceModelReady = loadCharacter('/assets/models/face_v01.glb').then((bound) => {
+      if (group.userData.disposed) {
+        disposeCharacter(bound);
+        return;
+      }
+      const model = bound.root;
+      model.position.set(0, 2.45, -5.9635);
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0x0d0809,
+        vertexColors: true,
+        toneMapped: false,
+        fog: false,
+      });
+      const glbMaterials = new Set();
+      model.traverse((node) => {
+        if (!node.isMesh) return;
+        const list = Array.isArray(node.material) ? node.material : [node.material];
+        for (const material of list) {
+          if (material) glbMaterials.add(material);
+        }
+        node.material = mat;
+      });
+      for (const material of glbMaterials) material.dispose();
+      for (const mesh of proceduralFace) {
+        faceRoot.remove(mesh);
+        if (mesh.geometry) mesh.geometry.dispose();
+      }
+      faceMat.dispose();
+      faceHi.dispose();
+      faceRoot.add(model);
+      if (document.body) document.body.dataset.faceModel = 'glb';
+    }).catch((error) => {
+      console.warn('黑色巨脸 GLB 加载失败，保留程序化脸。', error);
+      if (document.body) document.body.dataset.faceModel = 'fallback';
+    });
+
     // ---- 眼睛 ----
     const eyesRoot = new THREE.Group();
     eyesRoot.position.set(0, EYE_Y, EYE_Z);
@@ -2030,6 +2211,40 @@ function createFleshWall() {
     const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
     eyeR.position.set(EYE_DX, 0, 0);
     eyesRoot.add(eyeL, eyeR);
+
+    // 建模稿 assets/models/eyes_v01.glb：两只独立的球，各自以球心为原点，
+    // 直径 0.174 m、中心距 0.38 m，正好对上这里的 EYE_R / EYE_DX。
+    // 载入成功就换掉程序化球；失败保留现在的球，拍照判定不受影响。
+    // 材质统一用 eyeMat：glb 自带的是自发光 StandardMaterial，ACES 会把红压灰，
+    // 而且拍后淡出改的就是 eyeMat.color。
+    eyesModelReady = loadCharacter('/assets/models/eyes_v01.glb').then((bound) => {
+      if (group.userData.disposed) {
+        disposeCharacter(bound);
+        return;
+      }
+      const model = bound.root;
+      const meshes = [];
+      const glbMaterials = new Set();
+      model.traverse((node) => {
+        if (!node.isMesh) return;
+        meshes.push(node);
+        if (node.material) glbMaterials.add(node.material);
+      });
+      if (meshes.length !== 2) {
+        console.warn('eyes_v01.glb 应该正好两只眼睛，实际 ' + meshes.length + ' 个网格，保留程序化球。');
+        disposeCharacter(bound);
+        return;
+      }
+      for (const material of glbMaterials) material.dispose();
+      for (const mesh of meshes) mesh.material = eyeMat;
+      eyesRoot.remove(eyeL, eyeR);
+      eyeGeo.dispose();
+      eyesRoot.add(model);
+      if (document.body) document.body.dataset.eyesModel = 'glb';
+    }).catch((error) => {
+      console.warn('眼睛 GLB 加载失败，保留程序化球。', error);
+      if (document.body) document.body.dataset.eyesModel = 'fallback';
+    });
 
     // 光晕：加性混合、不写深度，只往周围染红，不产生几何轮廓
     const haloMat = new THREE.MeshBasicMaterial({
@@ -2101,6 +2316,40 @@ function createFleshWall() {
       const y = grinY(u) + (RNG() - 0.5) * 0.012;
       addTooth(u * GRIN_HALF * 0.94, y - 0.125, y + 0.040, 0.026 + RNG() * 0.012);
     }
+
+    // 建模稿 assets/models/teeth_v01.glb：一排 0.90 m 宽的咧嘴牙，
+    // 上排 9 颗朝下、下排 8 颗朝上，原点在包围盒中心。
+    // 放到 (0, 2.035, -5.900)，最前面 -5.870，和原程序化牙尖一样靠前。
+    // 载入成功就换掉这 17 个锥体；失败保留程序化牙。
+    teethModelReady = loadCharacter('/assets/models/teeth_v01.glb').then((bound) => {
+      if (group.userData.disposed) {
+        disposeCharacter(bound);
+        return;
+      }
+      const model = bound.root;
+      model.position.set(0, 2.035, -5.900);
+      const glbMaterials = new Set();
+      model.traverse((node) => {
+        if (!node.isMesh) return;
+        const list = Array.isArray(node.material) ? node.material : [node.material];
+        for (const material of list) {
+          if (material) glbMaterials.add(material);
+        }
+        // 和程序化牙同一块材质：颜色、雾和顶点色处理完全一致，
+        // 拍后淡出 / 灯灭时也不用再改。
+        node.material = toothMat;
+      });
+      for (const material of glbMaterials) material.dispose();
+      for (const tooth of [...teethRoot.children]) {
+        teethRoot.remove(tooth);
+        if (tooth.geometry) tooth.geometry.dispose();
+      }
+      teethRoot.add(model);
+      if (document.body) document.body.dataset.teethModel = 'glb';
+    }).catch((error) => {
+      console.warn('咧嘴牙 GLB 加载失败，保留程序化牙。', error);
+      if (document.body) document.body.dataset.teethModel = 'fallback';
+    });
 
     // ---- 拍照命中球 ----
     // 整个 group 不再挂 anomalyLevel，只有这个球带标签：
@@ -2360,6 +2609,7 @@ function createFleshWall() {
     level: 5,
     id: 'flesh-wall',
     group,
+    whenReady: Promise.all([eyesModelReady, faceModelReady, teethModelReady, crackDecorReady]),
     stand: { x: 0, z: 4.2 },
     // 瞄准点改成眼睛所在的位置（level.js 的 getAnomalyAimPoint 支持完整 xyz）
     // 瞄准点跟着眼睛走（裂缝中心线在眼睛高度上偏左约 0.14，不能写死 x=0）

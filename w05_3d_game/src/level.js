@@ -91,6 +91,10 @@ export class Level {
     this.debugGroup = null;
     this._debugDoor = null;
     this.furnitureVisuals = [];
+    this.centerSlots = [];
+    this.centerFurniture = [];
+    this.pileFurniture = [];
+    this.summoningLayout = false;
     this.classroomModel = null;
     this.classroomModelError = null;
 
@@ -134,6 +138,8 @@ export class Level {
         model.name = 'Classroom_M1_GLTF';
         const retired = new Set();
         model.traverse((node) => {
+          if (node.name.startsWith('Center_')) this.centerFurniture.push(node);
+          else if (node.name.startsWith('Pile_')) this.pileFurniture.push(node);
           if (!node.isMesh) return;
           node.castShadow = false;
           node.receiveShadow = true;
@@ -151,6 +157,7 @@ export class Level {
           }
         });
         for (const material of retired) material.dispose();
+        this.applyRitualVisibility();
         this.scene.add(model);
         this.classroomModel = model;
         for (const mesh of this.furnitureVisuals) {
@@ -178,6 +185,7 @@ export class Level {
 
   reset() {
     this.clearAnomalies();
+    this.setSummoningLayout(false);
     this.doorOpen = false;
     this.doorAngle = 0;
     this.doorPivot.rotation.y = 0;
@@ -417,8 +425,14 @@ export class Level {
       if (anomaly.parent === 'door') this.doorPivot.add(anomaly.group);
       else this.scene.add(anomaly.group);
       this.anomalies.push(anomaly);
+      if (anomaly.whenReady?.then) {
+        anomaly.whenReady.then(() => {
+          if (!anomaly.group.userData.disposed && anomaly.group.parent) this.onSceneChanged?.();
+        });
+      }
       added = true;
     }
+    if (count >= 3) this.setSummoningLayout(true);
     // 新异常带着新材质，先让渲染器编译，避免玩家第一次看到它时掉帧。
     if (added) this.onSceneChanged?.();
   }
@@ -930,6 +944,7 @@ export class Level {
   setNpcOpacity(opacity) {
     const value = clamp(opacity, 0, 1);
     this.npc.visible = value > 0.04;
+    this.npc.userData.opacity = value;
     for (const material of this.npcMaterials) {
       material.transparent = value < 0.99;
       material.opacity = value;
@@ -1254,7 +1269,9 @@ export class Level {
 
   addDesk(x, z) {
     const { topW, topD, topH } = LAYOUT.desks;
-    this.furnitureVisuals.push(this.addBox(topD, topH, topW, x, topH / 2, z, this.materials.desk, true));
+    const desk = this.addBox(topD, topH, topW, x, topH / 2, z, this.materials.desk, true);
+    this.furnitureVisuals.push(desk);
+    const deskBox = this.staticColliders[this.staticColliders.length - 1];
     const pose = chairPose(x, z);
     const chair = new THREE.Group();
     const seat = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.08, 0.42), this.materials.chair);
@@ -1268,14 +1285,49 @@ export class Level {
     this.scene.add(chair);
     this.furnitureVisuals.push(chair);
     const reach = CHAIR_HALF * (Math.abs(Math.cos(pose.yaw)) + Math.abs(Math.sin(pose.yaw)));
-    this.staticColliders.push({
+    const chairBox = {
       minX: pose.x - reach,
       maxX: pose.x + reach,
       minY: 0,
       maxY: CHAIR_HEIGHT,
       minZ: pose.z - reach,
       maxZ: pose.z + reach,
+    };
+    this.staticColliders.push(chairBox);
+    const index = LAYOUT.ritualCenterDesks.findIndex((spot) => sameSpot(spot, x, z));
+    if (index < 0) return;
+    this.centerSlots.push({
+      index,
+      desk,
+      chair,
+      deskBox,
+      chairBox,
+      home: {
+        deskX: desk.position.x,
+        deskY: desk.position.y,
+        deskZ: desk.position.z,
+        chairX: chair.position.x,
+        chairY: chair.position.y,
+        chairZ: chair.position.z,
+        deskBox: { ...deskBox },
+        chairBox: { ...chairBox },
+      },
     });
+  }
+
+  /** 第 3 关起，正中四套桌椅改堆到四周，给通灵阵让出空地。 */
+  setSummoningLayout(on) {
+    this.summoningLayout = on;
+    for (const slot of this.centerSlots) {
+      if (on) poseSlotPile(slot);
+      else poseSlotHome(slot);
+    }
+    this.applyRitualVisibility();
+  }
+
+  applyRitualVisibility() {
+    for (const node of this.centerFurniture) node.visible = !this.summoningLayout;
+    for (const node of this.pileFurniture) node.visible = this.summoningLayout;
   }
 
   buildDoor() {
@@ -1322,7 +1374,12 @@ export class Level {
   }
 
   buildCharacters() {
-    const customMate = createClassmate(THREE);
+    const customMate = createClassmate(THREE, {
+      onReady: () => {
+        this.npcTorso = customMate.userData.torso ?? null;
+        this.onSceneChanged?.();
+      },
+    });
     const npc = customMate ? {
       group: customMate,
       legs: customMate.userData.legs ?? [],
@@ -1919,7 +1976,8 @@ function makeMaterials() {
     uAmp: { value: 1 },
     uNodeX: { value: new Float32Array(12) },
     uPull: { value: 0.35 },
-    uFace: { value: new THREE.Vector2(LAYOUT.curtainFace.x, LAYOUT.curtainFace.y) },
+    // 窗帘上不再顶着一张脸，按住布的那一块挪到场景外，整面布都跟着风走。
+    uFace: { value: new THREE.Vector2(1000, 1000) },
   };
   const curtainSoft = curtain.clone();
   const curtainSoftRight = curtain.clone();
@@ -2126,6 +2184,114 @@ function furnitureJitter(seed, amount) {
   return ((s / 0xFFFFFFFF) * 2 - 1) * amount;
 }
 
+const DESK_HALF_X = 0.31;
+const DESK_TOP = 0.78;
+const DESK_HALF_Z = 0.58;
+const CHAIR_BOUND = 0.225;
+const CHAIR_TOP = 0.96;
+
+function poseSlotHome(slot) {
+  const { home } = slot;
+  slot.desk.position.set(home.deskX, home.deskY, home.deskZ);
+  slot.desk.rotation.set(0, 0, 0);
+  slot.chair.position.set(home.chairX, home.chairY, home.chairZ);
+  slot.chair.rotation.set(0, -Math.PI / 2, 0);
+  Object.assign(slot.deskBox, home.deskBox);
+  Object.assign(slot.chairBox, home.chairBox);
+}
+
+function poseSlotPile(slot) {
+  const deskPose = LAYOUT.ritualDeskPiles[slot.index];
+  const chairSpot = LAYOUT.ritualChairPiles[slot.index];
+  placeDeskMesh(slot.desk, deskPose);
+  writeAabb(slot.deskBox, transformedCorners(boxCorners(DESK_HALF_X, 0, DESK_TOP, DESK_HALF_Z), deskPose));
+  placeChairGroup(slot.chair, chairSpot);
+  writeAabb(slot.chairBox, transformedCorners(boxCorners(CHAIR_BOUND, 0, CHAIR_TOP, CHAIR_BOUND), chairSpot));
+}
+
+function boxCorners(hx, y0, y1, hz) {
+  const out = [];
+  for (const x of [-hx, hx]) {
+    for (const y of [y0, y1]) {
+      for (const z of [-hz, hz]) out.push({ x, y, z });
+    }
+  }
+  return out;
+}
+
+/** 与 generate_furniture_glb.py 的 rotate_xyz 同一套，对应 Three.js Euler XYZ。 */
+function rotateXYZ(x, y, z, pitch, yaw, roll) {
+  const cp = Math.cos(pitch);
+  const sp = Math.sin(pitch);
+  const y1 = y * cp - z * sp;
+  const z1 = y * sp + z * cp;
+  const cy = Math.cos(yaw);
+  const sy = Math.sin(yaw);
+  const x2 = x * cy + z1 * sy;
+  const z2 = -x * sy + z1 * cy;
+  const cr = Math.cos(roll);
+  const sr = Math.sin(roll);
+  return {
+    x: x2 * cr - y1 * sr,
+    y: x2 * sr + y1 * cr,
+    z: z2,
+  };
+}
+
+function liftFor(corners, pose) {
+  let minY = Infinity;
+  for (const corner of corners) {
+    const point = rotateXYZ(corner.x, corner.y, corner.z, pose.pitch, pose.yaw, pose.roll);
+    if (point.y < minY) minY = point.y;
+  }
+  return minY < 0 ? -minY : 0;
+}
+
+function transformedCorners(corners, pose) {
+  const lift = liftFor(corners, pose);
+  return corners.map((corner) => {
+    const point = rotateXYZ(corner.x, corner.y, corner.z, pose.pitch, pose.yaw, pose.roll);
+    return { x: pose.x + point.x, y: point.y + lift, z: pose.z + point.z };
+  });
+}
+
+function writeAabb(box, corners) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const point of corners) {
+    if (point.x < minX) minX = point.x;
+    if (point.x > maxX) maxX = point.x;
+    if (point.y < minY) minY = point.y;
+    if (point.y > maxY) maxY = point.y;
+    if (point.z < minZ) minZ = point.z;
+    if (point.z > maxZ) maxZ = point.z;
+  }
+  box.minX = minX;
+  box.maxX = maxX;
+  box.minY = Math.max(0, minY);
+  box.maxY = maxY;
+  box.minZ = minZ;
+  box.maxZ = maxZ;
+}
+
+function placeDeskMesh(desk, pose) {
+  const { topH } = LAYOUT.desks;
+  const lift = liftFor(boxCorners(DESK_HALF_X, 0, DESK_TOP, DESK_HALF_Z), pose);
+  const mid = rotateXYZ(0, topH / 2, 0, pose.pitch, pose.yaw, pose.roll);
+  desk.position.set(pose.x + mid.x, mid.y + lift, pose.z + mid.z);
+  desk.rotation.set(pose.pitch, pose.yaw, pose.roll);
+}
+
+function placeChairGroup(chair, pose) {
+  const lift = liftFor(boxCorners(CHAIR_BOUND, 0, CHAIR_TOP, CHAIR_BOUND), pose);
+  chair.position.set(pose.x, lift, pose.z);
+  chair.rotation.set(pose.pitch, pose.yaw, pose.roll);
+}
+
 function chairPose(dx, dz) {
   const seed = Math.trunc((dx + 20) * 97 + (dz + 10) * 13);
   const shiftX = furnitureJitter(seed, 0.035);
@@ -2191,6 +2357,7 @@ function findTag(object) {
 }
 
 function disposeObject(object) {
+  object.userData.disposed = true;
   const geometries = new Set();
   const materials = new Set();
   object.traverse((child) => {
