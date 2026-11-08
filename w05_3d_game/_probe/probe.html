@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>flesh-wall probe</title>
+<style>
+  html,body{margin:0;background:#000;overflow:hidden}
+  canvas{display:block}
+  #stat{position:fixed;right:0;top:0;margin:0;padding:8px 10px;z-index:10;
+        font:14px/1.35 Consolas,monospace;color:#7dff7d;background:rgba(0,0,0,.75);
+        white-space:pre;border-left:1px solid #2a2a2a}
+</style>
+</head>
+<body>
+<pre id="stat">booting…</pre>
+<script type="module">
+import * as THREE from '../vendor/three.module.js';
+import { createAnomaly } from '../src/anomalies.js';
+import { CONFIG } from '../src/config.js';
+
+const FOG = 0x07080c;
+const W1 = 1280, H1 = 700;
+const W2 = 1280, H2 = 420;
+
+function makeRenderer(w, h) {
+  const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  r.setPixelRatio(1);
+  r.setSize(w, h);
+  r.outputColorSpace = THREE.SRGBColorSpace;
+  r.toneMapping = THREE.ACESFilmicToneMapping;
+  r.toneMappingExposure = CONFIG.exposure;
+  document.body.appendChild(r.domElement);
+  return r;
+}
+
+// ---- 场景：复刻 level.js 的灯光与雾，只放第 5 关异常 ----
+function buildScene() {
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(FOG);
+  scene.fog = new THREE.FogExp2(FOG, CONFIG.fogRoom);
+  scene.add(new THREE.AmbientLight(0x93a0b4, CONFIG.ambient));
+  scene.add(new THREE.HemisphereLight(0x1b2433, 0x1a120c, CONFIG.hemi));
+  for (const x of [-6, -2, 2, 6]) {
+    for (const z of [-3, 3]) {
+      const p = new THREE.PointLight(0xffb27a, CONFIG.roomLight, 12, 2);
+      p.position.set(x, 2.72, z);
+      scene.add(p);
+    }
+  }
+  const anomaly = createAnomaly(5);
+  scene.add(anomaly.group);
+  return { scene, anomaly };
+}
+
+// ---- 像素统计 ----
+function stats(renderer, w, h, crackWorld) {
+  const gl = renderer.getContext();
+  const px = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  let cyan = 0, green = 0, red = 0, black = 0, total = 0;
+  for (let i = 0; i < px.length; i += 4) {
+    const r = px[i], g = px[i + 1], b = px[i + 2];
+    total += 1;
+    if (g > 80 && b > 80 && g > r + 25 && b > r + 25) cyan += 1;
+    else if (g > 80 && g > r + 35 && g > b + 15) green += 1;
+    if (r > 55 && r > g + 25 && r > b + 25) red += 1;
+    if (r < 26 && g < 26 && b < 26) black += 1;
+  }
+  return { cyan, green, red, black, total, px };
+}
+
+function pxAt(s, w, h, sx, sy) {
+  // readPixels 的原点在左下角
+  const x = Math.max(0, Math.min(w - 1, Math.round(sx)));
+  const y = Math.max(0, Math.min(h - 1, Math.round(h - 1 - sy)));
+  const i = (y * w + x) * 4;
+  return [s.px[i], s.px[i + 1], s.px[i + 2]];
+}
+
+// 以投影点为中心，找窗口内最暗的一块，判断"有没有真的黑缝"
+function darkestNear(s, w, h, cx, cy, rad) {
+  let best = 999, bestAt = null, blackCount = 0;
+  for (let dy = -rad; dy <= rad; dy += 2) {
+    for (let dx = -rad; dx <= rad; dx += 2) {
+      const x = Math.round(cx + dx), y = Math.round(cy + dy);
+      if (x < 0 || y < 0 || x >= w || y >= h) continue;
+      const [r, g, b] = pxAt(s, w, h, x, y);
+      const lum = r + g + b;
+      if (lum < best) { best = lum; bestAt = [x, y, r, g, b]; }
+      if (r < 30 && g < 30 && b < 30) blackCount += 1;
+    }
+  }
+  return { best, bestAt, blackCount, sampled: (rad * 2 / 2 + 1) ** 2 };
+}
+
+const out = [];
+function log(s) { out.push(s); document.getElementById('stat').textContent = out.join('\n'); }
+
+try {
+  const { scene, anomaly } = buildScene();
+  log('anomaly group children: ' + anomaly.group.children.length);
+
+  // ================= 视角 1：站在 z=4.2 看前墙裂缝 =================
+  const r1 = makeRenderer(W1, H1);
+  const cam1 = new THREE.PerspectiveCamera(70, W1 / H1, 0.08, 180);
+  cam1.position.set(0, 1.62, 4.2);
+  cam1.lookAt(0, 2.70, -6.0);
+  cam1.updateMatrixWorld(true);
+  r1.render(scene, cam1);
+
+  const s1 = stats(r1, W1, H1);
+  log('');
+  log('=== view1  1280x700  cam(0,1.62,4.2) -> (0,2.70,-6) ===');
+  log('cyan  : ' + s1.cyan + ' (' + (s1.cyan / s1.total * 100).toFixed(3) + '%)');
+  log('green : ' + s1.green + ' (' + (s1.green / s1.total * 100).toFixed(3) + '%)');
+  log('redDom: ' + s1.red + ' (' + (s1.red / s1.total * 100).toFixed(2) + '%)');
+  log('black : ' + s1.black + ' (' + (s1.black / s1.total * 100).toFixed(2) + '%)');
+
+  // 裂缝中心（前墙臂中点）投影到屏幕
+  const probePts = [
+    ['wall-mid ', new THREE.Vector3(0, 2.2, -5.92)],
+    ['wall-low ', new THREE.Vector3(0, 1.5, -5.92)],
+    ['corner   ', new THREE.Vector3(0, 3.09, -5.92)],
+    ['ceil-arm ', new THREE.Vector3(0, 3.09, -4.6)],
+  ];
+  for (const [name, v] of probePts) {
+    const p = v.clone().project(cam1);
+    const sx = (p.x * 0.5 + 0.5) * W1;
+    const sy = (-p.y * 0.5 + 0.5) * H1;
+    const inView = p.z < 1 && sx >= 0 && sx < W1 && sy >= 0 && sy < H1;
+    const rgb = inView ? pxAt(s1, W1, H1, sx, sy) : null;
+    log(name + ' scr=(' + sx.toFixed(0) + ',' + sy.toFixed(0) + ')'
+      + (inView ? ' rgb=' + rgb.join(',') : ' OUT-OF-VIEW'));
+  }
+  const d1 = darkestNear(s1, W1, H1, 640, 420, 90);
+  log('darkest in +-90px of (640,420): lum=' + d1.best + ' at ' + JSON.stringify(d1.bestAt));
+  log('near-black samples there: ' + d1.blackCount + '/' + d1.sampled);
+
+  // ================= 视角 2：站在裂缝下方仰视天花板那条臂 =================
+  const r2 = makeRenderer(W2, H2);
+  const cam2 = new THREE.PerspectiveCamera(75, W2 / H2, 0.08, 180);
+  cam2.position.set(0, 1.62, -1.2);
+  cam2.lookAt(0, 3.09, -5.0);
+  cam2.updateMatrixWorld(true);
+  r2.render(scene, cam2);
+
+  const s2 = stats(r2, W2, H2);
+  log('');
+  log('=== view2  1280x420  cam(0,1.62,-1.2) look up ===');
+  log('cyan  : ' + s2.cyan + ' (' + (s2.cyan / s2.total * 100).toFixed(3) + '%)');
+  log('green : ' + s2.green + ' (' + (s2.green / s2.total * 100).toFixed(3) + '%)');
+  log('black : ' + s2.black + ' (' + (s2.black / s2.total * 100).toFixed(2) + '%)');
+  log('DONE');
+} catch (err) {
+  log('ERROR: ' + (err && err.message ? err.message : String(err)));
+  log(String(err && err.stack ? err.stack : ''));
+}
+</script>
+</body>
+</html>

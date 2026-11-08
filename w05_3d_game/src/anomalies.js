@@ -1949,9 +1949,18 @@ function createFleshWall() {
     }
     const EYE_CX = centerXAt(EYE_Y);
 
+    // 淡出枢轴：原点放在**眼睛所在的深度**（EYE_Z），下面所有子节点仍用原来的绝对坐标。
+    // 拍中后整张脸（眼睛 + 尖牙 + 黑脸）一起绕这个点收缩后退。
+    // 之前 fade 只作用于 eyesRoot，而 teethRoot / faceRoot 是它的兄弟节点，
+    // 于是出现"眼睛退回深处、牙齿留在原地"。
+    const fadePivot = new THREE.Group();
+    fadePivot.position.set(EYE_CX, EYE_Y, EYE_Z);
+    group.add(fadePivot);
+
     const innerRoot = new THREE.Group();
-    innerRoot.position.x = EYE_CX;
-    group.add(innerRoot);
+    // 相对 fadePivot 反向偏移，抵消父节点位移，保证子节点坐标一个字都不用改
+    innerRoot.position.set(0, -EYE_Y, -EYE_Z);
+    fadePivot.add(innerRoot);
 
     // 脸单独一层：可以整体做极缓慢的前后"呼吸"，不会带着眼睛一起动
     const faceRoot = new THREE.Group();
@@ -2111,10 +2120,17 @@ function createFleshWall() {
       root: eyesRoot,
       face: faceRoot,
       teeth: teethRoot,
+      assembly: fadePivot,      // 整张脸的父节点：淡出时眼睛和牙齿一起退
       mat: eyeMat,
       base: eyeBase,
       halo: haloMat,
       light: eyeLight,
+      toothMat,
+      toothBase: new THREE.Color(0x4a2a20),   // flatMatVC(0x4a2a20) 的原始色
+      faceMat,
+      faceBase: new THREE.Color(0x050303),
+      faceHi,
+      faceHiBase: new THREE.Color(0x0a0808),
       cx: EYE_CX,
       z0: EYE_Z,
       fade: 0,
@@ -2415,12 +2431,22 @@ function createFleshWall() {
         const f = eyeRig.fade;
         if (f > 0) {
           const k = 1 - f;
+          // 亮度统一压暗：眼睛本体、光晕、点光、尖牙、黑脸，一个都不能留亮
           eyeRig.mat.color.copy(eyeRig.base).multiplyScalar(k);
           eyeRig.halo.opacity = 0.18 * k;
           eyeRig.light.intensity = 1.2 * k;
-          eyeRig.root.scale.setScalar(1 - 0.55 * f);
-          eyeRig.root.position.z = eyeRig.z0 - 0.018 * f;   // 往裂缝深处退
-          if (f >= 1 && eyeRig.root.visible) eyeRig.root.visible = false;
+          eyeRig.toothMat.color.copy(eyeRig.toothBase).multiplyScalar(k);
+          eyeRig.faceMat.color.copy(eyeRig.faceBase).multiplyScalar(k);
+          eyeRig.faceHi.color.copy(eyeRig.faceHiBase).multiplyScalar(k);
+          // 位置：整张脸绕"眼睛深度"这个枢轴收缩。
+          // 牙在前（z=-5.885）、眼在后（z=-5.981），收缩时牙会往后沉进裂缝，
+          // 眼睛基本不动，两者就是同一个动作 —— 不会再出现"眼退牙不退"。
+          // 注意：眼睛离裂缝后壁只剩 1mm，所以这里**不能**再整体加负 z，
+          // 否则会穿到后壁背面被挡掉。
+          eyeRig.root.scale.setScalar(1);
+          eyeRig.root.position.x = 0;
+          eyeRig.assembly.scale.setScalar(1 - 0.55 * f);
+          if (f >= 1 && eyeRig.assembly.visible) eyeRig.assembly.visible = false;
         } else {
           // 心跳缩放 + 极慢的左右扫视，避免"死盯"的假感
           eyeRig.root.scale.setScalar(1 + 0.06 * Math.sin(time * 2.4));
@@ -2430,15 +2456,16 @@ function createFleshWall() {
         }
 
         // 尖牙缓慢开合（方案 B）：两排整体各向外扩/收约 ±2cm，周期 6.5 秒；
-        // 灯灭时张幅 +50%（呼吸变重）。
-        if (eyeRig.teeth) {
+        // 灯灭时张幅 +50%（呼吸变重）。淡出期间冻结，免得"一边退一边还在张合"。
+        if (eyeRig.teeth && f <= 0) {
           const openAmp = flicker ? 0.052 : 0.035;
           eyeRig.teeth.scale.x = 1 + Math.sin(time * 0.966) * openAmp;
         }
 
         // 脸极缓慢地前后"呼吸"（±1cm，周期约 7.3 秒）：眼睛不动、脸在靠近。
         // 这是"黑暗里有个大东西在呼吸"最省成本的写法，比加牙更符合"未知"。
-        if (eyeRig.face) {
+        // 淡出期间同样冻结，否则会和后退动作打架。
+        if (eyeRig.face && f <= 0) {
           const amp = flicker ? 0.014 : 0.010;
           eyeRig.face.position.z = Math.sin(time * 0.86) * amp;
         }

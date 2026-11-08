@@ -12,6 +12,11 @@ const LEVELS = 5;
 const CAMERA_DRAW_TIME = 0.45;
 const CAMERA_LOWER_TIME = 0.4;
 const CAMERA_SHOOT_TIME = 0.35;
+/**
+ * 逃跑方向的朝向角（yaw）。走廊沿 +X 通向 EXIT，yaw = 0 朝 -Z、
+ * 所以 +X 是 -π/2。终局强迫回头之后镜头会自动转回这个角度。
+ */
+const ESCAPE_YAW = -Math.PI / 2;
 
 /**
  * 状态：menu → prologue → level → corridor → … → finaleLook → chase → epilogue → win
@@ -43,6 +48,7 @@ export class Game {
     this.pendingLine = null;
     this.photoLock = 0;
     this.lookT = 0;
+    this.turning = false;
     this.epilogueT = 0;
     this.endingFade = 0;
     this.saidEnd = false;
@@ -76,6 +82,7 @@ export class Game {
     this.pendingLine = null;
     this.photoLock = 0;
     this.lookT = 0;
+    this.turning = false;
     this.epilogueT = 0;
     this.epiStage = 0;
     this.epiStageT = 0;
@@ -93,6 +100,10 @@ export class Game {
     this.shakeY = 0;
     this.shakeT = 0;
     this.l5ShakeT = 0; // 第5关拍照后颤抖计时
+    this.entityStepAcc = 0; // 追逐中怪物已走的距离，攒够一个步幅就响一声
+    this.entityStepSide = 1; // 左右脚交替（声音声像 ±0.28）
+    this.roarArmed = true; // 只有「拉开过距离」再贴近才会再吼，避免一路狂吼
+    this.roarCool = 0; // 两次嘶吼的冷却（秒）
     this.controlHints = [];
     this.level.reset();
     this.player.setScripted(asDemo);
@@ -474,8 +485,12 @@ export class Game {
     }
     if (this.phase === 'finaleLook') {
       this.lookT += dt;
-      const need = lookHoldSeconds();
-      if (this.lookT >= need) this.beginChase();
+      if (this.turning) {
+        // 镜头正自己往逃跑方向转；转到位才交还操作（这期间怪物也是停着的）
+        if (!this.player.autoTurn) this.finishTurnBack();
+      } else if (this.lookT >= lookHoldSeconds()) {
+        this.beginChase();
+      }
     }
     if (this.phase === 'finaleChase') this.updateChase(dt);
     if (this.phase === 'epilogue') this.updateEpilogue(dt);
@@ -540,6 +555,7 @@ export class Game {
   beginFinale() {
     this.phase = 'finaleLook';
     this.lookT = 0;
+    this.turning = false;
     this.level.loopEnabled = false;
     this.level.setDoorOpen(false);
     this.level.showExit(true);
@@ -554,32 +570,86 @@ export class Game {
     emit(EVENT.lookLock, { target: eyes });
     this.audio.startHeartbeat();
     this.audio.setMood('chase');
+    // 镜头被拧向它的那一刻，它张嘴了 —— 玩家看见脸，也听见嗓子
+    this.audio.roar(0.95, 0);
     this.hud.setObjective(copy.runToExit);
     this.hud.setChase(false);
     this.autoLowerCamera();
     this.say(copy.itCame, 1.5);
   }
 
+  /**
+   * 注视结束 → 镜头自动转回逃跑方向。
+   * 玩家被强迫看完身后的怪物之后不用自己转身：镜头自己拧回 +X（EXIT 那头），
+   * 转到位才把操作权交回去，所以接下来只要按 W 往前跑。
+   */
   beginChase() {
     if (this.phase !== 'finaleLook') return;
-    this.phase = 'finaleChase';
+    this.turning = true;
     this.player.endLookLock();
-    emit(EVENT.lookUnlock, {});
+    this.player.beginAutoTurn(ESCAPE_YAW, 0);
     this.player.clearInteract();
     this.player.clearShoot();
-    // 注视期间玩家可能又拿出了相机，追逐开启时再收一次；之后仍可按 E 拿出
+    // 注视期间玩家可能又拿出了相机，这里再收一次；之后仍可按 E 拿出
     this.autoLowerCamera();
+    // 转身这 0.73 秒把环境低频抽空：真空之后再落 stinger，起跑那一下才有重量
+    // 长啸 2.4–2.6 秒，会在撞墙前把这一秒静音盖掉 —— 先掐掉，只留「吼 → 死寂 → 快跑！」
+    this.audio.cutRoar(0.18);
+    this.audio.duckAmbient(true);
+  }
+
+  /** 视角已经转回逃跑方向：交还操作，追逐正式开始，怪物起步。 */
+  finishTurnBack() {
+    this.turning = false;
+    this.phase = 'finaleChase';
+    emit(EVENT.lookUnlock, {});
     if (!this.demoActive) this.player.setControl(true);
     this.hud.setChase(true);
-    this.say(copy.turnAndSprint, 2.4);
+    // 正中「快跑！」闪一下就没了，常驻的只有上面那行「按住 Shift 冲刺」
+    this.hud.flashChase();
+    // 与「快跑！」同一帧落地：环境低频回来 + 一记下潜
+    this.audio.duckAmbient(false);
+    this.audio.stinger();
+    // 真空之后第一拍立刻落地：节拍层从这一帧开始，和 stinger、「快跑！」同一帧
+    this.audio.startChaseMusic();
+    this.entityStepAcc = 0;
+    this.entityStepSide = 1;
+    this.roarArmed = true;
+    this.roarCool = 1.2;
   }
 
   updateChase(dt) {
+    const beforeX = this.level.entity.position.x;
+    const beforeZ = this.level.entity.position.z;
     this.level.stepEntity(this.player.x, this.player.z, dt);
     const dist = Math.hypot(
       this.player.x - this.level.entity.position.x,
       this.player.z - this.level.entity.position.z,
     );
+    // 怪物一步 1.5 米（4.45m/s ⇒ 约 3 步/秒），按实际走过的距离累积，
+    // 不会因为掉帧或多算一帧而变调。之前整段追逐它一声不响。
+    const moved = Math.hypot(
+      this.level.entity.position.x - beforeX,
+      this.level.entity.position.z - beforeZ,
+    );
+    this.entityStepAcc += moved;
+    if (this.entityStepAcc >= 1.5) {
+      this.entityStepAcc -= 1.5;
+      this.entityStepSide = -this.entityStepSide;
+      this.audio.monsterStep(dist, 0.28 * this.entityStepSide);
+    }
+    // 贴近到 4.6 米它会吼。带迟滞 + 冷却：先被拉开到 6.2 米之外、再逼近才吼一次，
+    // 否则贴脸时会变成循环播放的「吼吼吼」。声像按它偏在你哪一侧给一点左右。
+    this.roarCool = Math.max(0, this.roarCool - dt);
+    if (dist > 6.2) this.roarArmed = true;
+    else if (dist < 4.6 && this.roarArmed && this.roarCool <= 0) {
+      this.roarArmed = false;
+      // 长啸 2.4 秒，冷却必须比它长，否则会变成一条接一条的「啊啊啊」
+      this.roarCool = 6.0;
+      const near = 1 - Math.max(0, dist - CONFIG.entityCatch) / 4;
+      const side = clamp((this.level.entity.position.z - this.player.z) * 0.25, -0.45, 0.45);
+      this.audio.roar(0.6 + 0.45 * clamp(near, 0, 1), side);
+    }
     // 眼睛先够到走廊尽头的同学 —— 追逐就地结束
     const mateDist = Math.hypot(
       this.level.entity.position.x - LAYOUT.classmateEnd.x,
@@ -782,6 +852,9 @@ export class Game {
     this.player.clearCourse();
     this.level.hideEntity();
     this.audio.stopHeartbeat();
+    // 被咬住那一下：一声近身嘶吼盖住所有其它声音
+    this.audio.roar(1.1, 0);
+    this.audio.stopChaseMusic();
     this.audio.lose();
     this.hud.setChase(false);
     if (this.cameraState !== 'none') this.setCameraState('holstered');
@@ -822,9 +895,13 @@ export class Game {
       const dx = this.player.x - this.level.entity.position.x;
       const dz = this.player.z - this.level.entity.position.z;
       const dist = Math.hypot(dx, dz);
-      this.hud.setDanger(clamp(1 - (dist - CONFIG.entityCatch) / 6, 0, 1));
+      const danger = clamp(1 - (dist - CONFIG.entityCatch) / 6, 0, 1);
+      this.hud.setDanger(danger);
+      // 同一份压力喂给声音：心跳 97 → 150 bpm，低频 drone 48 → 58Hz
+      this.audio.setTension(danger);
     } else if (this.phase !== 'lose') {
       this.hud.setDanger(0);
+      this.audio.setTension(0);
     }
   }
 

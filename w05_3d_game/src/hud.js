@@ -1,4 +1,4 @@
-﻿import { Viewfinder } from './viewfinder.js';
+import { Viewfinder } from './viewfinder.js';
 
 /** DOM 界面：标题、HUD、暂停 / 胜负、音量。不碰 Three 场景。 */
 export class Hud {
@@ -22,6 +22,7 @@ export class Hud {
     this.muteButtons = [...document.querySelectorAll('[data-mute]')];
     this.menuNote = byId('menu-note');
     this.chase = byId('chase');
+    this.chaseFlash = byId('chase-flash');
     this.buttons = {
       resume: byId('btn-resume'),
       retry: byId('btn-retry'),
@@ -164,6 +165,20 @@ export class Hud {
 
   setChase(on) {
     this.chase.classList.toggle('hidden', !on);
+    // 进追逐时那一下「快跑！」还没淡完就输了，别让它停在半透明上
+    if (!on) this.chaseFlash.classList.remove('on');
+  }
+
+  /**
+   * 屏幕正中闪一次「快跑！」（约 1 秒后自动淡掉）。
+   * 动画靠 CSS，这里只负责重播：先摘 .on、强制一次回流让浏览器忘记上一轮，
+   * 再加回去。不这样写的话，第二次进追逐（重开一局）字不会再出现。
+   */
+  flashChase() {
+    const el = this.chaseFlash;
+    el.classList.remove('on');
+    void el.offsetWidth;
+    el.classList.add('on');
   }
 
   syncMute(muted) {

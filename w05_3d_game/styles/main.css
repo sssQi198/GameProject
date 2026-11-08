@@ -104,6 +104,39 @@ body { min-width: 320px; }
   color: #ffb4a8;
 }
 
+/* 转回逃跑方向时屏幕正中的「快跑！」：出现约 1 秒、再淡掉，之后不再出现。
+   动画只在 hud.flashChase() 加 .on 时播放，播完停在 100%（opacity:0）。 */
+#chase-flash {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  font-family: "Arial Black", "Microsoft YaHei", sans-serif;
+  font-weight: 900;
+  font-size: calc(260 * var(--u));
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: #ff2a26;
+  text-shadow: 0 0 calc(26 * var(--u)) rgba(255, 30, 24, 0.92), 0 0 calc(90 * var(--u)) rgba(190, 12, 12, 0.6), 0 calc(8 * var(--u)) calc(30 * var(--u)) #000;
+  opacity: 0;
+  /* 压在准星上面：正中那个点会正好落在字里 */
+  z-index: 2;
+  will-change: opacity;
+}
+
+#chase-flash.on { animation: chase-flash 1.7s ease-out forwards; }
+
+@keyframes chase-flash {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(1.4); }
+  8% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  /* 到 62% ≈ 1.05 秒都保持全亮，再花 0.65 秒淡掉 */
+  62% { opacity: 1; transform: translate(-50%, -50%) scale(1.02); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.06); }
+}
+
+/* 动效敏感的用户走最后那段 prefers-reduced-motion：不缩放，只淡入淡出 */
+
 #crosshair {
   position: absolute;
   left: 50%;
@@ -901,6 +934,7 @@ button:hover { border-color: #c45c58; color: #fff4e7; }
   #vf-tint, #vf-grain {
     animation: none;
   }
+  #chase-flash.on { animation: chase-flash-flat 1.7s linear forwards; }
 }
 
 @keyframes vf-open-reduced {
@@ -916,4 +950,12 @@ button:hover { border-color: #c45c58; color: #fff4e7; }
 @keyframes vf-shoot-reduced {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.8; }
+}
+
+/* 「快跑！」的不缩放版本：只淡入、保持 1 秒、淡出，位置和大小都不动 */
+@keyframes chase-flash-flat {
+  0% { opacity: 0; }
+  4% { opacity: 1; }
+  62% { opacity: 1; }
+  100% { opacity: 0; }
 }

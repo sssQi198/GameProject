@@ -311,7 +311,13 @@ if (eyeRoot) {
   for (let i = 0; i < 40; i += 1) {
     anomaly.update(0.05, { time: i * 0.05, flickerDark: false });
   }
-  check(eyeRoot.visible === false, '推进 2 秒后眼睛组已隐藏（淡出收敛）');
+  // 淡出隐藏的是整张脸的父节点（眼睛 + 牙齿一起走），
+  // 所以这里要沿父链判断"实际是否还画得出来"，不能只看 eyesRoot.visible
+  let effVisible = true;
+  for (let n = eyeRoot; n; n = n.parent) {
+    if (n.visible === false) { effVisible = false; break; }
+  }
+  check(effVisible === false, '推进 2 秒后眼睛组已隐藏（淡出收敛）');
 }
 log('');
 log(fails === 0 ? '全部通过' : ('有 ' + fails + ' 项未通过'));

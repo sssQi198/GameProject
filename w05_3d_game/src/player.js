@@ -1,4 +1,4 @@
-﻿import * as THREE from '../vendor/three.module.js';
+import * as THREE from '../vendor/three.module.js';
 import { CONFIG } from './config.js';
 import { moveCircle } from './collision.js';
 import { lookResponsiveness } from './team/p2.js';
@@ -34,6 +34,7 @@ export class Player {
     this.course = null;
     this.courseDone = false;
     this.lookTarget = null;
+    this.autoTurn = null;
     this.pendingDX = 0;
     this.pendingDY = 0;
     this.interactQueued = false;
@@ -72,6 +73,7 @@ export class Player {
     this.course = null;
     this.courseDone = false;
     this.lookTarget = null;
+    this.autoTurn = null;
     this.pendingDX = 0;
     this.pendingDY = 0;
     this.interactQueued = false;
@@ -179,6 +181,23 @@ export class Player {
     this.pendingDY = 0;
   }
 
+  /**
+   * 自动把视角拧到指定朝向 —— 用在「被强迫扭头看完身后的怪物之后，镜头自己转回逃跑方向」。
+   * 只给角度不给目标点：正后方正好差 180°，用点算方向会左右不定。
+   * 转到位（差 0.02 rad ≈ 1°）后自动结束，期间不接受任何输入。
+   */
+  beginAutoTurn(yaw, pitch = 0) {
+    this.autoTurn = { yaw, pitch };
+    this.pendingDX = 0;
+    this.pendingDY = 0;
+  }
+
+  endAutoTurn() {
+    this.autoTurn = null;
+    this.pendingDX = 0;
+    this.pendingDY = 0;
+  }
+
   /** 把视角精确对准世界坐标，演示拍照用。 */
   facePoint(x, y, z) {
     const dx = x - this.x;
@@ -197,7 +216,11 @@ export class Player {
     const x0 = this.x;
     const z0 = this.z;
     this.radius = CONFIG.playerRadius;
-    if (this.lookTarget) {
+    if (this.autoTurn) {
+      this.applyAutoTurn(dt);
+      this.moving = false;
+      this.sprinting = false;
+    } else if (this.lookTarget) {
       this.applyLookLock(dt);
       this.moving = false;
       this.sprinting = false;
@@ -245,6 +268,24 @@ export class Player {
     this.pitch += (desiredPitch - this.pitch) * k;
     this.pendingDX = 0;
     this.pendingDY = 0;
+  }
+
+  applyAutoTurn(dt) {
+    const t = this.autoTurn;
+    const k = 1 - Math.exp(-lookResponsiveness() * dt);
+    this.yaw = lerpAngle(this.yaw, t.yaw, k);
+    this.pitch += (t.pitch - this.pitch) * k;
+    this.pendingDX = 0;
+    this.pendingDY = 0;
+    let d = t.yaw - this.yaw;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    // 差 1° 以内就直接对齐，别让它永远差一点点
+    if (Math.abs(d) < 0.02) {
+      this.yaw = t.yaw;
+      this.pitch = t.pitch;
+      this.autoTurn = null;
+    }
   }
 
   applyCourse(dt, colliders) {

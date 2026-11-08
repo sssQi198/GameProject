@@ -2,6 +2,7 @@ import * as THREE from '../vendor/three.module.js';
 import { CONFIG } from './config.js';
 import { LAYOUT } from './layout.js';
 import { moveCircle, stepDynamicBodies } from './collision.js';
+import { HALL_FLICKER_X, hallChaseLamp, hallLampPan, hallLampPassed } from './hallglow.js';
 import { cameraModel, createAnomaly } from './anomalies.js';
 import { emit } from './team/bus.js';
 import { EVENT, tagPhysical } from './team/contract.js';
@@ -35,6 +36,10 @@ const TURNED_CHAIR_YAW = [
 /** 座面金属框 0.45 见方。转过角度后，轴对齐盒子要包住四个角。 */
 const CHAIR_HALF = 0.225;
 const CHAIR_HEIGHT = 0.96;
+/** 走廊灯平时的光半径（米）。追逐时换成 hallglow.js 的灯池半径。 */
+const HALL_LAMP_RADIUS = 14;
+/** 灯管自发光强度（平时）。追逐时的值见 hallChaseLamp()。 */
+const HALL_BULB_GLOW = 0.9;
 
 /**
  * 教室 + 循环走廊。几何体是程序生成的，建模组以后可以把同名网格换成 GLB。
@@ -66,6 +71,16 @@ export class Level {
       },
     ];
     this.hallLamps = [];
+    /** 与 hallLamps 一一对应的灯管网格（每盏灯自己的材质，闪烁时要单独压暗）。 */
+    this.hallBulbs = [];
+    /** 追逐时会闪的灯在 hallLamps 里的下标。 */
+    this.hallFlicker = new Set();
+    /** 追逐段自己的时钟：闪烁曲线按这个走，跟游戏内计时无关。 */
+    this.hallTime = 0;
+    /** 追逐中已经被玩家甩在身后、永久熄灭的灯的下标。 */
+    this.hallDead = new Set();
+    /** 本次追逐是否已经做过「起跑时就在身后的灯」的静音清点。 */
+    this.hallPrimed = false;
     this.npcDone = false;
     this.npcIndex = 1;
     this.doorOpen = false;
@@ -186,6 +201,8 @@ export class Level {
     this.exitLight.intensity = 0;
     this.pickup.visible = false;
     this.pickupLight.intensity = 0;
+    this.hallDead.clear();
+    this.hallPrimed = false;
     for (const prop of this.props) this.resetItem(prop);
   }
 
@@ -549,6 +566,8 @@ export class Level {
     this.entity.position.x += (dx / dist) * step;
     this.entity.position.z += (dz / dist) * step;
     this.entityLight.intensity = 12;
+    // 飞向同学时把脸也转过去：最后那一幕看到的是"眼睛+咧嘴"贴上去，不是后脑勺
+    this.entity.rotation.y = Math.atan2(dx, dz);
     return dist - step;
   }
 
@@ -591,9 +610,21 @@ export class Level {
     );
     this.entity.position.x = next.x;
     this.entity.position.z = next.z;
+    this.entity.rotation.y = Math.atan2(targetX - next.x, targetZ - next.z);
+    this.updateGrin(Math.hypot(next.x - targetX, next.z - targetZ));
     const pulse = 1 + Math.sin(performance.now() * 0.012) * 0.18;
-    this.eyeL.scale.setScalar(pulse);
-    this.eyeR.scale.setScalar(pulse);
+    if (this.eyeL) this.eyeL.scale.setScalar(pulse);
+    if (this.eyeR) this.eyeR.scale.setScalar(pulse);
+  }
+
+  /**
+   * 贴脸压制：怪物贴到面前时那张 0.92m 宽的咧嘴会糊掉半个屏幕。
+   * 3.2m 之外满强度（远看仍是咧嘴），1.6m 处收到最弱的四成亮度 + 缩到 0.88。
+   */
+  updateGrin(dist) {
+    if (!this.setGrin) return;
+    const k = Math.min(1, Math.max(0, (dist - 1.6) / (3.2 - 1.6)));
+    this.setGrin(k);
   }
 
   showExit(on) {
@@ -626,7 +657,7 @@ export class Level {
     this.doorPivot.rotation.y = this.doorAngle;
 
     stepFlicker(this, dt, env.mood);
-    this.updateLights(env);
+    this.updateLights(env, dt);
     tickRoom(this, dt, env);
     this.updateNpc(dt, env);
     this.npcFootstep(dt, env);
@@ -660,9 +691,11 @@ export class Level {
    * 灯光调节 —— 后续AI接管者注意：
    * – 整体亮度：只改 `CONFIG.brightness`（1 = 原版暗光）
    * – 走廊灯颜色/亮度：调 `CONFIG.hallLamp`（config._lighting）或下方 `this.hallLamps`
+   * – 追逐时的走廊灯池（灯下很亮、灯间一小段暗、两盏在抖）：只改 config 的
+   *   `hallPoolGain` / `hallPoolRadius` 和 hallglow.js 里的 `HALL_FLICKER_X`、闪烁节奏
    * - 环境光/雾：调 `CONFIG.ambient` 和 scene.fog.density
    */
-  updateLights(env) {
+  updateLights(env, dt = 0) {
     const menu = env.mood === 'menu';
     const chase = env.mood === 'chase';
     const calm = env.mood === 'calm';
@@ -679,8 +712,47 @@ export class Level {
       const fixture = this.roomFixtures[i];
       if (fixture) fixture.material.emissiveIntensity = intensity > 4 ? 0.45 : 0.05;
     }
-    const lamp = chase ? 0 : calm ? CONFIG.hallLamp * 1.6 : CONFIG.hallLamp;
-    for (const light of this.hallLamps) light.intensity = lamp * bright;
+    if (chase) {
+      // 追逐：灯池 + 两盏抖灯 + 被甩在身后的灯永久熄灭。曲线和参数在 hallglow.js
+      // （那边有单测），这里只负责把数值搬到灯和灯管上，不新增也不移除灯
+      // （改灯数会触发着色器重编译，进追逐那一下会顿）。
+      this.hallTime += dt;
+      const playerX = Number(env.playerX);
+      // 进追逐的第一帧：起跑时就已经在身后的灯静音处理掉 —— 它们本来就在雾里，
+      // 四五盏一起「啪」只会糊成一片杂音，盖掉起跑的 stinger。
+      if (!this.hallPrimed && Number.isFinite(playerX)) {
+        this.hallPrimed = true;
+        for (let i = 0; i < this.hallLamps.length; i += 1) {
+          if (hallLampPassed(playerX, this.hallLamps[i].position.x)) this.hallDead.add(i);
+        }
+      }
+      for (let i = 0; i < this.hallLamps.length; i += 1) {
+        const lamp = this.hallLamps[i];
+        if (!this.hallDead.has(i) && hallLampPassed(playerX, lamp.position.x)) {
+          this.hallDead.add(i);
+          // 只给「刚跑过、还在身边这几米」的灯配声音；更远的灭在雾里，听不见才对
+          if (playerX - lamp.position.x <= 8) {
+            env.audio?.lampDeath?.(hallLampPan(playerX, lamp.position.x));
+          }
+        }
+        if (this.hallDead.has(i)) {
+          lamp.intensity = 0;
+          this.hallBulbs[i].material.emissiveIntensity = 0;
+          continue;
+        }
+        const state = hallChaseLamp(this.hallTime, i, this.hallFlicker.has(i));
+        lamp.intensity = state.intensity * bright;
+        lamp.distance = state.distance;
+        this.hallBulbs[i].material.emissiveIntensity = state.bulb;
+      }
+    } else {
+      const lamp = calm ? CONFIG.hallLamp * 1.6 : CONFIG.hallLamp;
+      for (const light of this.hallLamps) {
+        light.intensity = lamp * bright;
+        light.distance = HALL_LAMP_RADIUS;
+      }
+      for (const bulb of this.hallBulbs) bulb.material.emissiveIntensity = HALL_BULB_GLOW;
+    }
     const ambient = calm ? CONFIG.ambient * 2.4 : CONFIG.ambient;
     this.ambient.intensity = ambient * bright;
     if (this.hemi) this.hemi.intensity = CONFIG.hemi * bright;
@@ -1316,29 +1388,38 @@ export class Level {
     this.entityFadeT = 0;
 
     this.entity = new THREE.Group();
-    const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2438 });
-    eyeMat.toneMapped = false;
-    this.eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 10), eyeMat);
-    this.eyeR = this.eyeL.clone();
-    this.eyeL.position.set(-0.11, 1.62, 0);
-    this.eyeR.position.set(0.11, 1.62, 0);
-    const dark = new THREE.Mesh(
-      new THREE.SphereGeometry(1.55, 18, 12),
-      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.45, depthWrite: false }),
-    );
-    dark.position.y = 1.45;
     this.entityLight = new THREE.PointLight(0xff2233, 0, 7, 2);
     this.entityLight.position.y = 1.6;
-    this.entity.add(this.eyeL, this.eyeR, dark, this.entityLight);
+    this.entity.add(this.entityLight);
+    this.setGrin = null;
     const customEyes = createEyes(THREE);
     if (customEyes) {
+      // m2.js 那套已经是"第五关同一张脸"：眼睛 + 加性光晕 + 脸板 + 咧嘴尖牙 + 身后一团黑。
+      // 这里不要再叠一个黑球，否则两层半透明黑会把牙蒙没。
       this.entity.add(customEyes);
-      this.eyeL.visible = false;
-      this.eyeR.visible = false;
-      if (customEyes.userData.eyeL) this.eyeL = customEyes.userData.eyeL;
-      if (customEyes.userData.eyeR) this.eyeR = customEyes.userData.eyeR;
+      this.eyeL = customEyes.userData.eyeL || null;
+      this.eyeR = customEyes.userData.eyeR || null;
+      this.setGrin = customEyes.userData.setGrin || null;
+    } else {
+      // 兜底：没有自定义模型时用同一套数值，避免两个版本看起来不是同一个东西。
+      const eyeMat = new THREE.MeshBasicMaterial({ color: 0xff2030 });
+      eyeMat.toneMapped = false;
+      this.eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.087, 16, 12), eyeMat);
+      this.eyeR = this.eyeL.clone();
+      this.eyeL.position.set(-0.19, 1.62, 0.02);
+      this.eyeR.position.set(0.19, 1.62, 0.02);
+      const dark = new THREE.Mesh(
+        new THREE.SphereGeometry(1.55, 18, 12),
+        new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.5, depthWrite: false }),
+      );
+      dark.position.set(0, 1.45, -1.62);
+      this.entity.add(this.eyeL, this.eyeR, dark);
     }
     markNoRay(this.entity);
+    // 以前只有两颗球，朝向无所谓；现在有了正面（脸 + 咧嘴朝 +Z），
+    // 默认让它朝 +X —— 走廊沿 X 走，终局实体总是从玩家身后沿 -X 追上来。
+    // 实际朝向在 stepEntity / homeEntityTo 里按目标逐帧修正。
+    this.entity.rotation.y = Math.PI / 2;
     this.entity.visible = false;
     this.scene.add(this.entity);
   }
@@ -1522,18 +1603,25 @@ export class Level {
     // 走廊 106 米长，雾的可见距离只有十几米，5 米一盏等于让每帧多算一倍光照。
     // 改成 10 米一盏，近处观感几乎不变，片元光照循环少一半。
     for (let x = LAYOUT.hall.minX + 10; x <= LAYOUT.hall.maxX - 5; x += 10) {
-      const lamp = new THREE.PointLight(0x8ea0c0, CONFIG.hallLamp, 14, 2);
+      const lamp = new THREE.PointLight(0x8ea0c0, CONFIG.hallLamp, HALL_LAMP_RADIUS, 2);
       lamp.position.set(x, 2.55, LAYOUT.hall.z);
       this.scene.add(lamp);
       this.hallLamps.push(lamp);
+      // 灯管材质每盏一份：追逐时闪的那两盏要单独压暗本体，
+      // 共用一份材质会把整条走廊的灯管一起变暗。
       const bulb = new THREE.Mesh(
         new THREE.BoxGeometry(0.5, 0.06, 0.16),
-        this.materials.bulb,
+        this.materials.bulb.clone(),
       );
       bulb.position.copy(lamp.position);
       markNoRay(bulb);
       this.scene.add(bulb);
+      this.hallBulbs.push(bulb);
     }
+    // 该闪哪几盏按 x 认，走廊间距一改也不会错位到别的灯上
+    this.hallLamps.forEach((lamp, i) => {
+      if (HALL_FLICKER_X.some((x) => Math.abs(lamp.position.x - x) < 0.01)) this.hallFlicker.add(i);
+    });
   }
 
   addRoomLight(x, z) {

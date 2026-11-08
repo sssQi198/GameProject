@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>HUD 静态样张（追逐提示）</title>
+  <!-- 只用来肉眼看 CSS：真 index.html 的 #hud 片段 + 真 main.css，不含 WebGL -->
+  <link rel="stylesheet" href="../styles/main.css">
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background:
+        radial-gradient(120% 90% at 50% 55%, #10151d 0%, #060a10 45%, #020306 100%);
+    }
+    #stage {
+      position: relative;
+      width: 100%;
+      height: 100vh;
+      overflow: hidden;
+    }
+    /* 把「快跑！」定格在最亮的那一帧：动画本身的时间轴看不出字号和辉光 */
+    #chase-flash {
+      animation: none !important;
+      opacity: 1 !important;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <div id="hud">
+      <header class="hud-top">
+        <div>
+          <p id="record">记录  0 / 5</p>
+          <p id="timer">00:00</p>
+          <p id="objective">跑向绿色 EXIT</p>
+        </div>
+        <button id="btn-mute-hud" type="button" data-mute>Mute  静音</button>
+      </header>
+      <p id="chase">按住 Shift 冲刺</p>
+      <p id="chase-flash" aria-hidden="true">快跑！</p>
+      <div id="crosshair"></div>
+      <p id="subtitle"></p>
+      <p id="prompt"></p>
+    </div>
+  </div>
+</body>
+</html>

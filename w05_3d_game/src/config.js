@@ -1,4 +1,4 @@
-﻿/** 手感与气氛。`?debug` 面板改的就是这些字段，每帧读取。 */
+/** 手感与气氛。`?debug` 面板改的就是这些字段，每帧读取。 */
 export const CONFIG = {
   walkSpeed: 3.2,
   sprintSpeed: 5.5,
@@ -21,6 +21,13 @@ export const CONFIG = {
   hemi: 0.30,
   roomLight: 15.75,
   hallLamp: 36,
+  /**
+   * 追逐时走廊灯的「灯池」：半径收到 5.5 米（比两灯中点到灯的 5.6 米还小），
+   * 于是灯下很亮、两灯之间那一小段只剩环境光，暗得下来。
+   * 想更亮就调 hallPoolGain，想灯池更窄/间隙更宽就调小 hallPoolRadius。
+   */
+  hallPoolRadius: 5.5,
+  hallPoolGain: 2,
   lampDim: 0.35,
   lamp: 0.7,
   lampChase: 1.1,
