@@ -31,11 +31,44 @@ export const introAftermath = '发生什么了！我得去看看……';
 
 export const skipHint = 'E 跳过剧情';
 
+/**
+ * 暂停 / 胜负面板的文案。
+ * 标题和正文里用 ~~xx~~ 标记“这个字被划掉、被腐蚀掉了”，
+ * hud.js 会把它渲染成带划痕的 span。
+ * actions 是按钮文案，按钮 id 对应关系：resume / retry / restart / menu。
+ */
+export const panelCopy = {
+  pause: {
+    title: '意识~~涣~~散',
+    body: '别挣扎了……它们正在门外。\n你的理智值正在流失……你确定要面对门后的东西吗？',
+    actions: {
+      resume: '送死（继续噩梦）',
+      restart: '重新开始（无尽的折磨）',
+      menu: '懦夫（放弃求生）',
+    },
+  },
+  lose: {
+    title: '逃不~~掉~~了',
+    body: '它碰到你了。它没有体温。\n按住 Shift 冲刺，它比走路更快。',
+    actions: {
+      retry: '再挣扎一次',
+      restart: '重新开始（无尽的折磨）',
+      menu: '懦夫（放弃求生）',
+    },
+  },
+  win: {
+    title: '你~~出~~来了',
+    body: '他回头看你的那双眼睛，和你刚才逃的一模一样。\n门已经关上了。恭喜你——你还在这栋楼里。',
+    actions: {
+      restart: '重新开始（无尽的折磨）',
+      menu: '懦夫（放弃求生）',
+    },
+  },
+};
+
 export const copy = {
   follow: '跟着前面的人',
   wait: '等等我。',
-  pauseTitle: '暂停',
-  pauseBody: 'M 静音。Esc 或 Resume 回到楼里。',
   doorStillOpen: '门还开着。',
   someoneGone: '……人呢？',
   cameraOnFloor: '地上有一台相机。',
@@ -52,7 +85,4 @@ export const copy = {
   photoMiss: '没有记录到新异常。',
   doorOpen: '门开了',
   aheadPerson: '前面那个人',
-  winTitle: '你出来了',
-  loseTitle: '它碰到你了',
-  loseBody: '按住 Shift 冲刺。它比走路更快。',
 };

@@ -1061,17 +1061,25 @@ function createRedDoll() {
               chargeMaxDist = Math.hypot(faceX - launchX, faceZ - launchZ);
               advanceHold(env);
 
-              // 播放冲刺音效
-              if (audio) {
-                try {
-                  // 渐强噪音
-                  audio.burst({ duration: 0.08, gain: 0.15, type: 'highpass', freq: 3000, q: 0.4 });
-                  audio.burst({ duration: 0.12, gain: 0.25, type: 'bandpass', freq: 800, q: 0.6, delay: 0.02 });
-                  audio.burst({ duration: 0.2, gain: 0.35, type: 'bandpass', freq: 400, q: 0.5, delay: 0.06 });
-                  // 低吼
-                  audio.tone(110, 0.35, 0.10, 'sawtooth');
-                  audio.tone(55, 0.4, 0.06, 'sine');
-                } catch (e) { /* 音效出错不影响核心逻辑 */ }
+              // 突脸音效：只在第四关小人真正冲过来的这一刻响一次
+              // （第五关已在上面的 inLevel5 分支禁用了冲刺，这里再显式判一次关卡）
+              if (audio && (env.levelIndex ?? 0) === 4) {
+                let played = false;
+                if (typeof audio.playScare === 'function') {
+                  try {
+                    played = audio.playScare() !== false;
+                  } catch (e) { played = false; }
+                }
+                if (!played) {
+                  try {
+                    // 兜底：音效还没解码好时先用原来的合成音顶上，别让突脸没声音
+                    audio.burst({ duration: 0.08, gain: 0.15, type: 'highpass', freq: 3000, q: 0.4 });
+                    audio.burst({ duration: 0.12, gain: 0.25, type: 'bandpass', freq: 800, q: 0.6, delay: 0.02 });
+                    audio.burst({ duration: 0.2, gain: 0.35, type: 'bandpass', freq: 400, q: 0.5, delay: 0.06 });
+                    audio.tone(110, 0.35, 0.10, 'sawtooth');
+                    audio.tone(55, 0.4, 0.06, 'sine');
+                  } catch (e) { /* 音效出错不影响核心逻辑 */ }
+                }
               }
             }
           } else {
