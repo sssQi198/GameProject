@@ -4,6 +4,7 @@ import { hints, successLines } from './team/p1.js';
 import { anomalyFactory } from './team/m2.js';
 import { tagAnomaly } from './team/contract.js';
 import { disposeCharacter, loadCharacter } from './character-model.js';
+import { asset } from './asset-url.js';
 
 export function anomalyHint(level) {
   return hints[level] ?? '';
@@ -1031,7 +1032,7 @@ function createRedDoll() {
   };
   const pose = makePuppetPose();
 
-  const whenReady = loadCharacter('/assets/models/puppet_v03.glb').then((bound) => {
+  const whenReady = loadCharacter(asset('models/puppet_v03.glb')).then((bound) => {
     if (group.userData.disposed) {
       disposeCharacter(bound);
       return;
@@ -2344,7 +2345,7 @@ function createFleshWall() {
     // 墙臂沿 -Y（Blender）/ 世界向下，天花板臂伸进房间；整件放在这里不旋转。
     // 载入成功就换掉上面那一整组程序化翻边/触手/肉芽；深渊、背板、
     // 天花板封口、脸、眼睛、牙都不动。失败保留程序化版本。
-    crackDecorReady = loadCharacter('/assets/models/crack_decor_v01.glb').then((bound) => {
+    crackDecorReady = loadCharacter(asset('models/crack_decor_v01.glb')).then((bound) => {
       if (group.userData.disposed) {
         disposeCharacter(bound);
         return;
@@ -2484,7 +2485,7 @@ function createFleshWall() {
     // 仍在开口后面。faceRoot 只负责前后呼吸，不要把基准 z 写在它身上。
     // 材质改成不吃光、不进雾的顶点色，否则近黑会被 ACES 和雾洗没。
     const proceduralFace = faceRoot.children.slice();
-    faceModelReady = loadCharacter('/assets/models/face_v01.glb').then((bound) => {
+    faceModelReady = loadCharacter(asset('models/face_v01.glb')).then((bound) => {
       if (group.userData.disposed) {
         disposeCharacter(bound);
         return;
@@ -2542,7 +2543,7 @@ function createFleshWall() {
     // 载入成功就换掉程序化球；失败保留现在的球，拍照判定不受影响。
     // 材质统一用 eyeMat：glb 自带的是自发光 StandardMaterial，ACES 会把红压灰，
     // 而且拍后淡出改的就是 eyeMat.color。
-    eyesModelReady = loadCharacter('/assets/models/eyes_v01.glb').then((bound) => {
+    eyesModelReady = loadCharacter(asset('models/eyes_v01.glb')).then((bound) => {
       if (group.userData.disposed) {
         disposeCharacter(bound);
         return;
@@ -2646,7 +2647,7 @@ function createFleshWall() {
     // 上排 9 颗朝下、下排 8 颗朝上，原点在包围盒中心。
     // 放到 (0, 2.035, -5.900)，最前面 -5.870，和原程序化牙尖一样靠前。
     // 载入成功就换掉这 17 个锥体；失败保留程序化牙。
-    teethModelReady = loadCharacter('/assets/models/teeth_v01.glb').then((bound) => {
+    teethModelReady = loadCharacter(asset('models/teeth_v01.glb')).then((bound) => {
       if (group.userData.disposed) {
         disposeCharacter(bound);
         return;

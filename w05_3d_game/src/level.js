@@ -9,6 +9,7 @@ import { EVENT, tagPhysical } from './team/contract.js';
 import { extraColliders, createSceneExtra } from './team/m1.js';
 import { createClassmate, createEyes } from './team/m2.js';
 import { extraProps, stepFlicker, tick as tickRoom } from './team/p3.js';
+import { asset } from './asset-url.js';
 
 const FOG = 0x07080c;
 /** 门框进深 0.18。所有墙厚用 LAYOUT.wall（0.15），收到门框和相邻墙的外沿，只相接、不穿插。 */
@@ -152,7 +153,7 @@ export class Level {
   }
 
   loadClassroomModel() {
-    const woodMap = repeatMap('/assets/textures/desk_diff.jpg');
+    const woodMap = repeatMap(asset('textures/desk_diff.jpg'));
     const wood = new THREE.MeshStandardMaterial({
       map: woodMap,
       color: 0x4d433a,
@@ -169,7 +170,7 @@ export class Level {
     blockHallLight(woodDark, true);
     import('../vendor/GLTFLoader.js').then(({ GLTFLoader }) => {
       const loader = new GLTFLoader();
-      loader.load('/assets/models/classroom_m1_v01.glb', (gltf) => {
+      loader.load(asset('models/classroom_m1_v01.glb'), (gltf) => {
         const model = gltf.scene;
         model.name = 'Classroom_M1_GLTF';
         const retired = new Set();
@@ -2285,7 +2286,7 @@ function repeatMap(url) {
 }
 
 function makeMaterials() {
-  const floorMap = repeatMap('/assets/textures/floor_diff.jpg');
+  const floorMap = repeatMap(asset('textures/floor_diff.jpg'));
   const floorW = LAYOUT.room.maxX - LAYOUT.room.minX;
   const floorD = LAYOUT.room.maxZ - LAYOUT.room.minZ;
   // 一张图大约 2 米。教室 20×12，板宽才像地板。
@@ -2296,14 +2297,14 @@ function makeMaterials() {
     roughness: 0.9,
     metalness: 0,
   });
-  const wallMap = repeatMap('/assets/textures/wall_diff.jpg');
+  const wallMap = repeatMap(asset('textures/wall_diff.jpg'));
   const wall = new THREE.MeshStandardMaterial({
     map: wallMap,
     color: 0x74716c,
     roughness: 0.92,
     metalness: 0,
   });
-  const curtainMap = repeatMap('/assets/textures/curtain_diff.jpg');
+  const curtainMap = repeatMap(asset('textures/curtain_diff.jpg'));
   const motif = 0.2;
   curtainMap.repeat.set(CURTAIN_W / (motif * 8), CURTAIN_H / (motif * 8));
   // 图本身已是暗红提花。再乘 0x6e3438 会把纹样沉进雾里，所以保持白色相乘。
@@ -2339,7 +2340,7 @@ function makeMaterials() {
     side: THREE.DoubleSide,
   });
   const door = new THREE.MeshStandardMaterial({
-    map: repeatMap('/assets/textures/door_diff.jpg'),
+    map: repeatMap(asset('textures/door_diff.jpg')),
     color: 0xffffff,
     roughness: 0.72,
   });
@@ -2412,11 +2413,11 @@ function bottleMesh() {
 }
 
 function paperMesh() {
-  const paperNor = new THREE.TextureLoader().load('/assets/textures/paper_nor.jpg?v=3');
+  const paperNor = new THREE.TextureLoader().load(asset('textures/paper_nor.jpg?v=3'));
   const mesh = new THREE.Mesh(
     new THREE.BoxGeometry(0.28, 0.03, 0.22),
     new THREE.MeshStandardMaterial({
-      map: repeatMap('/assets/textures/paper_diff.jpg?v=3'),
+      map: repeatMap(asset('textures/paper_diff.jpg?v=3')),
       normalMap: paperNor,
       color: 0xe2d6c6,
       roughness: 1,

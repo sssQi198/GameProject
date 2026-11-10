@@ -8,6 +8,8 @@
  * createClassmate 默认加载 assets/models/classmate_v01.glb，失败才退回程序化模型。
  *   换模型走下面的 MATE_MODEL（url / scale / yawOffset / offsetY / hideMaterials），
  *   或者在地址栏加 ?mate=proc（程序化） / ?mate=/assets/models/xxx.glb&mateface=keep。
+ *   ?mate= 的路径由浏览器按当前页面解析：子目录部署（如 GitHub Pages 项目站点）时写
+ *   `?mate=assets/models/xxx.glb`；写成 `/assets/...` 会指向域名根，404 后退回程序化模型。
  *   glb 自带的五官（Eye_White/Eye_Dark/Face_Shadow 三个材质槽）默认按材质隐藏，
  *   给尾声的红眼和尖牙让位；换成没有五官的模型时把 hideMaterials 改成 []。
  * 同学：脚底在原点。userData.legs = [左腿, 右腿]，userData.arms = [左上臂, 右上臂]，
@@ -22,12 +24,13 @@
  */
 import * as THREE from '../../vendor/three.module.js';
 import { disposeCharacter, loadCharacter } from '../character-model.js';
+import { asset } from '../asset-url.js';
 
 // 空着就用 anomalies.js 里 52162af 那套异常模型。
 // 要替换某一关，把对应函数填进来。
 export const anomalyFactory = {};
 
-export const CLASSMATE_URL = '/assets/models/classmate_v01.glb';
+export const CLASSMATE_URL = asset('models/classmate_v01.glb');
 
 /** url 填这个值就完全不用 glb（= 接 glb 之前那套程序化同学）。 */
 export const PROCEDURAL_MATE = 'proc';

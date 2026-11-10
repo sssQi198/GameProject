@@ -11,6 +11,7 @@
  * 随机数用固定种子，默认每次都一样，方便复现和录演示；
  * 想换一批可以用 ?decorSeed=123 覆盖。
  */
+import { asset } from '../asset-url.js';
 
 const ANOMALY_ANCHORS = [
   { x: -7.85, z: 4.0, r: 2.0, note: 'level 1 seated figure' },
@@ -345,9 +346,9 @@ export function createSceneExtra(THREE, LAYOUT) {
   }
 
   if (papers.length) {
-    const paperMap = new THREE.TextureLoader().load('/assets/textures/paper_diff.jpg?v=3');
+    const paperMap = new THREE.TextureLoader().load(asset('textures/paper_diff.jpg?v=3'));
     paperMap.colorSpace = THREE.SRGBColorSpace;
-    const paperNor = new THREE.TextureLoader().load('/assets/textures/paper_nor.jpg?v=3');
+    const paperNor = new THREE.TextureLoader().load(asset('textures/paper_nor.jpg?v=3'));
     group.add(makeBatch(THREE, planeGeometry, new THREE.MeshStandardMaterial({
       map: paperMap,
       normalMap: paperNor,

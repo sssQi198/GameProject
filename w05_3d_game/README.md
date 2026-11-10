@@ -2072,6 +2072,78 @@ merge 之后 git 把 `game.js` 写成 CRLF，而它原本是 LF。用 `_tools/eo
 - `win()` 这条旧路径保留但无调用者，不动。
 - `docs/images/panel_scared_v1.png` 只进仓库，不参与运行；README 目录树里没有列它。
 
+### 17. 部署：资源路径改成「应用根」，可以直接挂 GitHub Pages 项目站点（第三十一轮）
+
+这一轮不动玩法，只让**同一份代码既能跑在域名根，也能跑在子目录**。用户要的是「按 c 做一版」——
+网页托管、组外人员零安装试玩（`https://sssqi198.github.io/GameProject/w05_3d_game/`）。
+
+#### 1. 原来为什么不行
+
+模型和贴图在四个文件里写成了 `'/assets/...'`（**域名根**绝对路径，共 **16 处**）：
+
+| 文件 | 处数 | 内容 |
+|---|---|---|
+| `src/level.js` | 8 | 课桌/地板/墙/窗帘/门/纸 6 张贴图 + `classroom_m1_v01.glb` |
+| `src/anomalies.js` | 5 | `puppet_v03` / `crack_decor_v01` / `face_v01` / `eyes_v01` / `teeth_v01` |
+| `src/team/m1.js` | 2 | `paper_diff.jpg?v=3`、`paper_nor.jpg?v=3` |
+| `src/team/m2.js` | 1 | `CLASSMATE_URL` |
+
+挂在子目录时，浏览器会去请求 `https://sssqi198.github.io/assets/models/eyes_v01.glb` → **404**。
+`GLTFLoader` 的 `catch` 把模型换成程序化几何，玩家看到的是「模型全变样」而不是报错，
+所以这是个**只在部署时才暴露**的问题。改之前实测（本地 `http://127.0.0.1:5198/w05_3d_game/`）：
+`classroomModel / puppetModel / eyesModel / teethModel / faceModel / crackDecor` 全是 `fallback`，
+控制台里 `eyes_v01.glb`、`teeth_v01.glb` 两条 404。
+
+#### 2. 改法：`src/asset-url.js`
+
+```js
+export const APP_ROOT = (() => {
+  if (typeof document !== 'undefined' && document.baseURI) {
+    const p = new URL('.', document.baseURI).pathname;   // 当前页面的目录
+    return p.endsWith('/') ? p : p + '/';
+  }
+  return '/';                                            // Node 探针：和改之前一样
+})();
+export function asset(rel) { return APP_ROOT + 'assets/' + rel; }
+```
+
+- 页面 `https://host/w05_3d_game/index.html` ⇒ OK `'/w05_3d_game/'` ⇒ `asset('models/x.glb')` = `/w05_3d_game/assets/models/x.glb`
+- 页面 `http://127.0.0.1:5173/index.html` ⇒ OK `'/'` ⇒ `/assets/models/x.glb`（**与改之前逐字节相同**）
+- `_probe/*.mjs` 在 Node 里跑，没有 `document.baseURI` ⇒ 仍是 `/assets/...`，**32 支探针一行没改**
+
+没动的两处，理由：
+
+- `audio.js` 本来就用 `./assets/audio/...`（相对文档），两种部署都对，不动更安全；
+- `?mate=<glb>` 是开发者手填参数，原样透传（子目录部署时写 `?mate=assets/models/xxx.glb`，见「已知限制」）。
+
+顺手补了 `index.html` 的 `<link rel="icon" href="./favicon.ico">`：不写这行，浏览器会默认去请求
+`/favicon.ico`，子目录部署下必然 404（控制台一条红，不影响玩，但没必要留着）。
+
+#### 3. 验证（CDP，Chromium + SwiftShader）
+
+| 入口 | 读数 |
+|---|---|
+| `http://127.0.0.1:5173/?probe=1&devLevel=5`（根路径） | `puppet/face/eyes/teeth/classroom/crackDecor = glb`、`calls 109`、`textures 21`、`errors: []` |
+| `http://127.0.0.1:5198/w05_3d_game/?probe=1`（子目录·菜单） | `classroom/face/eyes/teeth/crackDecor = glb`、`calls 128`、`errors: []`、控制台干净 |
+| `…/w05_3d_game/?probe=1&devLevel=1` | `calls 80`、全 `glb`、`audio.bgm = 4`、`errors: []` |
+| `…/w05_3d_game/?probe=1&devLevel=4` | `calls 88`、全 `glb`、`errors: []` |
+| `…/w05_3d_game/?probe=1&devLevel=5` | `calls 109`、全 `glb`、`textures 21`、`errors: []` |
+
+静态：`node --check` 5 个文件全过；`_probe/*.mjs` **32 / 32**（支数与上一轮一致）。
+
+#### 4. GitHub Pages 怎么开（一次设置，之后每次 push 自动更新）
+
+Settings → Pages → **Deploy from a branch** → Branch `main`、目录 `/ (root)` → Save。
+仓库根就是游戏目录的上一层，所以站点地址是
+`https://sssqi198.github.io/GameProject/w05_3d_game/`（**带子目录**，本轮修的就是这个）；
+想让 `…/GameProject/` 直接进游戏，得在仓库根放一个跳转页 —— 没做。
+
+#### 5. 没做的
+
+- 没把 `docs/`、`README.md`、`_probe/` 从仓库里摘出去：Pages 会一起发布（体积大，但 `w05_3d_game/` 本身是干净的）；
+- 没做打包/压缩，直接发布源码（ES 模块 + 原始 glb/贴图），首屏比打包版慢；
+- `assets/audio/bgm-10086.mp3`、`scare-rush.mp3` 的出处仍未核对（见 `assets/audio/CREDITS.md`），公开托管前要么补齐、要么换掉 —— 小范围试玩可以，公开发布 / 参赛不行。
+
 ## 已知限制
 
 - 只有一间教室和一条循环走廊，五处异常都叠在这间教室里
@@ -2084,6 +2156,7 @@ merge 之后 git 把 `game.js` 写成 CRLF，而它原本是 LF。用 `_tools/eo
 - `assets/audio/chase-breath.wav` 的作者页面没找回、`chase-heartbeat.wav` 的作者没记录，`assets/audio/CREDITS.md` 里标的是「待补」；要公开发布或参赛的话，这两条得先补齐或换素材
 - 第五关拍照那一下的低频重击是 `game.js` 里内联的 `burst + tone`，与已删的 `audio.roar()` 无关，声音偏「闷响」不是「吼」
 - 点光源是一池常数（第二十二轮）：全场恒定 18 盏参与渲染，池满了会挤掉离玩家最远的那盏；正常玩法实测同一刻最多 15 盏在照亮，碰不到上限。想加灯（比如给某个场景再加一盏剧情灯）不用改这个数，只要那一刻在亮的灯不超过 18
+- 部署：`?mate=/assets/...` 这种手填的**域名根**路径在子目录部署时失效，改写成 `?mate=assets/models/xxx.glb` 即可（相对路径按页面解析）
 
 ## AI 使用说明
 
