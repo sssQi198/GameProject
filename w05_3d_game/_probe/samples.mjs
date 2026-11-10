@@ -48,10 +48,18 @@ class SampleCtx extends FakeCtx {
     super();
     this.decoded = [];
   }
+  /**
+   * 两种调用形式都要支持：
+   * - 采样加载（loadSamples）走回调 `decodeAudioData(buf, onOk)`；
+   * - 突脸音效（PR #2 的 prepareScare）走 Promise `decodeAudioData(buf).then(...)`。
+   * 早期桩只实现了回调形式，上游合并后 prepareScare 会抛 "onOk is not a function"。
+   */
   decodeAudioData(buf, onOk) {
     this.decoded.push(buf.byteLength);
-    // 假 buffer：只提供 playSample / startLoop 会用到的字段
-    onOk({ duration: 1.2, sampleRate: 44100, length: 52920, getChannelData: () => new Float32Array(16) });
+    // 假 buffer：只提供 playSample / startLoop / BufferSource 会用到的字段
+    const fake = { duration: 1.2, sampleRate: 44100, length: 52920, getChannelData: () => new Float32Array(16) };
+    if (typeof onOk === 'function') onOk(fake);
+    return Promise.resolve(fake);
   }
 }
 globalThis.window.AudioContext = SampleCtx;
@@ -71,7 +79,12 @@ await settle();
 
 // ── 1. 三个文件真的在磁盘上 ────────────────────────────────────────────
 console.log('── 素材文件 ──');
-ok(fetched.length === 3, '三个采样各自拉了一次（心跳 / 喘气 / 尖叫）', `${fetched.length} 次`);
+// 上游 PR #2 之后 unlock() 还会顺手预加载第四关突脸音效 scare-rush.mp3，
+// 所以总请求数是 4；「每条采样只拉一次」这个约束只在三件采样上成立。
+const isScare = (f) => /scare-rush\.mp3$/.test(f.file);
+const sampleFetches = fetched.filter((f) => !isScare(f));
+ok(sampleFetches.length === 3, '三个采样各自拉了一次（心跳 / 喘气 / 尖叫）', `${sampleFetches.length} 次`);
+ok(fetched.some((f) => isScare(f) && f.ok), '突脸音效 scare-rush.mp3 也在预加载（第四关木偶突脸）');
 for (const f of fetched) {
   ok(f.ok, `文件存在：${path.basename(f.file)}`, f.ok ? `${(f.size / 1024).toFixed(0)} KB` : f.file);
 }
@@ -82,7 +95,7 @@ ok(byName('chase-breath.wav')?.head === 'RIFF', '喘气是 WAV', byName('chase-b
 ok(byName('scream.ogg')?.head === 'OggS', '尖叫是 Ogg（OggS 头）', byName('scream.ogg')?.head);
 const sizes = fetched.map((f) => statSync(f.file).size);
 ok(Math.min(...sizes) > 8000, '没有空文件', `最小 ${Math.min(...sizes)} B`);
-ok(bus.ctx.decoded.length === 3, '三个都送进了解码器', `${bus.ctx.decoded.length} 个`);
+ok(bus.ctx.decoded.length === 4, '三个采样 + 突脸音效都送进了解码器', `${bus.ctx.decoded.length} 个`);
 
 console.log('── 解码结果 ──');
 ok(Boolean(bus.samples.heartbeat && bus.samples.breath && bus.samples.scream),

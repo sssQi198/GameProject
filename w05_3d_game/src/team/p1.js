@@ -31,11 +31,44 @@ export const introAftermath = '发生什么了！我得去看看……';
 
 export const skipHint = 'E 跳过剧情';
 
+/**
+ * 暂停 / 胜负面板的文案。
+ * 标题和正文里用 ~~xx~~ 标记“这个字被划掉、被腐蚀掉了”，
+ * hud.js 会把它渲染成带划痕的 span。
+ * actions 是按钮文案，按钮 id 对应关系：resume / retry / restart / menu。
+ */
+export const panelCopy = {
+  pause: {
+    title: '意识~~涣~~散',
+    body: '别挣扎了……它们正在门外。\n你的理智值正在流失……你确定要面对门后的东西吗？',
+    actions: {
+      resume: '送死（继续噩梦）',
+      restart: '重新开始（无尽的折磨）',
+      menu: '懦夫（放弃求生）',
+    },
+  },
+  lose: {
+    title: '逃不~~掉~~了',
+    body: '它碰到你了。它没有体温。\n按住 Shift 冲刺，它比走路更快。',
+    actions: {
+      retry: '再挣扎一次',
+      restart: '重新开始（无尽的折磨）',
+      menu: '懦夫（放弃求生）',
+    },
+  },
+  win: {
+    title: '你~~出~~来了',
+    body: '他回头看你的那双眼睛，和你刚才逃的一模一样。\n门已经关上了。恭喜你——你还在这栋楼里。',
+    actions: {
+      restart: '重新开始（无尽的折磨）',
+      menu: '懦夫（放弃求生）',
+    },
+  },
+};
+
 export const copy = {
   follow: '跟着前面的人',
   wait: '等等我。',
-  pauseTitle: '暂停',
-  pauseBody: 'M 静音。Esc 或 Resume 回到楼里。',
   doorStillOpen: '门还开着。',
   someoneGone: '……人呢？',
   cameraOnFloor: '地上有一台相机。',
@@ -53,14 +86,14 @@ export const copy = {
   photoMiss: '没有记录到新异常。',
   doorOpen: '门开了',
   aheadPerson: '前面那个人',
-  // ── 终局安全屋 ──
+// ── 终局安全屋 ──
   // 旧 epilogue 文案（whereAreYou / eyesOnYou / winTitle）已作废。
   // 原因：现在玩家能隔着门听见同学的声音、看见他走进来，旧文案「你去哪里了？我到处在找你」
   // 是从「同学消失」直接跳结论，和新演出的时间线对不上。
+  // 注：pauseTitle / winTitle / loseTitle / loseBody 已迁到上面的 panelCopy（PR #2 面板重构），
+  // 这里只留 badEnd 卡用的两条。
   safeWhere: '你去哪里了？我找你找了好久，还碰到了怪物……',
   safeIsThatSo: '是吗……',
   badTitle: '游戏结束',
   badBody: '他不是你的同学……',
-  loseTitle: '它碰到你了',
-  loseBody: '按住 Shift 冲刺。它比走路更快。',
 };

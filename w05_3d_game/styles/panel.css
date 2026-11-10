@@ -1,0 +1,266 @@
+/* ============================================================
+   暂停 / 结束面板：干涸血泊 · 锈蚀血管 · 精神污染
+   ------------------------------------------------------------
+   单独成文件，在 main.css 之后加载，覆盖面板的旧样式。
+   色调：不再是鲜红，改用干涸后发褐发暗的血色（血泊质感）。
+   字体：叠色重影（红/青错位）+ 模糊残影层，部分字被划掉腐蚀。
+   边框：铁锈与血管交错的环带，四周噪点像老旧录像带。
+   ============================================================ */
+
+#screen-panel {
+  --blood-pool: #3a0d09;
+  --blood-dry: #57190f;
+  --blood-crust: #6d2a14;
+  --blood-rust: #7d4a22;
+  --bone-dry: #cfc2ae;
+
+  background:
+    radial-gradient(ellipse 130% 85% at 50% 122%, rgba(84, 22, 14, 0.5), transparent 62%),
+    radial-gradient(ellipse 75% 52% at 10% 88%, rgba(64, 16, 11, 0.46), transparent 66%),
+    radial-gradient(ellipse 62% 46% at 90% 10%, rgba(52, 12, 9, 0.44), transparent 68%),
+    rgba(7, 3, 3, 0.94);
+}
+
+/* 画面边缘噪点：中间淡、四周密，模拟录像带磁头脏污 */
+.panel-noise {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0.72;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(0deg, rgba(255, 240, 220, 0.05) 0 1px, transparent 1px 3px);
+  background-size: 180px 180px, 100% 3px;
+  mix-blend-mode: overlay;
+  -webkit-mask-image: radial-gradient(ellipse at center, transparent 14%, rgba(0, 0, 0, 0.45) 52%, #000 96%);
+  mask-image: radial-gradient(ellipse at center, transparent 14%, rgba(0, 0, 0, 0.45) 52%, #000 96%);
+  animation: panel-static 0.22s steps(3) infinite;
+}
+
+@keyframes panel-static {
+  0% { transform: translate(0, 0); opacity: 0.72; }
+  33% { transform: translate(-1.4%, 0.8%); opacity: 0.52; }
+  66% { transform: translate(1.1%, -0.6%); opacity: 0.86; }
+  100% { transform: translate(0, 0); opacity: 0.72; }
+}
+
+/* 血管：SVG 描边路径，粗细不一的暗红脉络爬过整个画面 */
+.panel-veins {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.62;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='900' height='520' viewBox='0 0 900 520'%3E%3Cg fill='none' stroke='%23a3301f' stroke-linecap='round'%3E%3Cpath d='M-20 96 C 120 70 210 150 330 128 S 540 60 700 104 S 860 150 930 120' stroke-width='3.2' opacity='.5'/%3E%3Cpath d='M-20 96 C 120 70 210 150 330 128' stroke-width='1.1' opacity='.75'/%3E%3Cpath d='M330 128 C 372 176 400 214 470 226 S 600 262 690 300' stroke-width='2.4' opacity='.42'/%3E%3Cpath d='M400 214 C 392 268 420 320 386 380 S 320 470 300 540' stroke-width='1.6' opacity='.38'/%3E%3Cpath d='M700 104 C 742 62 800 44 924 58' stroke-width='2.8' opacity='.4'/%3E%3Cpath d='M60 520 C 96 424 150 372 236 340 S 300 250 330 128' stroke-width='2.1' opacity='.36'/%3E%3Cpath d='M236 340 C 200 300 190 250 214 208' stroke-width='1.3' opacity='.5'/%3E%3Cpath d='M690 300 C 760 322 820 380 924 396' stroke-width='2.6' opacity='.38'/%3E%3Cpath d='M470 226 C 500 168 548 132 610 108' stroke-width='1.4' opacity='.44'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: cover;
+  background-repeat: no-repeat;
+  mix-blend-mode: screen;
+  filter: blur(calc(1.4 * var(--u)));
+  animation: vein-throb 7s ease-in-out infinite;
+}
+
+@keyframes vein-throb {
+  0%, 100% { opacity: 0.52; }
+  50% { opacity: 0.74; }
+}
+
+#screen-panel .menu-card {
+  position: relative;
+  z-index: 2;
+  border: 1px solid rgba(122, 52, 30, 0.4);
+  background:
+    radial-gradient(ellipse 60% 40% at 20% 0%, rgba(92, 26, 16, 0.34), transparent 68%),
+    radial-gradient(ellipse 50% 36% at 96% 100%, rgba(74, 20, 13, 0.4), transparent 70%),
+    linear-gradient(158deg, rgba(30, 15, 13, 0.97), rgba(9, 5, 5, 0.98));
+  box-shadow:
+    0 0 0 1px rgba(20, 7, 6, 0.9),
+    0 26px 80px rgba(0, 0, 0, 0.82),
+    inset 0 0 70px rgba(74, 18, 12, 0.22),
+    inset 0 0 200px rgba(0, 0, 0, 0.6);
+}
+
+/* 锈蚀血管环带：绕着卡片一圈，粗细不匀，像结痂的铁锈 */
+#screen-panel .menu-card::before {
+  content: "";
+  position: absolute;
+  inset: calc(-2 * var(--u));
+  padding: calc(9 * var(--u));
+  pointer-events: none;
+  background:
+    repeating-conic-gradient(from 12deg at 30% 40%,
+      rgba(154, 88, 42, 0.92) 0deg 4deg,
+      rgba(74, 30, 20, 0.95) 4deg 9deg,
+      rgba(26, 10, 8, 0.98) 9deg 15deg,
+      rgba(120, 58, 28, 0.8) 15deg 19deg,
+      rgba(46, 17, 13, 0.95) 19deg 25deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  filter: blur(calc(1.2 * var(--u)));
+  opacity: 0.92;
+}
+
+/* 卡片内的血渍与抓痕 */
+#screen-panel .menu-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(103deg, transparent 0 62px, rgba(120, 34, 24, 0.16) 62px 63.5px, transparent 63.5px 118px),
+    repeating-linear-gradient(17deg, transparent 0 96px, rgba(0, 0, 0, 0.32) 96px 97px, transparent 97px 168px);
+  mix-blend-mode: multiply;
+  opacity: 0.75;
+}
+
+/* 锈斑角标：只沿边框线走，不要铺成灰色方块 */
+.card-corner {
+  position: absolute;
+  width: calc(52 * var(--u));
+  height: calc(52 * var(--u));
+  pointer-events: none;
+  opacity: 0.9;
+}
+.card-corner.tl { top: calc(8 * var(--u)); left: calc(8 * var(--u)); }
+.card-corner.br { right: calc(8 * var(--u)); bottom: calc(8 * var(--u)); }
+.card-corner::before,
+.card-corner::after {
+  content: "";
+  position: absolute;
+  background:
+    linear-gradient(90deg, rgba(158, 92, 44, 0.95), rgba(88, 42, 24, 0.75) 40%, rgba(38, 16, 12, 0.5) 78%, transparent);
+  box-shadow: 0 0 calc(8 * var(--u)) rgba(120, 44, 22, 0.45);
+}
+.card-corner.tl::before { top: 0; left: 0; width: 100%; height: calc(2.2 * var(--u)); }
+.card-corner.tl::after { top: 0; left: 0; width: calc(2.2 * var(--u)); height: 100%; background: linear-gradient(180deg, rgba(158, 92, 44, 0.95), rgba(88, 42, 24, 0.75) 40%, rgba(38, 16, 12, 0.5) 78%, transparent); }
+.card-corner.br::before { bottom: 0; right: 0; width: 100%; height: calc(2.2 * var(--u)); background: linear-gradient(270deg, rgba(158, 92, 44, 0.95), rgba(88, 42, 24, 0.75) 40%, rgba(38, 16, 12, 0.5) 78%, transparent); }
+.card-corner.br::after { bottom: 0; right: 0; width: calc(2.2 * var(--u)); height: 100%; background: linear-gradient(0deg, rgba(158, 92, 44, 0.95), rgba(88, 42, 24, 0.75) 40%, rgba(38, 16, 12, 0.5) 78%, transparent); }
+
+/* 标题：叠色重影 + 模糊残影，像视线开始涣散 */
+#screen-panel h2 {
+  position: relative;
+  z-index: 0;
+  color: var(--bone-dry);
+  letter-spacing: 0.2em;
+  text-shadow:
+    calc(3 * var(--u)) calc(1 * var(--u)) rgba(132, 24, 20, 0.9),
+    calc(-2 * var(--u)) calc(-1 * var(--u)) rgba(58, 104, 126, 0.42),
+    0 0 calc(26 * var(--u)) rgba(0, 0, 0, 0.92),
+    0 calc(8 * var(--u)) calc(22 * var(--u)) rgba(0, 0, 0, 0.7);
+  animation: title-breathe 6s ease-in-out infinite;
+}
+
+#screen-panel h2::before {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  color: rgba(146, 30, 22, 0.5);
+  transform: translate(calc(6 * var(--u)), calc(4 * var(--u)));
+  filter: blur(calc(4.5 * var(--u)));
+  pointer-events: none;
+  white-space: pre;
+}
+
+@keyframes title-breathe {
+  0%, 100% { transform: translate(0, 0); letter-spacing: 0.2em; }
+  50% { transform: translate(calc(1.5 * var(--u)), calc(-1 * var(--u))); letter-spacing: 0.215em; }
+}
+
+/* 被划掉 / 抓花的字：暗哑、边缘被腐蚀掉一块 */
+.scared-strike {
+  position: relative;
+  color: #8b7c6c;
+  -webkit-mask-image: repeating-linear-gradient(74deg, #000 0 4px, rgba(0, 0, 0, 0.3) 4px 6px);
+  mask-image: repeating-linear-gradient(74deg, #000 0 4px, rgba(0, 0, 0, 0.3) 4px 6px);
+}
+
+.scared-strike::after {
+  content: "";
+  position: absolute;
+  left: -8%;
+  right: -8%;
+  top: 52%;
+  height: calc(3 * var(--u));
+  background: repeating-linear-gradient(90deg,
+    rgba(26, 7, 6, 0.95) 0 6px,
+    rgba(104, 28, 19, 0.75) 6px 9px,
+    transparent 9px 13px);
+  transform: rotate(calc(-1.6 * var(--u)));
+  box-shadow: 0 0 calc(7 * var(--u)) rgba(124, 22, 17, 0.55);
+}
+
+/* 正文：轻一些的重影，保留可读性 */
+#screen-panel #panel-text {
+  position: relative;
+  color: #9b8f80;
+  white-space: pre-line;
+  text-shadow:
+    calc(1.6 * var(--u)) 0 rgba(120, 24, 18, 0.6),
+    calc(-1.2 * var(--u)) rgba(52, 92, 112, 0.3),
+    0 0 calc(14 * var(--u)) rgba(0, 0, 0, 0.85);
+}
+
+#screen-panel #panel-text::before {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: -1;
+  color: rgba(132, 26, 20, 0.42);
+  filter: blur(calc(3.5 * var(--u)));
+  pointer-events: none;
+  white-space: pre-line;
+}
+
+/* 按钮：结痂的干血，不亮的反光 */
+#screen-panel .menu-actions button {
+  position: relative;
+  overflow: hidden;
+  color: #b6a894;
+  border-color: rgba(126, 56, 32, 0.55);
+  background: linear-gradient(152deg, rgba(48, 20, 16, 0.95), rgba(96, 28, 18, 0.72));
+  box-shadow:
+    inset 0 0 22px rgba(102, 20, 14, 0.2),
+    0 6px 18px rgba(0, 0, 0, 0.45);
+  transition: filter 0.18s ease, transform 0.18s ease;
+}
+
+#screen-panel .menu-actions button:hover {
+  border-color: rgba(168, 78, 44, 0.85);
+  color: #f0e2cd;
+  filter: brightness(1.18) saturate(0.9);
+  transform: translateX(calc(2 * var(--u)));
+}
+
+/* 主按钮：还在渗的血 */
+#screen-panel #btn-resume,
+#screen-panel #btn-retry {
+  background: linear-gradient(152deg, #6d1d10, #34100b);
+  border-color: rgba(150, 44, 28, 0.7);
+  text-shadow: 0 0 calc(14 * var(--u)) rgba(158, 30, 22, 0.7);
+}
+
+/* 放弃按钮：发灰发脆，像已经放弃挣扎 */
+#screen-panel #btn-back {
+  color: #7f7466;
+  border-color: rgba(92, 52, 34, 0.4);
+  background: linear-gradient(152deg, rgba(30, 20, 18, 0.9), rgba(52, 26, 18, 0.6));
+}
+#screen-panel #btn-back:hover { color: #b6a894; }
+
+#screen-panel .volume { color: #8d8274; }
+
+/* 开发者面板按钮收进暗色系，别抢戏 */
+#screen-panel #btn-dev-panel {
+  background: rgba(38, 30, 30, 0.7);
+  border: 1px solid rgba(96, 58, 44, 0.35);
+  color: #7d6f62;
+}
+#screen-panel #btn-dev-panel:hover { background: rgba(60, 40, 34, 0.8); color: #b0a091; }
+
+@media (prefers-reduced-motion: reduce) {
+  .panel-noise, .panel-veins, #screen-panel h2 { animation: none; }
+}

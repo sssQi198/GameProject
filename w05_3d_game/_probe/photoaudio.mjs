@@ -31,8 +31,10 @@ ok(succeed.length > 200, '找到 succeedPhoto() 的函数体', `${succeed.length
 
 // 注释里会**故意**提到被删掉的那句 `levelIndex === 4 → breath()`，
 // 所以判断「还有没有这条逻辑」必须先剥掉注释再看。
+// 注意：这里按 /\r?\n/ 拆行——game.js 在 git 检出后可能是 CRLF，
+// 用 split('\n') 会让行尾留一个 \r，`//.*$` 因为 . 不匹配 \r 而失效（合并后就踩到过）。
 const code = succeed
-  .split('\n')
+  .split(/\r?\n/)
   .map((line) => line.replace(/\/\/.*$/, ''))
   .join('\n');
 

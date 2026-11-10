@@ -101,8 +101,11 @@ w05_3d_game/
 │   ├── team/m2.js      同学模型（程序化 / glb 可换）
 │   └── debug.js        lil-gui
 └── assets/             glb、贴图；`audio/` 里是心跳 / 喘气 / 尖叫三个采样 +
-                        `horror-music.mp4`，出处与许可证见 `assets/audio/CREDITS.md`；
-                        追逐伴奏不在这里——它在 `src/chasemusic.js` 里现算，没有文件
+                        `bgm-10086.mp3`（菜单/关卡 BGM，4.4 MB，服务器开了 Range
+                        之后按 206 分片取，`duration` 才是有限值）和
+                        `scare-rush.mp3`（第四关木偶突脸），出处与许可证见
+                        `assets/audio/CREDITS.md`；追逐伴奏不在这里——它在
+                        `src/chasemusic.js` 里现算，没有文件
 ```
 
 场景现在用程序化几何体。把模型放进 `assets/models/` 后，可以在 `level.js` 里按同样的位置换上去。
@@ -1994,6 +1997,80 @@ this.breathVoices = [voice];
 - **门响余量 +2.2 dB**（见第 5 节），比旧排法薄 1.4 dB。
 - **`total` 已经不能加拍**。素材只有三口气，`total ≥ 2.77` 一律是 2.76 秒、三口气。想加第四拍要换更长素材，并重测 `PEAK_0 / PEAK_1`、`BREATH_UNITS`、`LEAD`。
 - 包络只证明「没有凹口、三峰对得上低头」，证明不了「听起来像喘气」。耳朵仍是最终判据 —— 这一轮是用户先听出来的。
+
+### 16. 合并：上游 PR #2 的暂停面板重构 + BGM 换曲（第三十轮）
+
+这一轮不改玩法，只做两件事：**把上游 GitHub 的 5 个提交并进来**，然后**证明本地十四～二十九轮的改动一条没丢**。
+用户原话：「从 GitHub 仓库拉取更新内容做兼容，再检查你从上次提交 GitHub 仓库到现在做出的所有改动，确认运行没有错误」。
+
+#### 1. 上游带进来什么
+
+| 提交 | 内容 | 落在哪 |
+|---|---|---|
+| `0f83646` | 暂停/结束面板重构：干涸血泊 + 锈蚀血管 + 精神污染 | 新 `styles/panel.css`（266 行）、`hud.js` 的 `showPanel/renderScared`、`team/p1.js` 的 `panelCopy` |
+| `831fcae` | 面板效果图 | `docs/images/panel_scared_v1.png`（只进仓库，不参与运行） |
+| `8ef0431` | BGM 换成 `10086.mp3`；第四关木偶突脸加专属音效 | `assets/audio/bgm-10086.mp3`、`scare-rush.mp3`；`audio.js` 的 `startMusic` + `prepareScare/playScare/stopScare`；`anomalies.js` 里只有 `(env.levelIndex ?? 0) === 4` 才放 |
+| `50defe3` | 主菜单缩放窗口后文字与贴纸错位 | `styles/main.css` 的 `.menu-stage` 居中 + 背景图 |
+| `000c3aa` | 合并 PR #2 本身 | — |
+
+`horror-music.mp4` 被 `bgm-10086.mp3` 取代并**从仓库删除**（合并状态里是 `D`）。`server.js` 同时补了
+Range / HEAD 支持：`<audio>` 要靠 `Content-Range` 才知道总长，拿不到 `duration` 时 `stopMusic` 的
+淡出和 `seek(30)` 都会失效（这句是上游提交的改动说明；本轮实测的只有「有 Range 时 206 且
+`duration = 144.96 s`」这一半）。
+
+#### 2. 冲突只有 4 个文件、5 处
+
+`src/audio.js`、`src/game.js`、`src/hud.js`、`src/team/p1.js`。逐处的取法：
+
+| 冲突点 | 取法 | 理由 |
+|---|---|---|
+| `unlock()` 里新建的总线 | **两边都要**：保留第二十一轮的 `chaseBus`，再加 PR 的 `scareGain`（0.9 → master） | 追逐伴奏与突脸音效是两条独立通道；都接 `master`，音量条和静音才同时对两者生效 |
+| `win()` | 留上游版本，注释标明「旧版结局路径，只给 devtools 兜底」 | 正片走 `ending` / `badEnd`，`win()` 已无调用者；删掉会少一条兜底 |
+| `lose()` 的收尾 | 留本地的 `releaseLock()`，`showPanel('lose')` 不带参数 | 面板文案统一由 `panelCopy.lose` 提供；上游的 `copy.loseTitle / loseBody` 两个字段随之删除 |
+| `badEnd` | `showPanel('badEnd', copy.badTitle, copy.badBody)` | `panelCopy` 里没有 `badEnd`，就地覆盖标题与正文；按钮由 `showPanel` 的 show 映射给（`restart` + `menu`） |
+
+还有一处不是冲突但要注意：`renderScared()` 会把标题里的 `~~…~~` 拆成 `<span class="scared-strike">`，
+所以 `panelCopy` 里所有标题都写成 `~~意识涣散~~` 这种形式。CDP 实测三个模式各 **1** 条删除线，
+`#panel-title` 的 `dataset.text` 是去掉 `~~` 后的 4 个字 —— 说明拆分是按 `~~` 配对的，不是正则吃掉。
+
+#### 3. 换行风格：`src/game.js` 必须回到 LF
+
+merge 之后 git 把 `game.js` 写成 CRLF，而它原本是 LF。用 `_tools/eol_restore.py` 按备份树
+`_旧版本\合并前_2026-11-10\w05_3d_game` 逐文件比对：只有 `game.js` 不一致，改回 LF；其余 11 个共有文件本来就一致。
+
+顺带暴露两个探针的硬伤，都已改成**不依赖换行**：
+
+- `_probe/photoaudio.mjs` 用 `split('\n')` 切源码，CRLF 下每行尾多一个 `\r`，`//.*$` 剥不掉行尾注释 ⇒ 改 `split(/\r?\n/)`；
+- `_probe/samples.mjs` 的假 ctx 只实现了回调式 `decodeAudioData`，而新代码走 Promise 式 ⇒ 两种都支持，并把
+  「三个采样 + 一个突脸音效」分开数（`sampleFetches.length === 3`，解码总数 `4`）。
+
+#### 4. 静态 + 探针
+
+- `node --check`：`src/*.js` + `src/team/*.js` 全绿（`fail = 0`）；
+- `_probe/*.mjs`：**32 支 / 32 通过**，与合并前支数一致（`dollface` 的 46 条断言未变）。
+
+#### 5. 浏览器实测（CDP，Chromium + SwiftShader）
+
+服务：`node server.js`（`http://127.0.0.1:5173`）。
+
+| 项 | 读数 |
+|---|---|
+| BGM | `file = bgm-10086.mp3`、`readyState = 4`、**`duration = 144.96 s`**、`loop = true`、`seek(30)` 成功 |
+| Range | `curl -H "Range: bytes=0-1023"` ⇒ **206**、`Content-Length: 1024`、`Content-Range: bytes 0-1023/4638720` |
+| 突脸音效 | `buffer` 已解码 **2.78 s**、`loading = false`、`playScare()` 返回 `true`、`stopScare()` 之后 `active = false` |
+| 面板 CSS | `panel.css` 已进 `document.styleSheets`、血管 `animationName = vein-throb`、`.panel-noise` 不透明度 **0.72** |
+| 面板按钮 | pause：`resume` + `restart` + `menu`；lose：`retry`（「再挣扎一次」）+ `restart` + `menu`；win / badEnd：`restart` + `menu` |
+| 关卡扫描 | `?devLevel=` intro / 1 / 2 / 3 / 4 / 5 / finalelook / finalechase / epilogue / badend **十个入口，`errors: []`、控制台零输出** |
+
+关卡扫描特意包含两个「跑出来的」结果：`?devLevel=finalechase` 在无输入下 2.2 秒内被抓 ⇒ 真走 `lose()` + 面板；
+`?devLevel=badend` 停在第 12 段 ⇒ `phase = badEnd`、`panel = true`。两条都没有异常，说明合并后
+`releaseLock()` / `showPanel('badEnd', …)` 这条新组合在真运行里是通的 —— 探针只能证明参数对，这里证明的是「跑起来不炸」。
+
+#### 6. 没做的
+
+- **没有 push**：合并只落本地（在 `ae6a883` 之上），等用户明确要求再推。
+- `win()` 这条旧路径保留但无调用者，不动。
+- `docs/images/panel_scared_v1.png` 只进仓库，不参与运行；README 目录树里没有列它。
 
 ## 已知限制
 

@@ -17,6 +17,8 @@
 | `chase-heartbeat.wav` | 1.13 s · 44100 Hz · 2ch · 16bit | `heartbeat_fast_0.wav` | **未记录**（内嵌 `LIST/INFO` 只有 `ISFT = FL Studio 9`，没有作者字段） | 下载页标注 CC0 | ① 32-bit float → PCM16（`_tools/wav_float_to_pcm16.py`）② 峰值统一到 0.5（`_tools/normalize_wav.py`）③ 未做循环裁切（原文件首尾原本就对齐） |
 | `chase-breath.wav` | 3.08 s · 44100 Hz · 2ch · 16bit | `breathing_tired.wav` | **Mikeask**（内嵌 `IART`，`ICRD = 2018`） | 下载页标注 CC0 | ① 循环接缝从 0.0018 收到 0.0001（`_tools/loopify.py fix … 90`，3.17 → 3.08 s）② 峰值统一到 0.5 ③ 与心跳同一个响度基准，两段循环的 gain 才有可比性 |
 | `scream.ogg` | 1.33 s · 48000 Hz | `aargh6.ogg`（freesound 合集的第 6 条） | **JohnsonBrandEditing** | **CC0 1.0**：<https://creativecommons.org/publicdomain/zero/1.0/> · <https://freesound.org/people/JohnsonBrandEditing/sounds/173944/> | 原文件直接使用，只改文件名 |
+| `bgm-10086.mp3` | 144.96 s · MP3 · 4 638 720 B（4.42 MiB） | 上游仓库 PR #2 直接放进 `assets/audio/` 的 `10086.mp3` | **未记录**（提交里没有作者字段） | **未核对**（上游没有标注） | 只改文件名；`startMusic()` 指向它，`loop = true`，音量走 `musicGain = 0.18` → `master`，第三十轮合并后实测 `duration = 144.96 s`、`readyState = 4` |
+| `scare-rush.mp3` | 2.78 s · MP3 · 45 392 B（44 KiB） | 上游仓库 PR #2 带来的第四关木偶突脸音效 | **未记录** | **未核对** | 只改文件名；`prepareScare()` 首帧 `fetch` + `decodeAudioData` 解成 `AudioBuffer`，每次突脸 new 一个 `BufferSource`（可从头重放、可叠加），走 `scareGain = 0.9` → `master`，所以音量条和静音对它同样生效 |
 
 `scream.ogg` 的出处可直接核实：合集自带的 `aargh.txt` 写明第 3–7 条来自
 `JohnsonBrandEditing/sounds/173944`，许可证 CC0；同合集的第 0、1–2 条是 CC BY 3.0，
@@ -48,8 +50,14 @@
 
 ## 四、其余声音
 
-`horror-music.mp4` 是更早几轮就在项目里的背景音乐，本轮没有改动它，出处也没有核对过
-（不在本轮「导入素材」的范围内）。如果后面要公开发布，这一条需要单独查证。
+`horror-music.mp4` 是更早几轮就在项目里的背景音乐，**第三十轮合并上游 PR #2 时被
+`bgm-10086.mp3` 取代，文件已从仓库删除**，`startMusic()` 的路径随之改了。原曲的出处本来
+就没有核对过，既然已经不用了就不再是待办；如果以后要把它找回来，仍然需要单独查证。
+
+`bgm-10086.mp3` 和 `scare-rush.mp3` 是上游 PR #2 直接放进本目录的，提交里没有写作者、
+页面和许可证。它们不影响游戏运行（本地演示/作业），但**公开发布前必须补上出处，
+或者换成本项目自产的合成音** —— 换 BGM 只改 `src/audio.js::startMusic()` 里的路径，
+换突脸音效只改 `prepareScare()` 里的 `fetch` 路径，播放逻辑一行都不用动。
 
 ## 五、追逐伴奏：本项目原创，不涉及素材授权
 

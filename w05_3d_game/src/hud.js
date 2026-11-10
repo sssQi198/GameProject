@@ -1,4 +1,5 @@
 import { Viewfinder } from './viewfinder.js';
+import { panelCopy } from './team/p1.js';
 
 /** DOM 界面：标题、HUD、暂停 / 胜负、音量。不碰 Three 场景。 */
 export class Hud {
@@ -112,10 +113,18 @@ export class Hud {
     this.exitDemo.classList.toggle('hidden', !on);
   }
 
-  showPanel(mode, title, text) {
+  /**
+   * 显示暂停 / 胜负面板。
+   * 文案默认取 panelCopy[mode]，也可以由调用方传入覆盖值（devtools 用）。
+   * 按钮文案也来自 panelCopy[mode].actions，按钮 id 缺失时自动隐藏。
+   */
+  showPanel(mode, titleOverride, textOverride) {
+    const preset = panelCopy[mode];
     this.panel.classList.remove('hidden');
-    this.panelTitle.textContent = title;
-    this.panelText.textContent = text;
+    this.panel.dataset.mode = mode;
+    this.renderScared(this.panelTitle, titleOverride ?? preset?.title ?? '');
+    this.renderScared(this.panelText, textOverride ?? preset?.body ?? '');
+    const actions = preset?.actions ?? {};
     const show = {
       pause: ['resume', 'restart', 'menu'],
       lose: ['retry', 'restart', 'menu'],
@@ -124,8 +133,33 @@ export class Hud {
     }[mode];
     for (const [name, el] of Object.entries(this.buttons)) {
       el.classList.toggle('hidden', !show.includes(name));
+      const label = actions[name];
+      if (label) el.textContent = label;
     }
     this.syncScreen();
+  }
+
+  /**
+   * 渲染带「划掉」标记的文案。
+   * ~~文字~~ 会被拆成 <span class="scared-strike">，CSS 负责画划痕和腐蚀感。
+   * 用 textContent 逐段写入，不走 innerHTML，避免文案里的尖括号被当标签解析。
+   * 同时把纯文本存进 data-text，给 CSS 的重影层（::before 的 content）用。
+   */
+  renderScared(el, text) {
+    el.textContent = '';
+    const parts = String(text).split('~~');
+    parts.forEach((part, index) => {
+      if (!part) return;
+      if (index % 2 === 1) {
+        const span = document.createElement('span');
+        span.className = 'scared-strike';
+        span.textContent = part;
+        el.appendChild(span);
+      } else {
+        el.appendChild(document.createTextNode(part));
+      }
+    });
+    el.dataset.text = el.textContent;
   }
 
   hidePanel() {

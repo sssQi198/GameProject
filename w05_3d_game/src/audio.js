@@ -95,6 +95,10 @@ export class AudioBus {
     this.musicGain = null;
     this.music = null;
     this.musicSource = null;
+    this.scareGain = null;
+    this.scareBuffer = null;
+    this.scareLoading = false;
+    this.scareActive = null;
     this.noise = null;
     this.volume = readNumber(STORAGE_VOL, 0.4);
     this.muted = localStorageSafe(STORAGE_MUTE) === '1';
@@ -153,14 +157,20 @@ export class AudioBus {
       this.musicGain = this.ctx.createGain();
       this.musicGain.gain.value = 0.18;
       this.musicGain.connect(this.master);
+      // 追逐段专用音乐总线（第二十一轮起自己合成，见 chasemusic.js）
       this.chaseBus = this.ctx.createGain();
       this.chaseBus.gain.value = 0.0001;
       this.chaseBus.connect(this.master);
       this.chaseMusic = new ChaseMusic(this.ctx, this.chaseBus);
       if (this.chaseTrackIndex > 0) this.chaseMusic.setTrack(this.chaseTrackIndex);
+      // 突脸音效单独一条通道，同样走 master，所以音量条和静音对它也生效
+      this.scareGain = this.ctx.createGain();
+      this.scareGain.gain.value = 0.9;
+      this.scareGain.connect(this.master);
       this.noise = makeNoise(this.ctx);
       this.startDrone();
       this.startMusic();
+      this.prepareScare();
     }
     this.loadSamples();
     this.applyVolume();
@@ -390,7 +400,7 @@ export class AudioBus {
 
   startMusic() {
     if (!this.ctx || this.music || !this.musicGain) return;
-    this.music = new Audio('./assets/audio/horror-music.mp4');
+    this.music = new Audio('./assets/audio/bgm-10086.mp3');
     this.music.loop = true;
     this.music.preload = 'auto';
     this.music.setAttribute('aria-hidden', 'true');
@@ -402,6 +412,59 @@ export class AudioBus {
     this.music.play().catch(() => {
       // 若浏览器仍拦截播放，下一次用户交互时 unlock 会再次尝试。
     });
+  }
+
+  /**
+   * 第四关红人偶冲刺贴脸时的音效。
+   * 首帧就 fetch + decodeAudioData 解成 AudioBuffer，之后每次突脸直接 new 一个
+   * BufferSource 播放：可以从头重放、可以叠着放，也不依赖 <audio> 的 seek 行为。
+   */
+  prepareScare() {
+    if (!this.ctx || !this.scareGain || this.scareBuffer || this.scareLoading) return;
+    this.scareLoading = true;
+    fetch('./assets/audio/scare-rush.mp3')
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.arrayBuffer();
+      })
+      .then((data) => this.ctx.decodeAudioData(data))
+      .then((buffer) => {
+        this.scareBuffer = buffer;
+        this.scareLoading = false;
+      })
+      .catch((error) => {
+        this.scareLoading = false;
+        console.warn('突脸音效加载失败，只能退回合成音:', error);
+      });
+  }
+
+  /** 播放突脸音效。重复触发时从头重放（多个 BufferSource 可叠加）。 */
+  playScare() {
+    if (!this.ctx || !this.scareGain) return false;
+    if (!this.scareBuffer) {
+      this.prepareScare();
+      return false;
+    }
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.scareBuffer;
+    src.connect(this.scareGain);
+    src.onended = () => {
+      src.disconnect();
+      if (this.scareActive === src) this.scareActive = null;
+    };
+    this.scareActive = src;
+    src.start();
+    return true;
+  }
+
+  /** 打断正在播放的突脸音效（例如重开本关）。 */
+  stopScare() {
+    if (!this.scareActive) return;
+    try {
+      this.scareActive.stop();
+      this.scareActive.disconnect();
+    } catch (error) { /* 已经自然结束就忽略 */ }
+    this.scareActive = null;
   }
 
   startDrone() {

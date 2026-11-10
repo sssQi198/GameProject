@@ -286,6 +286,7 @@ export class Game {
     // 开场衔接那边会传一个更大的 musicTau，让 BGM 跟着黑幕一起「渐起」
     this.audio.setMood('play', opts.musicTau || 0.5);
     this.audio.stopHeartbeat();
+    this.audio.stopScare();
   }
 
   startDemo() {
@@ -366,7 +367,7 @@ export class Game {
     this.player.setControl(false);
     this.intentionalUnlock = true;
     if (document.pointerLockElement) document.exitPointerLock();
-    this.hud.showPanel('pause', copy.pauseTitle, copy.pauseBody);
+    this.hud.showPanel('pause');
   }
 
   resume() {
@@ -1429,6 +1430,20 @@ export class Game {
     this.succeedPhoto();
   }
 
+  /** 旧版「逃出去了」结局路径：现在正片走 ending / badEnd，这里保留给 devtools 兜底。 */
+  win() {
+    if (this.phase === 'win') return;
+    this.phase = 'win';
+    this.player.setControl(false);
+    this.audio.stopHeartbeat();
+    this.audio.setMood('calm');
+    this.audio.win();
+    this.hud.setChase(false);
+    this.hud.setDanger(0);
+    if (this.cameraState !== 'none') this.setCameraState('holstered');
+    this.hud.showPanel('win');
+  }
+
   lose() {
     if (this.phase === 'lose') return;
     this.phase = 'lose';
@@ -1440,7 +1455,7 @@ export class Game {
     this.audio.lose();
     this.hud.setChase(false);
     if (this.cameraState !== 'none') this.setCameraState('holstered');
-    this.hud.showPanel('lose', copy.loseTitle, copy.loseBody);
+    this.hud.showPanel('lose');
     this.releaseLock();
   }
 
