@@ -126,6 +126,7 @@ export class Game {
     this.audio.unlock();
     this.audio.setMood('play');
     this.audio.stopHeartbeat();
+    this.audio.stopScare();
   }
 
   startDemo() {
