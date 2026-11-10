@@ -11,38 +11,28 @@
  *   · 追逐里**不再有喘气声**（喘气只在**刚进安全屋那一刻**：低头那一段一串 `pant()`，
  *     第二十七轮把门口那一声 `breath()` 也删了），
  *     改成很响的心跳；
- *   · 原来那首循环曲在追逐时直接压到 0，让位给 src/chasemusic.js 写的**四份追逐伴奏**
- *     （全程序化合成，?chase=1..4 或 dev/chase-bgm.html 里 A/B 试听，选择存 localStorage）。
+ *   · 原来那首循环曲在追逐时直接压到 0，让位给追逐伴奏。
+ *
+ * 第三十二轮把追逐伴奏从「四份程序化合成」换成**一首真实录音**
+ * （`assets/audio/chase-noescape.mp3`，见 `src/chasefile.js`）：
+ *   · 不再有 `?chase=1..4` 和 `localStorage['wf-chase']`——只有一首，没有选择；
+ *   · 与「怪物离你多近」的挂钩只剩**音量**（−6 dB → +1 dB），
+ *     不再改 BPM、滤波、音色（那是 `src/chasemusic.js` 那套已经删掉的做法）。
  * 浏览器会拦住自动播放，所以要等玩家点「开始」或「观看演示」再 unlock。
  */
 
-import { ChaseMusic, CHASE_TRACKS } from './chasemusic.js';
+import { ChaseFile } from './chasefile.js';
 
 const STORAGE_VOL = 'wf-volume';
 const STORAGE_MUTE = 'wf-muted';
-/** 追逐伴奏选的是哪一份（1–4，0 = 关）。 */
-const STORAGE_CHASE = 'wf-chase';
-/**
- * 从没挑过时放哪一份。3 = C · 锤击（`industrial`）：金属敲击 + 16 分踩踏 + 失真低鼓，
- * 走廊灯一路灭的那段最贴。改这里就能换默认，不用动 `CHASE_TRACKS` 的顺序——
- * 顺序是编号契约，`?chase=N`、`localStorage['wf-chase']`、探针都按它来。
- */
-const DEFAULT_CHASE_TRACK = 3;
 
 /**
- * 追逐伴奏总线在「追逐中」的目标增益（第二十二轮由 0.85 提到 1.5）。
- *
- * 为什么必须提：默认 BGM 实际出声是 `musicGain 0.36`（p3.js 每帧把 0.18 抬成 0.18×2.0）。
- * 在同一台机器、同一套 `master`（volume 0.4）上量 5–6 秒窗口，C · 锤击在强度 1、总线 0.85 时
- * 只比 BGM 高 **0.5–1.7 dB** RMS（多次量的抖动）—— 可 BGM 是连续铺底的 pad，锤击是
- * 「一记一记 + 大量空拍」，等电平听起来就是更轻，于是「差不多」在耳朵里变成「更小声」。
- * 提到 1.5 后同一窗口 **+5.5 dB** RMS、峰值约 BGM 的 2.5 倍（0.193 vs 0.075），敲击才压得住。
- *
- * 上限约束（这条别随手再往上推）：master 上量到心跳独占 RMS 0.0499 / 峰值 0.2708，
- * 伴奏在 1.5 时 RMS 0.0375 / 峰值 0.1928，心跳仍高 **+2.5 dB**、「很响的心跳」还在最前面。
- * master 上不挂限幅器，两者叠加量到的峰值 0.3394、削波样本 = 0，所以 1.5 是这套配比的上限。
+ * 追逐伴奏（`chasefile.js`）自己管音量：内部 GainNode 按 `chaseGainFor(压力)` 走，
+ * 起点 −6 dB、贴着背 +1 dB。基准取 unity，依据是实测——这首在 unity 增益下的 RMS
+ * 与原先 C · 锤击（总线 1.5）只差 0.4 dB，所以这里不需要再补一个总线增益。
+ * 音量配比（这支麦克风 vs 心跳）若以后要动，改 `chasefile.js` 的 `CHASE_GAIN_*_DB`，
+ * 别再往这条链路上串 GainNode。
  */
-const CHASE_BUS_GAIN = 1.5;
 
 /**
  * 第十八轮：网上找的写实素材（心跳 / 喘气 / 尖叫），和实时合成的音效并存。
@@ -121,12 +111,8 @@ export class AudioBus {
      * 所以这里按数组存 —— 掐的时候要整串一起掐，只掐最后一个会留下尾巴。
      */
     this.breathVoices = [];
-    /** 追逐伴奏总线（第十九轮）：只在这一条上出四份候选曲，方便整体推音量。 */
-    this.chaseBus = null;
-    /** 追逐伴奏实例（程序化合成，见 chasemusic.js）。 */
-    this.chaseMusic = null;
-    /** 选的是第几份（1–4，0 = 关）。 */
-    this.chaseTrackIndex = clampTrack(readNumber(STORAGE_CHASE, DEFAULT_CHASE_TRACK));
+    /** 追逐伴奏（第三十二轮）：一首实录 MP3，见 `chasefile.js`。 */
+    this.chaseFile = null;
     /**
      * 第二十一轮：默认 BGM 是否被**彻底停掉**（不是压到 0.0001）。
      * 追逐一开始就置 true 并把 <audio> 元素 pause 掉，之后到安全屋、结局都不再出声；
@@ -157,12 +143,10 @@ export class AudioBus {
       this.musicGain = this.ctx.createGain();
       this.musicGain.gain.value = 0.18;
       this.musicGain.connect(this.master);
-      // 追逐段专用音乐总线（第二十一轮起自己合成，见 chasemusic.js）
-      this.chaseBus = this.ctx.createGain();
-      this.chaseBus.gain.value = 0.0001;
-      this.chaseBus.connect(this.master);
-      this.chaseMusic = new ChaseMusic(this.ctx, this.chaseBus);
-      if (this.chaseTrackIndex > 0) this.chaseMusic.setTrack(this.chaseTrackIndex);
+      // 追逐段伴奏（第三十二轮）：实录 MP3，走自己的「距离 → 音量」GainNode → master。
+      // 解码是异步的，所以先建好实例、unlock 里顺手 prepareChase() 预加载；
+      // 真到追逐那一刻素材已经在内存里，不用等 fetch。
+      this.chaseFile = new ChaseFile(this.ctx, this.master);
       // 突脸音效单独一条通道，同样走 master，所以音量条和静音对它也生效
       this.scareGain = this.ctx.createGain();
       this.scareGain.gain.value = 0.9;
@@ -171,6 +155,7 @@ export class AudioBus {
       this.startDrone();
       this.startMusic();
       this.prepareScare();
+      this.prepareChase();
     }
     this.loadSamples();
     this.applyVolume();
@@ -221,7 +206,7 @@ export class AudioBus {
     }
     if (this.musicGain) {
       // 追逐时把原来那首循环曲压到 0：它已经陪玩家听了十分钟，
-      // 而且这一轮追逐段换成了 chasemusic.js 的四份专门做的伴奏，两首叠着只会互相糊。
+      // 而且追逐段的伴奏（第三十二轮起是 chase-noescape.mp3）和它叠着只会互相糊。
       // 第二十一轮：光压音量不够——追逐一开始就真把它 pause 掉（见 stopMusic），
       // 之后一路到安全屋、结局都保持 musicOff，所以这里不能再把它抬回 0.18。
       const musicTarget = mood === 'menu' ? 0.12 : this.musicOff || mood === 'chase' ? 0.0001 : 0.18;
@@ -304,55 +289,42 @@ export class AudioBus {
     return this.musicTau;
   }
 
-  // ── 追逐伴奏（第十九轮，四份候选） ────────────────────────────────────
+  // ── 追逐伴奏（第三十二轮：一首实录 MP3，距离只调音量） ────────────────
 
   /**
-   * 起步追伴奏。选的是 0（关）就什么都不做，方便 A/B 对比「有声 / 无声」。
-   * 伴奏是纯合成的，不依赖采样的异步加载，所以一进 chase 立刻有声。
+   * 预加载 + 解码追逐伴奏。放在 unlock() 里调一次：fetch + decodeAudioData 不需要
+   * 用户手势，而且 720 KB 的 MP3 解一遍约 100 ms——真到进追逐那一刻再解，
+   * 前半秒会是静的（这首诗是整场追逐唯一的音乐，开头的静默很明显）。
+   * 失败不抛：`chaseFile.state` 会变成 `failed`，游戏照常玩，只是没有伴奏。
+   */
+  prepareChase() {
+    if (!this.chaseFile) return Promise.resolve(null);
+    return this.chaseFile.load().catch((error) => {
+      this.chaseError = String((error && error.message) || error);
+      return null;
+    });
+  }
+
+  /**
+   * 起步追伴奏。与旧版不同，这里没有「选 0 = 关」了：整局只有这一首。
+   * 素材还没解好时 `start()` 会记下「要放」，解完自己起，不会丢。
    */
   startChaseMusic() {
-    if (!this.ctx || !this.chaseMusic || !this.chaseBus) return false;
-    if (this.chaseTrackIndex <= 0) return false;
-    this.chaseMusic.setIntensity(this.tension);
-    this.chaseMusic.start();
-    this.chaseBus.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.chaseBus.gain.setTargetAtTime(CHASE_BUS_GAIN, this.ctx.currentTime, 0.25);
-    return true;
+    if (!this.ctx || !this.chaseFile) return false;
+    this.chaseFile.setIntensity(this.tension);
+    return this.chaseFile.start();
   }
 
   stopChaseMusic(fade = 0.45) {
-    if (!this.ctx || !this.chaseBus) return false;
-    const now = this.ctx.currentTime;
-    this.chaseBus.gain.cancelScheduledValues(now);
-    this.chaseBus.gain.setTargetAtTime(0.0001, now, Math.max(0.05, fade / 3));
-    return Boolean(this.chaseMusic && this.chaseMusic.stop(fade));
+    if (!this.ctx || !this.chaseFile) return false;
+    return this.chaseFile.stop(fade);
   }
 
-  /**
-   * 换一份追逐伴奏（1–4，0 = 关）。正在追逐时立刻换，不用重开一局；
-   * 选完记在 localStorage，下次进游戏还是这一份。
-   */
-  setChaseTrack(index) {
-    const i = clampTrack(index);
-    this.chaseTrackIndex = i;
-    localStorageSafeSet(STORAGE_CHASE, String(i));
-    if (!this.chaseMusic) return i;
-    if (i === 0) {
-      this.stopChaseMusic(0.3);
-    } else {
-      this.chaseMusic.setTrack(i);
-      if (this.mood === 'chase') this.startChaseMusic();
-    }
-    return i;
-  }
-
-  /** 当前选的是哪一份（给 HUD / 控制台用）。 */
+  /** 给 HUD / 探针 / 控制台看的状态快照（旧版 `chaseTrack()` 的替代）。 */
   chaseTrack() {
-    return {
-      index: this.chaseTrackIndex,
-      name: this.chaseTrackIndex > 0 ? CHASE_TRACKS[this.chaseTrackIndex - 1].name : '关闭',
-      all: CHASE_TRACKS.map((t) => t.name),
-    };
+    return this.chaseFile
+      ? this.chaseFile.snapshot()
+      : { id: 'noescape', name: 'E · 无逃脱', state: 'idle', playing: false, intensity: 0, gain: 1, duration: null, error: null };
   }
 
   /** 低频 drone 的基音：宁静时很高（196），追逐时沉到 48 并被压力顶到 58。 */
@@ -366,7 +338,8 @@ export class AudioBus {
    * 追逐压力 0–1。game.js 每帧按「与怪物的距离」算好传进来。
    *
    * 只改已有节点的参数，不加节点：心跳周期 0.62 → 0.40 秒（97 → 150 bpm），
-   * 低频 drone 48 → 58Hz。压力变化小于 2% 时整段跳过，免得每帧都重排自动化。
+   * 低频 drone 48 → 58Hz，追逐伴奏的音量 −6 dB → +1 dB（第三十二轮起）。
+   * 压力变化小于 2% 时整段跳过，免得每帧都重排自动化。
    */
   setTension(value) {
     const t = Math.max(0, Math.min(1, Number(value) || 0));
@@ -381,7 +354,7 @@ export class AudioBus {
     this.droneB.frequency.setTargetAtTime(f * 1.5, now, 0.5);
     // 心跳跟着压力一起加：越近越响、越急（第十九轮把基线抬了一档，追逐里只剩它在撑气氛）
     this.setLoop('heartbeat', 1.35 + 0.45 * t, this.heartRate());
-    if (this.chaseMusic) this.chaseMusic.setIntensity(t);
+    if (this.chaseFile) this.chaseFile.setIntensity(t);
   }
 
   /**
@@ -645,8 +618,8 @@ export class AudioBus {
   }
 
   update(dt) {
-    // 伴奏不依赖 heartOn：输了/停了心跳之后，淡出还要继续走
-    if (this.chaseMusic) this.chaseMusic.update();
+    // 第三十二轮：追逐伴奏是一段循环 buffer，音量由 setTension 的 setTargetAtTime 自己走，
+    // 不需要每帧推进（原来那套程序化伴奏要在这里排下一小节的音符）。
     if (!this.heartOn || !this.ctx) return;
     // 采样心跳在跑的时候，合成 thump 不要再叠一层（否则听起来是两倍速、而且相位会打架）
     if (this.loops.heartbeat) return;
@@ -1065,13 +1038,6 @@ function readNumber(key, fallback) {
   if (raw === null || raw === '') return fallback;
   const n = Number(raw);
   return Number.isFinite(n) ? n : fallback;
-}
-
-/** 追逐伴奏的编号：1–4 是四份候选，0 = 关。读不出来就回落到默认那份。 */
-function clampTrack(value) {
-  const n = Math.round(Number(value));
-  if (!Number.isFinite(n)) return DEFAULT_CHASE_TRACK;
-  return Math.max(0, Math.min(CHASE_TRACKS.length, n));
 }
 
 function localStorageSafe(key) {

@@ -2,7 +2,7 @@
  * 探针共用的假 Web Audio：把每个节点和每条参数自动化都记下来，
  * 这样不用开浏览器就能检查「排出来的音频图」。
  *
- * 注意它只覆盖 audio.js / chasemusic.js 用到的 API 子集：
+ * 注意它只覆盖 audio.js / chasefile.js 用到的 API 子集：
  * createGain / Oscillator / BufferSource / BiquadFilter / StereoPanner /
  * MediaElementSource / createBuffer / resume / destination / currentTime。
  */

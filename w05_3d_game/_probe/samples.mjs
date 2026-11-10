@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 import { AudioBus } from '../src/audio.js';
+import { chaseGainFor } from '../src/chasefile.js';
 import { FakeCtx, installFakeAudio } from './fakeaudio.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -56,8 +57,14 @@ class SampleCtx extends FakeCtx {
    */
   decodeAudioData(buf, onOk) {
     this.decoded.push(buf.byteLength);
-    // 假 buffer：只提供 playSample / startLoop / BufferSource 会用到的字段
-    const fake = { duration: 1.2, sampleRate: 44100, length: 52920, getChannelData: () => new Float32Array(16) };
+    // 假 buffer：只提供 playSample / startLoop / BufferSource / buildLoopBuffer 会用到的字段
+    const fake = {
+      duration: 1.2,
+      sampleRate: 44100,
+      length: 52920,
+      numberOfChannels: 2,
+      getChannelData: () => new Float32Array(16),
+    };
     if (typeof onOk === 'function') onOk(fake);
     return Promise.resolve(fake);
   }
@@ -80,11 +87,15 @@ await settle();
 // ── 1. 三个文件真的在磁盘上 ────────────────────────────────────────────
 console.log('── 素材文件 ──');
 // 上游 PR #2 之后 unlock() 还会顺手预加载第四关突脸音效 scare-rush.mp3，
-// 所以总请求数是 4；「每条采样只拉一次」这个约束只在三件采样上成立。
+// 第三十二轮起 unlock() 还会预加载追逐伴奏 chase-noescape.mp3（`prepareChase()`）。
+// 所以总请求数是 5；「每条采样只拉一次」这个约束只在三件采样上成立。
 const isScare = (f) => /scare-rush\.mp3$/.test(f.file);
-const sampleFetches = fetched.filter((f) => !isScare(f));
+const isChase = (f) => /chase-noescape\.mp3$/.test(f.file);
+const sampleFetches = fetched.filter((f) => !isScare(f) && !isChase(f));
 ok(sampleFetches.length === 3, '三个采样各自拉了一次（心跳 / 喘气 / 尖叫）', `${sampleFetches.length} 次`);
 ok(fetched.some((f) => isScare(f) && f.ok), '突脸音效 scare-rush.mp3 也在预加载（第四关木偶突脸）');
+ok(fetched.filter(isChase).length === 1, '追逐伴奏 chase-noescape.mp3 在 unlock 时预加载了一次',
+  `${fetched.filter(isChase).length} 次`);
 for (const f of fetched) {
   ok(f.ok, `文件存在：${path.basename(f.file)}`, f.ok ? `${(f.size / 1024).toFixed(0)} KB` : f.file);
 }
@@ -95,25 +106,33 @@ ok(byName('chase-breath.wav')?.head === 'RIFF', '喘气是 WAV', byName('chase-b
 ok(byName('scream.ogg')?.head === 'OggS', '尖叫是 Ogg（OggS 头）', byName('scream.ogg')?.head);
 const sizes = fetched.map((f) => statSync(f.file).size);
 ok(Math.min(...sizes) > 8000, '没有空文件', `最小 ${Math.min(...sizes)} B`);
-ok(bus.ctx.decoded.length === 4, '三个采样 + 突脸音效都送进了解码器', `${bus.ctx.decoded.length} 个`);
+ok(bus.ctx.decoded.length === 5, '三个采样 + 突脸音效 + 追逐伴奏都送进了解码器',
+  `${bus.ctx.decoded.length} 个`);
 
 console.log('── 解码结果 ──');
 ok(Boolean(bus.samples.heartbeat && bus.samples.breath && bus.samples.scream),
   '三个采样都进了 bus.samples', Object.keys(bus.samples).join(' / '));
 
-// ── 2. 追逐段：只有心跳循环 + 合成伴奏，没有喘气 ──────────────────────
+// ── 2. 追逐段：心跳循环 + 一首实录伴奏，没有喘气 ──────────────────────
 console.log('── 追逐段 ──');
 const beforeChase = bus.ctx.created.length;
 bus.setMood('chase');
-// 第十九轮：喘气从追逐段拿掉了，改由 chasemusic.js 的程序化伴奏 + 更响的心跳撑气氛
+// 第十九轮：喘气从追逐段拿掉了，改成更响的心跳 + 一首专门的伴奏。
+// 第三十二轮：伴奏从「四份程序化合成」换成 assets/audio/chase-noescape.mp3（见 chasefile.js）。
 ok(!bus.loops.breath, 'setMood(chase) 不再起喘气循环（追逐段没有喘气声）');
-ok(Boolean(bus.chaseMusic) && bus.chaseMusic.playing === true, 'setMood(chase) 起了追逐伴奏');
-ok(bus.ctx.created.length > beforeChase + 5, '伴奏真的建了节点',
+ok(Boolean(bus.chaseFile), 'unlock() 时就建好了追逐伴奏实例（预加载，不等进追逐那一刻）');
+ok(bus.chaseFile.state === 'ready' && Boolean(bus.chaseFile.buffer),
+  '伴奏素材已经解码待播（unlock → fetch → decodeAudioData → 拼接）', bus.chaseFile.state);
+ok(bus.ctx.created.length > beforeChase, 'setMood(chase) 建了播放节点',
   `${bus.ctx.created.length - beforeChase} 个`);
-// 第二十二轮把总线从 0.85 提到 1.5：实测 C · 锤击峰值只有 BGM 的 1.5 倍（听感还更轻），
-// 提到 1.5 后同一窗口 RMS 比 BGM 高 +5.5dB，心跳仍比伴奏高 +2.5dB，master 上削波样本 0。
-const chaseBusTarget = bus.chaseBus?.gain.events.at(-1)?.v;
-ok(Math.abs(chaseBusTarget - 1.5) < 1e-6, '伴奏总线推到 1.5（压过默认 BGM）', fmt(chaseBusTarget));
+const chaseSources = bus.ctx.created.slice(beforeChase).filter((n) => n.kind === 'buffer');
+ok(chaseSources.length === 1, '只起了一个 BufferSource（不会两条叠着）', `${chaseSources.length} 条`);
+ok(chaseSources[0]?.loop === true, '循环播放（loop = true，接缝在内存里拼接好了）');
+ok(chaseSources[0]?.buffer === bus.chaseFile.buffer, '放的就是解码 + 淡化后的那个 buffer');
+// 距离只改音量：起步时压力是 0，所以增益应该正好是 −6 dB 那一端
+const chaseStart = bus.chaseFile.gain.gain.events.at(-1);
+ok(Math.abs(chaseStart.v - chaseGainFor(0)) < 1e-9, '起步音量 = −6 dB（离得远，压着放）',
+  fmt(chaseStart.v));
 
 bus.startHeartbeat();
 const hb = bus.loops.heartbeat;
@@ -131,17 +150,22 @@ ok(Math.abs(bus.loops.heartbeat.gain.gain.events.at(-1).v - 1.8) < 1e-6,
 ok(Math.abs(bus.loops.heartbeat.src.playbackRate.events.at(-1).v - 1.35) < 1e-6,
   '压力满时心跳 1.35 倍速（更急）', fmt(bus.loops.heartbeat.src.playbackRate.events.at(-1).v));
 ok(!bus.loops.breath, '压力拉满也不会冒出喘气循环');
-ok(Math.abs(bus.chaseMusic.info().intensity - 1) < 1e-6, '压力拉满时伴奏强度也到 1',
-  fmt(bus.chaseMusic.info().intensity));
+// 第三十二轮：伴奏不再有「强度 → 织体」，只有音量；压力 1 = +1 dB
+const chaseFull = bus.chaseFile.gain.gain.events.at(-1);
+ok(chaseFull.kind === 'target' && Math.abs(chaseFull.v - chaseGainFor(1)) < 1e-9,
+  '压力拉满时伴奏音量推到 +1 dB（这个方法只改音量）', fmt(chaseFull.v));
+ok(Math.abs(bus.chaseFile.snapshot().intensity - 1) < 1e-6, '快照里的强度也记成 1',
+  fmt(bus.chaseFile.snapshot().intensity));
 
 // 同一键不重复起第二条（否则会两路叠着、相位打架）
 const before = bus.ctx.created.length;
 bus.startHeartbeat();
 ok(bus.ctx.created.length === before, '同一键不会重复起第二条循环（不叠音）',
   `新增节点 ${bus.ctx.created.length - before}`);
-const musicBefore = bus.chaseMusic.info().beats;
+const chaseSourceBefore = bus.chaseFile.source;
 bus.startChaseMusic();
-ok(bus.chaseMusic.info().beats === musicBefore, '重复 startChaseMusic 不会把伴奏从头再起一遍');
+ok(bus.chaseFile.source === chaseSourceBefore && bus.ctx.created.length === before,
+  '重复 startChaseMusic 不会把伴奏从头再起一遍');
 
 // ── 3. 安全屋里：单次喘气，不是循环 ────────────────────────────────────
 console.log('── 安全屋 ──');

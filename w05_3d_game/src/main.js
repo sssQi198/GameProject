@@ -51,15 +51,9 @@ try {
   scene.add(camera);
 
   const audio = new AudioBus();
-  // 追逐伴奏现在有四份候选（第十九轮），地址栏里可以直接指定听哪一份：
-  //   ?chase=1..4   1=A 脉搏  2=B 锯弦  3=C 锤击  4=D 耳语   0 = 不放伴奏
-  // 不写就用上次在 dev/chase-bgm.html 里选的那份（localStorage: wf-chase），
-  // 从没挑过就是 3 = C · 锤击（`DEFAULT_CHASE_TRACK`，audio.js:29）。
-  // 「不写」包括 `?chase=0`——那是明确的「关」，不是「用默认」。
-  {
-    const chaseParam = new URLSearchParams(location.search).get('chase');
-    if (chaseParam !== null && chaseParam !== '') audio.setChaseTrack(Number(chaseParam));
-  }
+  // 追逐伴奏自第三十二轮起只有一首（assets/audio/chase-noescape.mp3），
+  // 所以没有 `?chase=` 这种选曲参数了：音量只跟「怪物离你多近」挂钩（audio.setTension）。
+  // 试听/调音量曲线用 dev/chase-bgm.html。
   const hud = new Hud(audio);
   const level = new Level(scene);
   const player = new Player(camera);
@@ -225,16 +219,20 @@ try {
           grounded: player.grounded,
           mate: game.safehouse ? game.safehouse.mateChestPoint() : null,
           door: game.safehouse ? game.safehouse.doorAngle() : null,
-          chase: audio.chaseMusic ? audio.chaseMusic.info() : null,
+          chase: audio.chaseFile ? audio.chaseFile.snapshot() : null,
         });
-        // 追逐伴奏核对：选的是第几份 / 真在跑吗 / 强度多少
-        if (audio.chaseMusic) {
-          const info = audio.chaseMusic.info();
-          // 第一个字段用「玩家选的编号」而不是 ChaseMusic 内部下标：选 0（关）时
-          // 内部下标仍是 0+1=1，写出来会误报成「选了 A 但没响」。
-          const sel = Number.isFinite(audio.chaseTrackIndex) ? audio.chaseTrackIndex : info.index;
-          const id = sel > 0 ? info.id : 'off';
-          document.body.dataset.chase = `${sel}|${id}|${info.playing ? 'on' : 'off'}|${info.intensity}`;
+        // 追逐伴奏核对：在跑吗 / 当前压力换算出的增益 / 素材解码到哪一步
+        // 格式：playing|state|gain|intensity|duration|error，一行看完
+        if (audio.chaseFile) {
+          const s = audio.chaseFile.snapshot();
+          document.body.dataset.chase = [
+            s.playing ? 'on' : 'off',
+            s.state,
+            s.gain,
+            s.intensity,
+            s.duration === null ? '-' : s.duration,
+            s.error || '-',
+          ].join('|');
         }
       } catch (error) {
         document.body.dataset[tag] = 'err:' + (error && error.message);

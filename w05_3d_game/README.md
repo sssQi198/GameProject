@@ -92,7 +92,7 @@ w05_3d_game/
 │   ├── viewfinder.js   取景器：相机屏幕式取景层与效果
 │   ├── camera-rig.js   程序化手持相机模型
 │   ├── audio.js        Web Audio：采样层（真录音）+ 合成兜底
-│   ├── chasemusic.js   追逐伴奏：四份程序化合成曲子，可当场换（`?chase=`）
+│   ├── chasefile.js    追逐伴奏：一首实录 MP3，循环接缝在内存里做平，距离只调音量
 │   ├── hallglow.js     走廊灯池与身后熄灯
 │   ├── demo.js         演示模式
 │   ├── collision.js    碰撞
@@ -104,8 +104,8 @@ w05_3d_game/
                         `bgm-10086.mp3`（菜单/关卡 BGM，4.4 MB，服务器开了 Range
                         之后按 206 分片取，`duration` 才是有限值）和
                         `scare-rush.mp3`（第四关木偶突脸），出处与许可证见
-                        `assets/audio/CREDITS.md`；追逐伴奏不在这里——它在
-                        `src/chasemusic.js` 里现算，没有文件
+                        `assets/audio/CREDITS.md`；追逐伴奏在这里——
+                        `chase-noescape.mp3`（45 s 实录，唯一一首，见第六节）
 ```
 
 场景现在用程序化几何体。把模型放进 `assets/models/` 后，可以在 `level.js` 里按同样的位置换上去。
@@ -1110,6 +1110,12 @@ python generate_furniture_glb.py
 
 ## 第十九轮：追逐只留很响的心跳、四份程序化伴奏可以挑，红眼尖牙照抄第五关怪物模型
 
+> **本节的「四份伴奏」已在第三十二轮整体下线**：`src/chasemusic.js` 连同它的探针一起删除，
+> 追逐段改放一首实录 MP3（`assets/audio/chase-noescape.mp3`，`src/chasefile.js`），
+> `?chase=` 与 `localStorage['wf-chase']` 都不再被读，`dev/chase-bgm.html` 已重写成单曲试听页。
+> 所以下文 §2、§5 里「四份怎么挑」「探针 99 条」「`data-chase` 是 `编号|id|…`」这些**都是历史**，
+> 现状见第三十二轮那一节；§1、§3、§4 讲的追逐/红眼/尖牙仍然有效（只是伴奏换了）。
+
 三件事：**追逐里删掉喘气、把心跳做成全场最响的一层**，**写了四份追逐伴奏供挑选**（`dev/chase-bgm.html` 试听、记住选择），**同学的眼睛和尖牙改成照抄第五关 `eyes_v01.glb` / `teeth_v01.glb` 的参数**——目的是让人一眼看出「这张脸是怪物变的」，而不是「人戴了个红色美瞳」。
 
 ### 1. 追逐：没有喘气，只有很响的心跳
@@ -1191,7 +1197,7 @@ python generate_furniture_glb.py
 
 ### 5. 怎么验
 
-- `_probe/chasemusic.mjs`（**新**，99 条）：四份曲子各有 name/bpm、`setIntensity` 单调、`Run` 的节点数在预算内、`stop()` 是渐变不是硬切、`setTrack` 越界会绕回、切曲不泄漏节点。
+- `_probe/chasemusic.mjs`（**新**，99 条；**第三十二轮已随 `chasemusic.js` 删除**）：四份曲子各有 name/bpm、`setIntensity` 单调、`Run` 的节点数在预算内、`stop()` 是渐变不是硬切、`setTrack` 越界会绕回、切曲不泄漏节点。
 - 无头 Edge：
 
 | URL | 采到的数 |
@@ -1205,7 +1211,7 @@ python generate_furniture_glb.py
 | `dev/chase-bgm.html?autoplay=1&track=2` | `data-preview="ok"`、4 张卡片、`{index:2,id:"saw",playing:true,beats:31}` |
 | `dev/chase-bgm.html?autoplay=1`（不给 `track`） | 选中第 **3** 张卡（`.card.on` 下标 3）、`{index:3,id:"industrial",name:"C · 锤击",playing:true,beats:36}`、状态栏「播放中：C · 锤击」 |
 - `?probe=1` 现在还挂了一个后门 `window.__probeDump(tag)`：立刻渲染一帧、重写 `data-<tag>` / `data-chase` / `data-diag` 并返回这三个值。无头验「真跑起来之后」的状态就靠它——页面刚加载时抓的那一帧必然早于追逐开始，`data-chase` 只会是 `|off|`。
-- `data-chase` 第一个字段是**玩家选的编号**（`audio.chaseTrackIndex`），不是 `ChaseMusic` 的内部下标。选 0（关）时内部下标仍是 0、`info().index` 会报 1，旧写法会写成「选了 A 却没响」，现在写 `0|off|off|<强度>`。
+- `data-chase` 第一个字段是**玩家选的编号**（`audio.chaseTrackIndex`），不是 `ChaseMusic` 的内部下标。选 0（关）时内部下标仍是 0、`info().index` 会报 1，旧写法会写成「选了 A 却没响」，现在写 `0|off|off|<强度>`。（**第三十二轮起格式改成 `on/off|state|gain|intensity|duration|error`**，见那一节的表格。）
 - 只能人眼过的：四份里哪份对味、心跳 0.3545 峰值在耳机上会不会吵、17 颗牙在 0.62 m 看着是不是太密、侧面那张「远眼被挡住一半」自不自然。
 
 ### 6. 已知副作用（都接受）
@@ -1288,6 +1294,8 @@ python generate_furniture_glb.py
 两项都是「动一个数」的改动，但各配了一次量：一个决定听感排序，一个决定画面色调。
 
 ### 1. 追逐伴奏：总线 0.85 → 1.5
+
+> **第三十二轮已删除这个常量**：合成伴奏整体下线，换成实录 MP3 后总线不再需要增益（实测 E 与原 C 只差 0.4 dB，直接 unity 基准），`CHASE_BUS_GAIN` / `chaseBus` 在 `src/audio.js` 里都不存在了。下面这段是当时的推理，留作「为什么原来要 +5.5 dB」的参考。
 
 `src/audio.js` 新增 `const CHASE_BUS_GAIN = 1.5`，`startChaseMusic()` 的斜坡写它：
 
@@ -2142,7 +2150,112 @@ Settings → Pages → **Deploy from a branch** → Branch `main`、目录 `/ (r
 
 - 没把 `docs/`、`README.md`、`_probe/` 从仓库里摘出去：Pages 会一起发布（体积大，但 `w05_3d_game/` 本身是干净的）；
 - 没做打包/压缩，直接发布源码（ES 模块 + 原始 glb/贴图），首屏比打包版慢；
-- `assets/audio/bgm-10086.mp3`、`scare-rush.mp3` 的出处仍未核对（见 `assets/audio/CREDITS.md`），公开托管前要么补齐、要么换掉 —— 小范围试玩可以，公开发布 / 参赛不行。
+- `assets/audio/bgm-10086.mp3`、`scare-rush.mp3`、`chase-noescape.mp3` 的出处仍未核对（见 `assets/audio/CREDITS.md`），公开托管前要么补齐、要么换掉 —— 小范围试玩可以，公开发布 / 参赛不行。
+
+### 18. 追逐伴奏换成一首实录 MP3，距离只调音量（第三十二轮）
+
+要求分两步来：先是「我在工作区放了一个 MP3 文件，用它替换现在的追逐部分 BGM」，试听后定成
+「**只保留 E**（`chase-noescape.mp3`），按距离适当调整音量就行」。所以这轮**不是**加选项，
+而是**把合成器整套拆掉、换一首真实录音，且只让音量和距离挂钩**——BPM、滤波、音色都不跟距离变。
+
+#### 1. 新模块 `src/chasefile.js`（219 行）
+
+流程很短：`fetch` → `decodeAudioData` → **在内存里**把接缝做平 → 一个 `loop = true` 的
+`AudioBufferSourceNode` → 自己的 `GainNode` → `master`（`audio.js` 里的 `chaseFile`）。
+
+接缝是这首曲子唯一的硬问题：MP3 编码器在开头塞了 31 ms 静音，末尾又收在半空中，直接 loop 会「咔」一下。
+做法是掐掉头 31 ms，再把**最后 45 ms 等功率交叉淡化**到开头——`cos/sin` 曲线，不是线性，
+所以交界处不会掉音量：
+
+| 数 | 值 |
+|---|---|
+| 磁盘文件 | 720 384 B · 解码后 45.024 s · 48 kHz · 2ch |
+| 掐头 | 31 ms（找第一个 \|x\| > 0.003 的样本） |
+| 交叉淡化 | 45 ms 等功率 |
+| 循环长度 | **44.948 s** |
+| 接缝跳变 | **0.0052**（不做处理的原样 loop 是 0.4948，差 95 倍） |
+| 峰值 / RMS | 0.628（−4.0 dBFS）/ −19.7 dBFS |
+
+**磁盘上的 mp3 一个字节没改**，所有处理都在 `buildLoopBuffer()` 里算完就丢。
+
+#### 2. 距离 → 音量：只有一条曲线，`chaseGainFor(t)`
+
+`game.js:1518` 每帧算一次压力交给音频：
+
+```js
+const danger = clamp(1 - (dist - CONFIG.entityCatch) / 6, 0, 1);  // 6 米外=0，贴脸=1
+```
+
+`audio.setTension(t)` 夹到 0..1、变化小于 0.02 就跳过，然后 `chaseFile.setIntensity(t)`。
+增益是 **dB 线性**的 −6 dB → +1 dB（`10^(db/20)`，即 0.5012 → 1.1220，7 dB 摆幅），
+用 `setTargetAtTime(..., 0.5)` 平滑，约 4.5 秒才走完——够慢，不会跟着怪物一顿一顿地跳。
+
+为什么是 unity 基准而不是原来那 1.5：实测这首 E = −26.8 dBFS，原 C · 锤击（总线 1.5）= −26.4 dBFS，
+只差 0.4 dB，所以 `CHASE_BUS_GAIN` 直接取消，最响档峰值 0.628 × 1.122 ≈ 0.70，不削波。
+
+#### 3. 删掉的东西
+
+| 对象 | 处理 |
+|---|---|
+| `src/chasemusic.js`（454 行，四份程序化伴奏） | **删除** |
+| `_probe/chasemusic.mjs` | **删除**（合成器没了，断言没有对象） |
+| `?chase=1..4` / `?chase=0` | 不再解析，`main.js` 只留一行注释 |
+| `localStorage['wf-chase']`、`DEFAULT_CHASE_TRACK`、`CHASE_BUS_GAIN`、`chaseBus` | 全部删除 |
+| `dev/chase-bgm.html` | 重写成单曲页：播放/停、距离滑杆（直接调 `setIntensity`）、增益读数、dBFS 电平表、「跳到最后 3 秒」听接缝 |
+
+`audio.js` 里对应的口子改成三个小方法：`prepareChase()`（unlock 时就解码，不等追逐）、
+`startChaseMusic()`、`stopChaseMusic(fade)`；`setMood('chase')` 起它、别的 mood 停它。
+
+#### 4. 验证（数字都在，不是「跑起来没报错」）
+
+离线（假 Web Audio，`_probe/chasefile.mjs`，26 条断言）：
+
+| 断言 | 结果 |
+|---|---|
+| `chaseGainFor(0)` / `chaseGainFor(1)` | 0.5012 / 1.1220（**2.2387 倍**） |
+| 单调 + dB 线性中点 | `chaseGainFor(0.5)` = 0.7499，等于两端几何平均 |
+| 越界夹取 | `-3` / `7` 都夹回 0 / 1 |
+| 接缝 | 头 31 ms、淡化 45 ms、循环 1.955 s（测试用 2 s 假素材），跳变 0.00524 vs 原样 0.4948 |
+| 坏素材 | 空 buffer / 全静音 → `failed` + 中文错误，不抛到游戏里 |
+| 404 | `state = failed`、`error` 里带 `HTTP 404`，游戏照常跑（只是没伴奏） |
+
+离线（`_probe/samples.mjs`）：解锁时**只有 1 次** MP3 请求、5 个采样解码、`state === 'ready'`、
+只有 1 个 `kind === 'buffer'` 的循环源且它的 `buffer` 就是 `chaseFile.buffer`、起始增益 =
+`chaseGainFor(0)`、`setTension(1)` 后目标 = `chaseGainFor(1)`、重复 `startChaseMusic()` **不新建节点**。
+离线（`_probe/bgmstop.mjs`，31 条）：追逐时 `playing === true`、增益 `10^(-6/20)`；
+`setMood('calm')` 后 `playing === false`、增益回到 0.0001。
+
+浏览器（CDP，`dev/chase-bgm.html`）：
+
+| 项 | 读数 |
+|---|---|
+| 距离滑杆 0 / 1 | 增益 **−6.00 dB / +1.00 dB**，摆幅 7.00 dB |
+| 接缝 | `seamJump 0.0177` vs 相邻样本 `p99 0.0502`（跳变小一个量级，听不出来） |
+| 满档输出 | `outPeakAtMax 0.371`、`clipped: false` |
+
+浏览器（CDP，真游戏 `?probe=1&devLevel=finalechase`，把怪物冻结在两侧再逐帧 `__probeDump`）：
+
+| 距离 | `data-chase` | 增益节点 | 期望 `chaseGainFor` |
+|---|---|---|---|
+| 远处（压力 0） | `on\|ready\|0.501\|0\|44.948\|-` | **0.5012** | 0.5012 |
+| 近处（压力 0.925） | `on\|ready\|1.056\|0.93\|44.948\|-` | **1.0559** | 1.0559 |
+
+摆幅 **6.47 dB**（差值的来源：`entityCatch = 1.45`，真贴到 1.45 米就已经被抓住了，所以实测点取
+`1.45 + 0.45 = 1.9` 米、压力最高只能到 0.925；不是映射不到位）。`setMood('calm')` 之后
+`playing:false`、增益 0.0001、`musicOff:true`，干净收尾。
+
+`_probe/` 现在 **31 个脚本全部 exit 0**（比上轮少一个，就是被删的 `chasemusic.mjs`）；
+`doorwall.mjs` 会打一行 `密度不一致的块: 13 <-- FAIL`，那是它自己的贴图密度自检，与音频无关、本轮之前就这样。
+
+#### 5. 已知副作用 / 没做
+
+- **窗口 RMS 的摆幅小于增益摆幅**（实测 4.2–4.6 dB vs 6.47 dB）：这首曲子本身两段 4.5 秒的响度就不一样，
+  所以判断「跟距离变了吗」要看**增益参数**，不要看两个窗口的 RMS——这一点在探针里也是这么断言的。
+- 压力真正到 1 的那一瞬间就是被抓到的那一瞬间，玩家实际能听到的最响档大约 +0.6 dB，不是 +1 dB；
+  想让满档可听就得把 `entityCatch` 调小，那是改玩法，这轮没动。
+- 只有一层音量，没有做「贴近时低频变多」这类音色映射（按要求：按距离调整音量就行）。
+- 素材**授权未核对**：出处只有站点首页（爱给网），没有素材页、没有作者，文件名里的「免版税」不等于可以再分发。
+  内测/课堂演示可以用，**公开发布或参赛前必须解决**（见 `assets/audio/CREDITS.md` 第六节）。
 
 ## 已知限制
 
@@ -2152,7 +2265,7 @@ Settings → Pages → **Deploy from a branch** → Branch `main`、目录 `/ (r
 - 没有触屏操作
 - 终局必须按住 `Shift`。只走路会被那双眼睛追上
 - 终局那 18.80 秒**没有任何跳过入口**
-- 追逐段有音乐层了（第十九轮）：`src/chasemusic.js` 的四份**程序化**伴奏，**默认 C · 锤击**（`industrial`，2026-11-09 你挑的），`?chase=0` 可关、`?chase=1..4` 换曲，试听页 `dev/chase-bgm.html`。**这份伴奏是追逐段唯一的音乐**：默认 BGM 在追逐一开始就被 `stopMusic()` 真停掉（不是压着放），而且从此不再回来，安全屋和结局都是安静的（第二十轮）。喘气在追逐里**已去掉**，全游戏只剩安全屋低头那**一处** `pant()`（门口那一声 `breath()` 已在第二十七轮删掉；第四关拍完那一声在第二十六轮删掉，见 §12、§13）。**音量配比（第二十一轮）**：伴奏总线 `CHASE_BUS_GAIN = 1.5`，比默认 BGM 高约 +5.5 dB RMS（峰值 2.5 倍）；心跳仍是最响的一层（`master` 上 RMS 0.0499 / 峰值 0.2708，比伴奏高 2.5 dB），两者叠加峰值 0.3394、削波样本 0。十四轮下线的那首成品追逐曲没有回来，理由是版权与「听腻」两头都占
+- 追逐段有音乐层（第十九轮加、第三十二轮换）：现在是**一首实录 MP3** `assets/audio/chase-noescape.mp3`（45.02 s，48 kHz 立体声，`src/chasefile.js`），**距离只改音量**（−6 dB ↔ +1 dB），不再有曲目可选、`?chase=` 已失效，试听页 `dev/chase-bgm.html` 重写成单曲版。**这份伴奏是追逐段唯一的音乐**：默认 BGM 在追逐一开始就被 `stopMusic()` 真停掉（不是压着放），而且从此不再回来，安全屋和结局都是安静的（第二十轮）。喘气在追逐里**已去掉**，全游戏只剩安全屋低头那**一处** `pant()`（门口那一声 `breath()` 已在第二十七轮删掉；第四关拍完那一声在第二十六轮删掉，见 §12、§13）。**音量配比**：这首在原 unity 增益下与原 C · 锤击（当时总线 1.5）只差 0.4 dB，所以总线增益取消、直接 unity 基准；心跳仍是最响的一层（`master` 上 RMS 0.0499 / 峰值 0.2708）。**授权是这条素材的硬伤**：出处只有站点（爱给网），具体素材页与作者都拿不回来，许可证**未核对**，公开发布/参赛前必须先解决（见 `assets/audio/CREDITS.md` 第六节）。十四轮下线的那首成品追逐曲没有回来，理由是版权与「听腻」两头都占
 - `assets/audio/chase-breath.wav` 的作者页面没找回、`chase-heartbeat.wav` 的作者没记录，`assets/audio/CREDITS.md` 里标的是「待补」；要公开发布或参赛的话，这两条得先补齐或换素材
 - 第五关拍照那一下的低频重击是 `game.js` 里内联的 `burst + tone`，与已删的 `audio.roar()` 无关，声音偏「闷响」不是「吼」
 - 点光源是一池常数（第二十二轮）：全场恒定 18 盏参与渲染，池满了会挤掉离玩家最远的那盏；正常玩法实测同一刻最多 15 盏在照亮，碰不到上限。想加灯（比如给某个场景再加一盏剧情灯）不用改这个数，只要那一刻在亮的灯不超过 18

@@ -3,419 +3,240 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>追逐伴奏试听 · 五份候选（4 合成 + 1 MP3）</title>
+    <title>追逐伴奏试听 · 无逃脱（唯一一首）</title>
     <style>
       :root { color-scheme: dark; }
       * { box-sizing: border-box; }
       body {
         margin: 0;
         min-height: 100vh;
-        padding: 28px 32px 40px;
-        background: radial-gradient(1200px 600px at 50% -10%, #1a1216 0%, #0a0709 55%, #060405 100%);
+        padding: 30px 34px 44px;
+        background: radial-gradient(1200px 620px at 50% -10%, #1a1216 0%, #0a0709 55%, #060405 100%);
         color: #e8e2dd;
         font: 14px/1.7 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
       }
-      h1 { margin: 0 0 4px; font-size: 19px; letter-spacing: 0.06em; font-weight: 600; }
+      h1 { margin: 0 0 5px; font-size: 19px; letter-spacing: 0.06em; font-weight: 600; }
       .sub { margin: 0 0 22px; color: #8d827d; font-size: 12.5px; }
-      .sub code { color: #c8b6ab; background: #171012; padding: 1px 5px; border-radius: 3px; }
+      .sub code, .hint code { color: #c8b6ab; background: #171012; padding: 1px 5px; border-radius: 3px; }
 
-      .grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
-      @media (max-width: 1180px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-      @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-
-      .card {
-        position: relative;
-        text-align: left;
-        padding: 14px 15px 12px;
-        border: 1px solid #2a1f22;
-        border-radius: 8px;
-        background: linear-gradient(180deg, #15100f 0%, #0d0a0b 100%);
-        color: inherit;
-        font: inherit;
-        cursor: pointer;
-        transition: border-color 0.15s, transform 0.12s, background 0.15s;
+      .facts {
+        display: grid; gap: 10px; margin-bottom: 20px;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
       }
-      .card:hover { border-color: #5c3a34; transform: translateY(-1px); }
-      .card.on { border-color: #b8362c; background: linear-gradient(180deg, #24100f 0%, #120a0a 100%); box-shadow: 0 0 0 1px #b8362c inset, 0 6px 26px -12px #ff3a2a; }
-      .card .id {
-        display: inline-block; margin-bottom: 6px;
-        font-size: 11px; letter-spacing: 0.16em; color: #b8362c; text-transform: uppercase;
+      .fact {
+        padding: 11px 13px; border: 1px solid #241b1d; border-radius: 8px; background: #0c0809;
       }
-      .card .name { display: block; font-size: 15.5px; font-weight: 600; margin-bottom: 4px; }
-      .card .brief { display: block; color: #9a8d88; font-size: 12px; line-height: 1.55; }
-      .card .ref { display: block; margin-top: 7px; color: #6d625f; font-size: 11.5px; }
-      .card .bpm { position: absolute; top: 12px; right: 13px; color: #5c514e; font-size: 11px; font-variant-numeric: tabular-nums; }
+      .fact .k { display: block; color: #6d625f; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; }
+      .fact .v { display: block; margin-top: 2px; font-size: 15px; font-variant-numeric: tabular-nums; }
+      .fact .v small { color: #8d827d; font-size: 11.5px; }
 
       .panel {
-        display: flex; flex-wrap: wrap; align-items: center; gap: 18px;
-        padding: 14px 16px; border: 1px solid #241b1d; border-radius: 8px; background: #0c0809;
+        display: flex; flex-wrap: wrap; align-items: center; gap: 20px;
+        padding: 15px 17px; border: 1px solid #241b1d; border-radius: 8px; background: #0c0809;
       }
       .panel label { display: flex; align-items: center; gap: 9px; color: #9a8d88; font-size: 12.5px; }
-      input[type="range"] { width: 150px; accent-color: #b8362c; }
-      output { min-width: 34px; color: #d8c9c2; font-variant-numeric: tabular-nums; }
+      input[type="range"] { width: 260px; accent-color: #b8362c; }
+      output { min-width: 46px; color: #d8c9c2; font-variant-numeric: tabular-nums; }
 
       button.act {
-        padding: 8px 16px; border: 1px solid #3a2a2c; border-radius: 6px;
+        padding: 8px 17px; border: 1px solid #3a2a2c; border-radius: 6px;
         background: #171011; color: #e8e2dd; font: inherit; cursor: pointer;
       }
       button.act:hover { border-color: #6b3b34; }
       button.act.primary { border-color: #b8362c; background: #2a1210; }
       button.act.primary:hover { background: #3a1714; }
-      button.act[aria-pressed="true"] { border-color: #b8362c; color: #ff8b7a; }
 
       .meter { margin-top: 18px; display: flex; align-items: center; gap: 12px; color: #6d625f; font-size: 12px; }
-      .bar { flex: 1; height: 6px; border-radius: 3px; background: #1a1214; overflow: hidden; }
-      .bar > i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #7a2a20, #ff3a2a); transition: width 0.06s linear; }
+      .bar { flex: 0 1 340px; height: 6px; border-radius: 3px; background: #1a1214; overflow: hidden; }
+      .bar > i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #7a2a20, #ff3a2a); transition: width 0.05s linear; }
 
-      .hint { margin-top: 22px; color: #6d625f; font-size: 12px; line-height: 1.8; }
+      .hint { margin-top: 22px; color: #6d625f; font-size: 12px; line-height: 1.85; }
       .hint b { color: #a89892; font-weight: 600; }
-      .hint code { color: #c8b6ab; background: #171012; padding: 1px 5px; border-radius: 3px; }
+      .err { color: #ff8b7a; }
     </style>
   </head>
   <body>
-    <h1>追逐伴奏 · 五份候选</h1>
+    <h1>追逐伴奏 · 无逃脱</h1>
     <p class="sub">
-      A–D 是程序化合成（振荡器 + 噪声 + 滤波），没有采样任何外部音乐；E 是外部素材
-      （爱给网免版税区，出处链接待补）。点任意一张卡就是换那一首，正在放的话会直接切过去。
-      五张卡走同一个 master、同一个电平表，右边的 <b>dBFS</b> 可以横向比谁更响。
+      追逐段只剩这一首实录（第三十二轮定案）：<code>assets/audio/chase-noescape.mp3</code>。
+      原来那四份程序化合成（A 脉搏 / B 锯弦 / C 锤击 / D 耳语）连同 <code>chasemusic.js</code> 已经删掉了。
+      距离<b>只改音量</b>，BPM、滤波、音色都不动。
     </p>
 
-    <div class="grid" id="tracks"></div>
+    <div class="facts">
+      <div class="fact"><span class="k">状态</span><span class="v" id="fState">—</span></div>
+      <div class="fact"><span class="k">循环长度</span><span class="v" id="fDur">—</span></div>
+      <div class="fact"><span class="k">掐掉头静音</span><span class="v" id="fTrim">—</span></div>
+      <div class="fact"><span class="k">接缝交叉淡化</span><span class="v" id="fXfade">—</span></div>
+      <div class="fact"><span class="k">采样率 / 声道</span><span class="v" id="fFmt">—</span></div>
+      <div class="fact"><span class="k">加载耗时</span><span class="v" id="fLoad">—</span></div>
+    </div>
 
     <div class="panel">
       <button class="act primary" id="toggle" type="button">▶ 播放</button>
-      <label>强度 <input type="range" id="intensity" min="0" max="100" value="60" /><output id="intensityOut">0.60</output></label>
-      <label>音量 <input type="range" id="volume" min="0" max="100" value="70" /><output id="volumeOut">0.70</output></label>
-      <button class="act" id="use" type="button">设为本局伴奏</button>
+      <label>
+        距离 <input type="range" id="dist" min="0" max="100" value="100" />
+        <output id="distOut">贴背</output>
+      </label>
+      <span style="color:#9a8d88;font-size:12.5px">增益 <output id="gainOut">—</output></span>
+      <button class="act" id="looptest" type="button">跳到最后 3 秒（听接缝）</button>
     </div>
 
     <div class="meter">
       <span>电平</span>
       <div class="bar"><i id="level"></i></div>
       <span id="dbfs">—</span>
-      <span id="status">未开始</span>
+      <span id="status">点「播放」（浏览器要一次用户手势才允许出声）</span>
     </div>
 
     <p class="hint">
-      <b>强度</b>就是游戏里「怪物离你多近」——拉满等于贴着背跑：BPM 更高、滤波更开、每一下更响。
-      E 卡是现成的 MP3，不吃强度，只跟主音量走，所以把它和 C（<code>3</code>）对比时请把强度拉到同一档再听。<br />
-      <b>设为本局伴奏</b>会把选择写进 <code>localStorage: wf-chase</code>，之后进游戏就放这一份（也可以<b>右键复制对应链接</b>）。
-      E 卡现在还没接进游戏——点它只会提示，不写 localStorage（游戏的 <code>clampTrack</code> 只认 0..4，写 5 会掉回 D · 耳语）。<br />
-      <b>没挑过的时候</b>游戏放的是 <code>3</code>（C · 锤击）；这一页跟着显示同一份，点开听到的就是进游戏听到的。
-      地址栏参数：<code>?chase=1</code>（A 脉搏）、<code>2</code>（B 锯弦）、<code>3</code>（C 锤击）、<code>4</code>（D 耳语）、<code>0</code>（不放伴奏）。
-      试听页自己的参数是 <code>?track=5</code>（E 卡）、<code>?autoplay=1</code>（不点就出声）。<br />
-      想听游戏里的实际效果：<code>?devLevel=finalechase</code> 直接跳到追逐段（不加 <code>chase</code> 就是这一页选中的那份）。
+      <b>距离 → 音量</b>：左端 = 怪物很远 = <code>−6 dB</code>，右端 = 贴着背 = <code>+1 dB</code>。
+      中间是按 <b>dB 线性</b>插值的，不是按增益线性——所以「近了一点」听起来才是均匀地变响。
+      <!-- -->
+      游戏里这条曲线由 <code>game.js</code> 每帧按怪物距离算出的 <code>tension</code> 驱动，
+      <code>audio.setTension()</code> 只是把它转给 <code>chasefile.js</code>。<br />
+      <b>接缝</b>：MP3 开头有 31 ms 编码器延迟静音，末尾是硬切。原样 <code>loop = true</code> 每圈会「咔」一下，
+      所以解码后在<b>内存里</b>掐掉 31 ms、把最后 45 ms 等功率淡化到开头，45.024 s 变成 44.948 s。
+      磁盘上的 mp3 一个字节没改。<b>「跳到最后 3 秒」</b>就是专门听这个接缝的。<br />
+      <b>进游戏里听</b>：<code>?devLevel=finalechase</code> 直接跳到追逐段。这一页只是给它配的试听台。
     </p>
 
     <script type="module">
-import { ChaseMusic, CHASE_TRACKS, seeded } from '../src/chasemusic.js';
+import { ChaseFile, CHASE_FILE_URL, CHASE_XFADE, CHASE_GAIN_MAX_DB, CHASE_GAIN_MIN_DB, chaseGainFor } from '../src/chasefile.js';
 
-// 第五张卡是**外部素材**（爱给网免版税区下载的 MP3，第一轮试听用），不经过合成引擎：
-// 解码成 AudioBuffer → 等功率交叉淡化做成无缝循环 → 挂到同一个 master 上，
-// 这样电平和前四份是同一把尺子，A/B 才有意义。它不是游戏里的正式音轨，
-// 点「设为本局伴奏」对这张卡会被拒绝（src/audio.js 的 clampTrack 只认 0..4）。
-const FILE_TRACK = {
-  name: 'E · 无逃脱（MP3）',
-  brief: '外部素材，45 秒，首尾等功率交叉淡化后无缝循环。不吃「强度」，只跟主音量走。',
-  ref: 'assets/audio/chase-noescape.mp3 · 出处：爱给网（页面链接待补）',
-  url: '../assets/audio/chase-noescape.mp3',
-  length: '45.0 s',
-};
-const FILE_INDEX = CHASE_TRACKS.length + 1; // 5
-const TRACK_COUNT = FILE_INDEX;
+const $ = (id) => document.getElementById(id);
+const fmtDb = (g) => `${(20 * Math.log10(g)).toFixed(2)} dB`;
 
-const params = new URLSearchParams(location.search);
-// 默认那份和游戏里保持一致（src/audio.js 的 DEFAULT_CHASE_TRACK = 3 = C · 锤击）。
-// 优先级：?track= → 上次点过「设为本局伴奏」的那份 → 默认。存的是 0（关）时试听页
-// 仍然放默认那份——「关」在试听页里没有意义。
-const DEFAULT_TRACK = 3;
-const clampTrack = (n) => {
-  const v = Math.round(Number(n));
-  return Number.isFinite(v) && v >= 1 && v <= TRACK_COUNT ? v : DEFAULT_TRACK;
-};
-const stored = (() => {
-  try {
-    return localStorage.getItem('wf-chase');
-  } catch {
-    return null;
-  }
-})();
-let index = clampTrack(params.get('track') ?? (Number(stored) > 0 ? stored : DEFAULT_TRACK));
-const trackName = (i) => (i === FILE_INDEX ? FILE_TRACK.name : CHASE_TRACKS[i - 1].name);
+// 开发页在 dev/ 下，比游戏页多一层；'../assets/...' 才是这台机器上的真文件。
+const URL_DEV = CHASE_FILE_URL.replace(/^\.\//, '../');
 
-let ctx = null;
-let master = null;
-let analyser = null;
-let music = null;
-let fileGain = null;
-let fileSource = null;
-let fileBuffer = null;
-let fileLoading = null;
-let fileStats = null;
-let fileTrim = { headMs: 0 };
+const ctx = new (window.AudioContext || window.webkitAudioContext)();
+const analyser = ctx.createAnalyser();
+analyser.fftSize = 2048;
+analyser.connect(ctx.destination);
+const bus = new ChaseFile(ctx, analyser);
+
 let playing = false;
+let raf = 0;
+let loopCount = 0;
 
-const el = (id) => document.getElementById(id);
-const grid = el('tracks');
-const toggleBtn = el('toggle');
-const useBtn = el('use');
-const levelBar = el('level');
-const statusText = el('status');
-const dbText = el('dbfs');
-
-// ── 卡片 ────────────────────────────────────────────────────────────
-const cards = [...CHASE_TRACKS, FILE_TRACK].map((t, i) => {
-  const n = i + 1;
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'card';
-  btn.dataset.index = String(n);
-  btn.innerHTML = `
-    <span class="bpm">${n === FILE_INDEX ? t.length : `${t.bpm[0]}–${t.bpm[1]} BPM`}</span>
-    <span class="id">${n === FILE_INDEX ? '外部素材' : `TRACK ${String.fromCharCode(65 + i)}`}</span>
-    <span class="name">${t.name}</span>
-    <span class="brief">${t.brief}</span>
-    <span class="ref">${t.ref}</span>`;
-  btn.addEventListener('click', () => {
-    void play(n);
-  });
-  grid.append(btn);
-  return btn;
-});
-
-function paint() {
-  cards.forEach((c, i) => c.classList.toggle('on', i + 1 === index));
-  toggleBtn.textContent = playing ? '■ 停止' : '▶ 播放';
-  toggleBtn.setAttribute('aria-pressed', playing ? 'true' : 'false');
-  document.body.dataset.track = String(index);
-}
-
-// ── 音频图 ──────────────────────────────────────────────────────────
-function ensureCtx() {
-  if (ctx) return;
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  ctx = new Ctx();
-  master = ctx.createGain();
-  master.gain.value = Number(el('volume').value) / 100;
-  analyser = ctx.createAnalyser();
-  analyser.fftSize = 1024;
-  master.connect(analyser);
-  analyser.connect(ctx.destination);
-  music = new ChaseMusic(ctx, master);
-  music.setTrack(index === FILE_INDEX ? DEFAULT_TRACK : index);
-  music.setIntensity(Number(el('intensity').value) / 100);
-}
-
-// 等功率交叉淡化：把末尾 xf 个采样混进开头，丢掉末尾那一段。
-// 这样 buffer 末尾接开头就是连续的（MP3 自己在开头塞了 31 ms 静音，也顺手掐掉）。
-function crossfadeLoop(buffer, xfadeSec) {
-  const sr = buffer.sampleRate;
-  const ch = buffer.numberOfChannels;
-  const d0 = buffer.getChannelData(0);
-  let s = 0;
-  while (s < buffer.length && Math.abs(d0[s]) < 1e-4) s += 1;
-  fileTrim = { headMs: Math.round((s / sr) * 1000) };
-  const n = buffer.length - s;
-  const xf = Math.min(Math.round(sr * xfadeSec), Math.floor(n / 4));
-  const len = n - xf;
-  const out = ctx.createBuffer(ch, len, sr);
-  for (let c = 0; c < ch; c += 1) {
-    const src = buffer.getChannelData(c);
-    const dst = out.getChannelData(c);
-    for (let i = 0; i < xf; i += 1) {
-      const a = (i / xf) * Math.PI * 0.5;
-      dst[i] = src[s + i] * Math.sin(a) + src[s + len + i] * Math.cos(a);
-    }
-    for (let i = xf; i < len; i += 1) dst[i] = src[s + i];
+function paintFacts() {
+  const info = bus.info;
+  $('fState').textContent = {
+    idle: '未加载', loading: '加载中…', ready: '就绪', failed: '失败（静音降级）',
+  }[bus.state] || bus.state;
+  if (info) {
+    $('fDur').innerHTML = `${info.duration.toFixed(3)} <small>s</small>`;
+    $('fTrim').innerHTML = `${info.headTrimMs} <small>ms</small>`;
+    $('fXfade').innerHTML = `${info.xfadeMs} <small>ms</small>`;
+    $('fFmt').innerHTML = `${(info.sampleRate / 1000).toFixed(1)} <small>kHz</small> / ${info.channels}`;
+    $('fLoad').innerHTML = `${info.loadMs} <small>ms</small>`;
   }
-  return out;
-}
-
-function loadFileTrack() {
-  if (fileBuffer) return Promise.resolve(fileBuffer);
-  if (!fileLoading) {
-    const t0 = performance.now();
-    fileLoading = fetch(FILE_TRACK.url)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.arrayBuffer();
-      })
-      .then((ab) => ctx.decodeAudioData(ab))
-      .then((raw) => {
-        fileBuffer = crossfadeLoop(raw, 0.045);
-        fileStats = {
-          rawDuration: Math.round(raw.duration * 1000) / 1000,
-          loopDuration: Math.round(fileBuffer.duration * 1000) / 1000,
-          sampleRate: raw.sampleRate,
-          channels: raw.numberOfChannels,
-          trimmedHeadMs: fileTrim.headMs,
-          xfadeMs: 45,
-          buildMs: Math.round(performance.now() - t0),
-        };
-        return fileBuffer;
-      })
-      .catch((e) => {
-        fileLoading = null;
-        throw e;
-      });
-  }
-  return fileLoading;
-}
-
-function startFile() {
-  stopFile(0.08); // 连点同一张卡时不要两条 source 叠着放（会白高 3 dB）
-  if (!fileGain) {
-    fileGain = ctx.createGain();
-    fileGain.gain.value = 0.0001;
-    fileGain.connect(master);
-  }
-  const src = ctx.createBufferSource();
-  src.buffer = fileBuffer;
-  src.loop = true;
-  src.connect(fileGain);
-  const t = ctx.currentTime;
-  fileGain.gain.cancelScheduledValues(t);
-  fileGain.gain.setValueAtTime(0.0001, t);
-  fileGain.gain.linearRampToValueAtTime(1, t + 0.35);
-  src.start(t);
-  fileSource = src;
-  statusText.textContent = `播放中：${FILE_TRACK.name}（${fileBuffer.duration.toFixed(1)} s 循环）`;
-}
-
-function stopFile(fade = 0.35) {
-  if (!fileSource || !fileGain) return;
-  const src = fileSource;
-  fileSource = null;
-  const t = ctx.currentTime;
-  fileGain.gain.cancelScheduledValues(t);
-  fileGain.gain.setValueAtTime(Math.max(0.0001, fileGain.gain.value), t);
-  fileGain.gain.linearRampToValueAtTime(0.0001, t + fade);
-  try {
-    src.stop(t + fade + 0.02);
-  } catch {
-    /* 已经停过就算了 */
+  if (bus.error) {
+    $('status').textContent = `素材没加载成功：${bus.error}`;
+    $('status').className = 'err';
   }
 }
 
-function stopSynth(fade = 0.2) {
-  if (music && music.playing) music.stop(fade);
+function paintGain() {
+  const t = Number($('dist').value) / 100;
+  const g = chaseGainFor(t);
+  $('distOut').textContent = t >= 0.995 ? '贴背' : (t <= 0.005 ? '很远' : `${(t * 100).toFixed(0)}%`);
+  $('gainOut').textContent = `×${g.toFixed(3)}（${fmtDb(g)}）`;
+  bus.setIntensity(t);
+  return t;
 }
 
-async function play(i) {
-  ensureCtx();
-  if (ctx.state === 'suspended') await ctx.resume();
-  index = i;
-  if (i === FILE_INDEX) {
-    statusText.textContent = '加载 MP3 …';
-    try {
-      await loadFileTrack();
-    } catch (e) {
-      statusText.textContent = `MP3 加载失败：${e && e.message ? e.message : e}`;
-      paint();
-      return;
-    }
-    stopSynth(0.2);
-    startFile();
-  } else {
-    stopFile(0.2);
-    music.setTrack(i);
-    music.start();
-    statusText.textContent = `播放中：${trackName(i)}`;
+function tickMeter() {
+  if (!playing) { raf = 0; return; }
+  const buf = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(buf);
+  let sum = 0;
+  let peak = 0;
+  for (let i = 0; i < buf.length; i += 1) {
+    sum += buf[i] * buf[i];
+    peak = Math.max(peak, Math.abs(buf[i]));
+  }
+  const rms = Math.sqrt(sum / buf.length);
+  const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+  $('dbfs').textContent = Number.isFinite(db) ? `${db.toFixed(1)} dBFS` : '−∞';
+  // −40 dBFS 映射到 0%，0 dBFS 映射到 100%
+  $('level').style.width = `${Math.max(0, Math.min(100, ((db + 40) / 40) * 100))}%`;
+  const src = bus.source;
+  $('status').textContent = `播放中 · 循环点 ${(bus.info.duration).toFixed(2)} s · 峰值 ${peak.toFixed(3)}`;
+  $('status').className = '';
+  raf = requestAnimationFrame(tickMeter);
+}
+
+async function start() {
+  await ctx.resume();
+  const t = paintGain();
+  if (!bus.buffer) {
+    // 还没解完（大文件首次约 300 ms）：等它，别播空
+    $('status').textContent = '解码中…';
+    try { await bus.load(URL_DEV); } catch { /* 失败会在下面统一报 */ }
+    paintFacts();
+  }
+  bus.start();
+  if (!bus.playing) {
+    $('status').textContent = bus.error ? `素材没加载成功：${bus.error}` : '解码还没完成，稍等一下再点';
+    return;
   }
   playing = true;
-  resetMeter();
-  paint();
+  loopCount = 0;
+  $('toggle').textContent = '■ 停止';
+  $('status').textContent = `播放中 · 距离 ${(t * 100).toFixed(0)}%`;
+  if (!raf) raf = requestAnimationFrame(tickMeter);
 }
 
 function stop() {
-  stopFile(0.35);
-  stopSynth(0.35);
+  bus.stop();
   playing = false;
-  statusText.textContent = '已停止';
-  paint();
+  $('toggle').textContent = '▶ 播放';
+  $('status').textContent = '已停（淡出 0.45 s）';
+  $('level').style.width = '0%';
+  $('dbfs').textContent = '—';
 }
 
-function start() {
-  return play(index);
-}
-
-toggleBtn.addEventListener('click', () => (playing ? stop() : void play(index)));
-
-el('intensity').addEventListener('input', (e) => {
-  const v = Number(e.target.value) / 100;
-  el('intensityOut').textContent = v.toFixed(2);
-  if (music) music.setIntensity(v);
-});
-
-el('volume').addEventListener('input', (e) => {
-  const v = Number(e.target.value) / 100;
-  el('volumeOut').textContent = v.toFixed(2);
-  if (master) master.gain.setTargetAtTime(v, ctx.currentTime, 0.05);
-});
-
-useBtn.addEventListener('click', () => {
-  if (index === FILE_INDEX) {
-    statusText.textContent = '这首还没接进游戏（等你们听完定下来再接），先不写 localStorage';
-    return;
-  }
+$('toggle').addEventListener('click', () => { if (playing) stop(); else start(); });
+$('dist').addEventListener('input', () => paintGain());
+$('looptest').addEventListener('click', async () => {
+  if (!playing) await start();
+  const src = bus.source;
+  if (!src) return;
+  // buffer 已经在循环，直接 seek 到「结尾前 3 秒」听接缝
+  const dur = bus.info.duration;
   try {
-    localStorage.setItem('wf-chase', String(index));
-    statusText.textContent = `已设为：${trackName(index)}（进游戏生效）`;
-  } catch {
-    statusText.textContent = '这个浏览器不让写 localStorage';
+    src.loop = false;
+    src.stop();
+    const seek = ctx.createBufferSource();
+    seek.buffer = bus.buffer;
+    seek.loop = true;
+    seek.connect(bus.gain);
+    seek.start(0, Math.max(0, dur - 3));
+    bus.source = seek;
+    loopCount += 1;
+    $('status').textContent = `接缝试听（第 ${loopCount} 次）：从 ${(dur - 3).toFixed(2)} s 起，听 3 秒后的接缝`;
+  } catch (err) {
+    $('status').textContent = `接缝试听失败：${err.message}`;
   }
 });
 
-// ── 调度 + 电平表 ───────────────────────────────────────────────────
-const buf = new Float32Array(1024);
-let peak = 0;
-let sumSq = 0;
-let sumN = 0;
-function resetMeter() {
-  peak = 0;
-  sumSq = 0;
-  sumN = 0;
-  if (dbText) dbText.textContent = '—';
-}
-function frame() {
-  requestAnimationFrame(frame);
-  if (music && music.playing) music.update();
-  if (!analyser) return;
-  analyser.getFloatTimeDomainData(buf);
-  let sum = 0;
-  for (let i = 0; i < buf.length; i += 1) sum += buf[i] * buf[i];
-  const rms = Math.sqrt(sum / buf.length);
-  peak = Math.max(rms, peak * 0.9);
-  levelBar.style.width = `${Math.min(100, peak * 240).toFixed(1)}%`;
-  // 4 秒滑动平均，换算成 dBFS：前四份和 MP3 用同一个 analyser、同一档主音量，
-  // 这个数可以直接横向比「谁更响」。
-  if (playing && rms > 0) {
-    sumSq += sum;
-    sumN += buf.length;
-    if (sumN > 44100 * 4) {
-      sumSq /= 2;
-      sumN /= 2;
-    }
-    if (dbText) dbText.textContent = `${(10 * Math.log10(sumSq / sumN)).toFixed(1)} dBFS`;
-  }
-}
-frame();
-paint();
-document.body.dataset.preview = 'ok';
+paintGain();
+paintFacts();
+// 预加载（不等用户点，和解锁流程一样）
+bus.load(URL_DEV).then(paintFacts).catch(paintFacts);
 
-// 给自动化核对用：?autoplay=1 直接起播（浏览器不给手势就静音跑）
-if (params.get('autoplay') === '1') void play(index).catch((e) => { statusText.textContent = `起播失败：${e}`; });
+/** 给 CDP / 探针用的门面。 */
 window.__chasePreview = {
+  bus,
+  ctx,
   start,
   stop,
-  play,
-  tracks: [...CHASE_TRACKS.map((t) => ({ id: t.id, name: t.name })), { id: 'file', name: FILE_TRACK.name }],
-  seeded: (n) => seeded(n)(),
-  info: () => (music ? music.info() : null),
-  index: () => index,
-  playing: () => playing,
-  file: () => fileStats,
-  dbfs: () => (dbText ? dbText.textContent : null),
+  setIntensity: (t) => { $('dist').value = String(Math.round(t * 100)); return paintGain(); },
+  snapshot: () => ({ ...bus.snapshot(), playing, intensity: Number($('dist').value) / 100,
+    gainDb: 20 * Math.log10(chaseGainFor(Number($('dist').value) / 100)),
+    minDb: CHASE_GAIN_MIN_DB, maxDb: CHASE_GAIN_MAX_DB, xfade: CHASE_XFADE }),
 };
     </script>
   </body>

@@ -13,7 +13,7 @@ function clamp(v, lo, hi) {
   return v < lo ? lo : (v > hi ? hi : v);
 }
 
-/** 固定种子伪随机（和 anomalies.js / chasemusic.js 同一个 mulberry32）：
+/** 固定种子伪随机（和 anomalies.js 同一个 mulberry32）：
  *  同一套牙每次刷新都长在同一个位置，调试截图才能前后对比。 */
 function seededRandom(seed) {
   let a = seed >>> 0;
