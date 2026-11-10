@@ -5,7 +5,7 @@
  * （`assets/audio/chase-noescape.mp3`），并且只保留一个跟玩法挂钩的旋钮：**音量跟距离**。
  * 所以这个探针只查三件能在 Node 里查清的事：
  *
- *   ① 距离 → 音量的映射（单调、夹取、两端正好 −6 dB / +1 dB）；
+ *   ① 距离 → 音量的映射（单调、夹取、两端正好 0 dB / +4 dB）；
  *   ② 无缝循环的拼接数学（掐头静音 + 等功率交叉淡化，接缝真的接上了）；
  *   ③ 素材本身（路径能被浏览器按相对路径取到、文件在磁盘上、体积对得上）。
  *
@@ -40,11 +40,11 @@ const fmt = (v, n = 4) => Number(v).toFixed(n);
 console.log('── 距离 → 音量 ──');
 const g0 = chaseGainFor(0);
 const g1 = chaseGainFor(1);
-ok(Math.abs(g0 - Math.pow(10, CHASE_GAIN_MIN_DB / 20)) < 1e-9, '压力 0 就是 −6 dB',
+ok(Math.abs(g0 - Math.pow(10, CHASE_GAIN_MIN_DB / 20)) < 1e-9, '压力 0 就是 0 dB（默认档 = 素材自己的电平）',
   `${fmt(g0)}（${fmt(20 * Math.log10(g0), 2)} dB）`);
-ok(Math.abs(g1 - Math.pow(10, CHASE_GAIN_MAX_DB / 20)) < 1e-9, '压力 1 就是 +1 dB',
+ok(Math.abs(g1 - Math.pow(10, CHASE_GAIN_MAX_DB / 20)) < 1e-9, '压力 1 就是 +4 dB',
   `${fmt(g1)}（${fmt(20 * Math.log10(g1), 2)} dB）`);
-ok(g1 > g0 * 2, '两端差 7 dB（贴背时超过一倍的振幅）', `${fmt(g1 / g0)}×`);
+ok(g1 > g0 * 1.5, '两端差 4 dB（贴背时约 1.58 倍振幅）', `${fmt(g1 / g0)}×`);
 
 let mono = true;
 let prev = -Infinity;
@@ -55,11 +55,11 @@ for (let t = 0; t <= 1.0001; t += 0.05) {
 }
 ok(mono, '0→1 单调递增（越近越响，没有回头）');
 
-// 中间的 0.5 应该在两端之间、且落在 dB 中线（−2.5 dB ≈ 0.750）
+// 中间的 0.5 应该在两端之间、且落在 dB 中线（+2 dB ≈ 1.259）
 const gm = chaseGainFor(0.5);
-ok(Math.abs(gm - Math.pow(10, -2.5 / 20)) < 1e-9, '压力 0.5 落在 −2.5 dB（dB 线性，不是增益线性）',
+ok(Math.abs(gm - Math.pow(10, 2 / 20)) < 1e-9, '压力 0.5 落在 +2 dB（dB 线性，不是增益线性）',
   `${fmt(gm)}`);
-ok(gm < (g0 + g1) / 2, 'dB 线性下中点比增益线性更轻（听感上的「一半」应是 −2.5 dB，不是 +0.81）',
+ok(gm < (g0 + g1) / 2, 'dB 线性下中点比增益线性更轻（听感上的「一半」应是 +2 dB，不是 +2.5 dB）',
   `${fmt(gm)} < ${fmt((g0 + g1) / 2)}`);
 
 ok(chaseGainFor(-5) === g0 && chaseGainFor(9) === g1, '超出 0–1 的输入被夹到两端');

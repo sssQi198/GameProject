@@ -92,10 +92,10 @@ ok(target(bus.musicGain.gain) === 0.18, '安全屋 BGM 目标 0.18', String(targ
 bus.setMood('chase');
 ok(bus.musicOff === true, '追逐一开始 musicOff = true');
 ok(target(bus.musicGain.gain) === 0.0001, '默认 BGM 目标压到 0.0001', String(target(bus.musicGain.gain)));
-// 第三十二轮：伴奏只有「距离 → 音量」一条曲线（−6 dB … +1 dB），不再有总线增益
+// 第三十二轮：伴奏只有「距离 → 音量」一条曲线（0 dB … +4 dB），不再有总线增益
 ok(bus.chaseFile.playing === true, '追逐伴奏真的起来了（一首 MP3）');
-ok(lastV(bus.chaseFile.gain.gain) === Math.pow(10, -6 / 20),
-  '伴奏按距离起播：压力 0 → −6 dB', String(lastV(bus.chaseFile.gain.gain)));
+ok(lastV(bus.chaseFile.gain.gain) === Math.pow(10, 0 / 20),
+  '伴奏按距离起播：压力 0 → 0 dB（unity，比默认 BGM 高 1.9 dB）', String(lastV(bus.chaseFile.gain.gain)));
 ok(bus.music && bus.music.paused === false, '淡出还没走完，元素先别 pause');
 
 // 淡出 1.0s + 120ms 之后才 pause

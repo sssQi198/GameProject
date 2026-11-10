@@ -16,7 +16,7 @@
  * 第三十二轮把追逐伴奏从「四份程序化合成」换成**一首真实录音**
  * （`assets/audio/chase-noescape.mp3`，见 `src/chasefile.js`）：
  *   · 不再有 `?chase=1..4` 和 `localStorage['wf-chase']`——只有一首，没有选择；
- *   · 与「怪物离你多近」的挂钩只剩**音量**（−6 dB → +1 dB），
+ *   · 与「怪物离你多近」的挂钩只剩**音量**（0 dB → +4 dB），
  *     不再改 BPM、滤波、音色（那是 `src/chasemusic.js` 那套已经删掉的做法）。
  * 浏览器会拦住自动播放，所以要等玩家点「开始」或「观看演示」再 unlock。
  */
@@ -28,8 +28,9 @@ const STORAGE_MUTE = 'wf-muted';
 
 /**
  * 追逐伴奏（`chasefile.js`）自己管音量：内部 GainNode 按 `chaseGainFor(压力)` 走，
- * 起点 −6 dB、贴着背 +1 dB。基准取 unity，依据是实测——这首在 unity 增益下的 RMS
- * 与原先 C · 锤击（总线 1.5）只差 0.4 dB，所以这里不需要再补一个总线增益。
+ * 起点 0 dB、贴着背 +4 dB。基准取「这首自己的电平」，依据是实测——整曲 RMS
+ * −19.7 dBFS，比默认 BGM 经 musicGain 0.36 之后的 −21.6 dBFS 高 1.9 dB，
+ * 所以默认档听起来就在 BGM 之上，这里不需要再补一个总线增益。
  * 音量配比（这支麦克风 vs 心跳）若以后要动，改 `chasefile.js` 的 `CHASE_GAIN_*_DB`，
  * 别再往这条链路上串 GainNode。
  */
@@ -338,7 +339,7 @@ export class AudioBus {
    * 追逐压力 0–1。game.js 每帧按「与怪物的距离」算好传进来。
    *
    * 只改已有节点的参数，不加节点：心跳周期 0.62 → 0.40 秒（97 → 150 bpm），
-   * 低频 drone 48 → 58Hz，追逐伴奏的音量 −6 dB → +1 dB（第三十二轮起）。
+   * 低频 drone 48 → 58Hz，追逐伴奏的音量 0 dB → +4 dB（第三十二轮起）。
    * 压力变化小于 2% 时整段跳过，免得每帧都重排自动化。
    */
   setTension(value) {

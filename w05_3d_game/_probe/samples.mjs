@@ -129,9 +129,9 @@ const chaseSources = bus.ctx.created.slice(beforeChase).filter((n) => n.kind ===
 ok(chaseSources.length === 1, '只起了一个 BufferSource（不会两条叠着）', `${chaseSources.length} 条`);
 ok(chaseSources[0]?.loop === true, '循环播放（loop = true，接缝在内存里拼接好了）');
 ok(chaseSources[0]?.buffer === bus.chaseFile.buffer, '放的就是解码 + 淡化后的那个 buffer');
-// 距离只改音量：起步时压力是 0，所以增益应该正好是 −6 dB 那一端
+// 距离只改音量：起步时压力是 0，所以增益应该正好是 0 dB 那一端（unity）
 const chaseStart = bus.chaseFile.gain.gain.events.at(-1);
-ok(Math.abs(chaseStart.v - chaseGainFor(0)) < 1e-9, '起步音量 = −6 dB（离得远，压着放）',
+ok(Math.abs(chaseStart.v - chaseGainFor(0)) < 1e-9, '起步音量 = 0 dB（默认档，不小于默认 BGM）',
   fmt(chaseStart.v));
 
 bus.startHeartbeat();
@@ -150,10 +150,10 @@ ok(Math.abs(bus.loops.heartbeat.gain.gain.events.at(-1).v - 1.8) < 1e-6,
 ok(Math.abs(bus.loops.heartbeat.src.playbackRate.events.at(-1).v - 1.35) < 1e-6,
   '压力满时心跳 1.35 倍速（更急）', fmt(bus.loops.heartbeat.src.playbackRate.events.at(-1).v));
 ok(!bus.loops.breath, '压力拉满也不会冒出喘气循环');
-// 第三十二轮：伴奏不再有「强度 → 织体」，只有音量；压力 1 = +1 dB
+// 第三十二轮：伴奏不再有「强度 → 织体」，只有音量；压力 1 = +4 dB
 const chaseFull = bus.chaseFile.gain.gain.events.at(-1);
 ok(chaseFull.kind === 'target' && Math.abs(chaseFull.v - chaseGainFor(1)) < 1e-9,
-  '压力拉满时伴奏音量推到 +1 dB（这个方法只改音量）', fmt(chaseFull.v));
+  '压力拉满时伴奏音量推到 +4 dB（这个方法只改音量）', fmt(chaseFull.v));
 ok(Math.abs(bus.chaseFile.snapshot().intensity - 1) < 1e-6, '快照里的强度也记成 1',
   fmt(bus.chaseFile.snapshot().intensity));
 
