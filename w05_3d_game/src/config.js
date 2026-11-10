@@ -3,7 +3,11 @@ export const CONFIG = {
   walkSpeed: 3.2,
   sprintSpeed: 5.5,
   prologueSpeed: 2.35,
-  lookSensitivity: 0.00215,
+  /**
+   * 鼠标灵敏度（每像素转过的弧度）。原本 0.00215，现按 50% 收紧到 0.001075。
+   * 想调回去就把这个数乘 2。
+   */
+  lookSensitivity: 0.001075,
   /** 视角追随鼠标的速度（每秒收敛比例）。调大更跟手，调小更顺滑。 */
   lookSmoothing: 55,
   playerRadius: 0.34,
