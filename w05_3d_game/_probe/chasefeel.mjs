@@ -78,8 +78,10 @@ ok(hotGaps.length > calmGaps.length, '压力 1 时心跳明显更快',
   `${hotBeats.length} 下 vs ${calmBeats.length} 下（6 秒）`);
 ok(Math.abs(avg(hotGaps) - 0.40) < 0.03, '压力 1 时心跳 0.40 秒一下',
   `实测 ${avg(hotGaps).toFixed(3)}s ⇒ ${Math.round(60 / avg(hotGaps))} bpm`);
-ok(calmBeats[0].g === 0.55 && Math.abs(hotBeats[0].g - 0.8) < 1e-9,
-  '压力越高心跳越重', `${calmBeats[0].g} → ${hotBeats[0].g}`);
+// 第十九轮把追逐段的心跳整体调响、调重（喘气声撤掉，靠心跳撑）：
+// 追逐里的基础音量从 0.55 提到 0.85，满压到 1.20，不再是 0.55 → 0.80 那档。
+ok(calmBeats[0].g === 0.85 && Math.abs(hotBeats[0].g - 1.2) < 1e-9,
+  '压力越高心跳越重（追逐里 0.85 起，满压 1.20）', `${calmBeats[0].g} → ${hotBeats[0].g}`);
 
 // 一次心跳 = 两下（第二下轻一点）
 const thumps = capture(() => bus.heartbeat(0.8));

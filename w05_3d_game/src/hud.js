@@ -23,6 +23,21 @@ export class Hud {
     this.menuNote = byId('menu-note');
     this.chase = byId('chase');
     this.chaseFlash = byId('chase-flash');
+    // 注意命名：DOM 节点叫 *Node，方法叫 fadeWhite/fadeBlack。
+    // 之前两者同名，实例属性把原型方法挡住了，hud.fadeWhite(1) 会直接 TypeError。
+    this.fadeWhiteNode = document.getElementById('fade-white') || null;
+    this.fadeBlackNode = document.getElementById('fade-black') || null;
+    // 演示收尾用的第三层：z-index 6，能压住 #menu。只由 fadeCut/dissolveCut 写。
+    this.fadeCutNode = document.getElementById('fade-cut') || null;
+    this.fadeShown = { white: -1, black: -1 };
+    this.cutShown = -1;
+    this.cutAnim = 0;
+    // 开场衔接（第二十一轮）：z-5 的黑幕 + 正中那行「按 F11 获得沉浸式体验」。
+    // 黑幕比 #menu（z-4）高一层，所以「渐黑」能真的把标题页压下去。
+    this.bootCurtainNode = document.getElementById('boot-curtain') || null;
+    this.bootHintNode = document.getElementById('boot-hint') || null;
+    this.bootShown = -1;
+    this.bootHintShown = -1;
     this.buttons = {
       resume: byId('btn-resume'),
       retry: byId('btn-retry'),
@@ -105,6 +120,7 @@ export class Hud {
       pause: ['resume', 'restart', 'menu'],
       lose: ['retry', 'restart', 'menu'],
       win: ['restart', 'menu'],
+      badEnd: ['restart', 'menu'],
     }[mode];
     for (const [name, el] of Object.entries(this.buttons)) {
       el.classList.toggle('hidden', !show.includes(name));
@@ -137,8 +153,101 @@ export class Hud {
     this.writeText(this.objective, 'objective', text);
   }
 
-  setSubtitle(text) {
-    this.writeText(this.subtitle, 'subtitle', text);
+  setSubtitle(text, who = '') {
+    // 直接写 textContent，避免 writeText 去重导致同文本不同说话人被吞掉
+    const newValue = who ? `${who}：${text}` : text;
+    if (this.subtitle.textContent !== newValue) {
+      this.subtitle.textContent = newValue;
+    }
+    this.subtitle.dataset.who = who || '';
+  }
+
+  setFade(kind, alpha) {
+    // kind='white'|'black'；alpha 夹到 0..1
+    const node = kind === 'white' ? this.fadeWhiteNode : this.fadeBlackNode;
+    if (!node) return;
+    const clamped = Math.max(0, Math.min(1, alpha));
+    const formatted = clamped.toFixed(3);
+    const cacheKey = kind === 'white' ? 'white' : 'black';
+    if (Math.abs(this.fadeShown[cacheKey] - clamped) < 0.001) return;
+    this.fadeShown[cacheKey] = clamped;
+    node.style.opacity = formatted;
+  }
+
+  fadeWhite(alpha) {
+    this.setFade('white', alpha);
+  }
+
+  fadeBlack(alpha) {
+    this.setFade('black', alpha);
+  }
+
+  clearFade() {
+    if (this.fadeWhiteNode) this.fadeWhiteNode.style.opacity = '0';
+    if (this.fadeBlackNode) this.fadeBlackNode.style.opacity = '0';
+    this.fadeShown = { white: -1, black: -1 };
+  }
+
+  /** 演示收尾第三层（z-6）：1 = 满屏白，盖住标题页。 */
+  setCut(alpha) {
+    if (!this.fadeCutNode) return;
+    const clamped = Math.max(0, Math.min(1, alpha));
+    if (Math.abs(this.cutShown - clamped) < 0.002) return;
+    this.cutShown = clamped;
+    this.fadeCutNode.style.opacity = clamped.toFixed(3);
+  }
+
+  /** 把第三层从当前值淡到 0，durationMs 毫秒；结束后彻底清 0。 */
+  dissolveCut(durationMs = 600) {
+    if (!this.fadeCutNode) return;
+    const start = performance.now();
+    const begin = this.cutShown < 0 ? 0 : this.cutShown;
+    const token = (this.cutAnim += 1);
+    const step = () => {
+      if (token !== this.cutAnim) return; // 被新的 dissolve/clear 取代
+      const k = Math.min(1, (performance.now() - start) / Math.max(1, durationMs));
+      this.setCut(begin * (1 - k));
+      if (k < 1) requestAnimationFrame(step);
+      else {
+        this.cutShown = 0;
+        this.fadeCutNode.style.opacity = '0';
+      }
+    };
+    requestAnimationFrame(step);
+  }
+
+  clearCut() {
+    this.cutAnim += 1;
+    this.cutShown = 0;
+    if (this.fadeCutNode) this.fadeCutNode.style.opacity = '0';
+  }
+
+  /**
+   * 开场衔接的黑幕（z-5，盖得住标题页）：0 = 全透明，1 = 全黑。
+   * 和 setFade 一样做 0.001 的重复值去抖，别每帧写 style。
+   */
+  setBoot(alpha) {
+    if (!this.bootCurtainNode) return;
+    const clamped = Math.max(0, Math.min(1, alpha));
+    if (Math.abs(this.bootShown - clamped) < 0.001) return;
+    this.bootShown = clamped;
+    this.bootCurtainNode.style.opacity = clamped.toFixed(3);
+  }
+
+  /** 黑幕正中那行「按 F11 获得沉浸式体验」。节点挂在黑幕里面，两层 opacity 相乘。 */
+  setBootHint(alpha) {
+    if (!this.bootHintNode) return;
+    const clamped = Math.max(0, Math.min(1, alpha));
+    if (Math.abs(this.bootHintShown - clamped) < 0.002) return;
+    this.bootHintShown = clamped;
+    this.bootHintNode.style.opacity = clamped.toFixed(3);
+    // 完全透明时顺手藏起来，免得它盖住画面中心（pointer-events 是 none，但不再参与绘制更干净）
+    this.bootHintNode.style.visibility = clamped <= 0.001 ? 'hidden' : 'visible';
+  }
+
+  /** 黑幕没退完之前先把 HUD 收起来，画面露完再让它一起出来。 */
+  setPlayChromeVisible(on) {
+    if (this.hud) this.hud.classList.toggle('hidden', !on);
   }
 
   setPrompt(text) {

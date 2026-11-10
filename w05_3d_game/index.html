@@ -61,6 +61,49 @@
 #btn-dev-panel:hover { background: rgba(80,110,220,0.5); }
 #btn-dev-panel span { display: inline-block; margin-left: 6px; font-size: 11px; color: #7a8; }
 /* devtools end */
+      /* 终局全屏遮罩：透明度由 JS 每帧写 style.opacity，所以不能加 CSS transition */
+      /* z-index 3：压住 #hud（2），但不能压住 #menu / #screen-panel（4），否则结算卡会被黑场盖住 */
+      .fade {
+        position: fixed;
+        inset: 0;
+        z-index: 3;
+        background: #ffffff;
+        opacity: 0;
+        pointer-events: none;
+        will-change: opacity;
+      }
+      #fade-black { background: #000000; }
+      /* 演示收尾专用：白光要能盖住标题页（#menu 是 4），所以单独一层放在 6。
+         只给「演示停在白光里 → 淡回标题」用，不参与 badEnd 的黑场/结算卡层序。 */
+      #fade-cut { z-index: 6; will-change: opacity; }
+      /* 开场衔接（第二十一轮）：z-5 的黑幕比 #menu（4）高，所以「渐黑」能把标题页一起压下去。
+         这层只在点「开始」之后的衔接段用，透明度和字幕都由 hud.setBoot / setBootHint 写，
+         不加 CSS transition（否则和 JS 的逐帧斜坡打架）。 */
+      #boot-curtain {
+        position: fixed;
+        inset: 0;
+        z-index: 5;
+        background: #000000;
+        opacity: 0;
+        pointer-events: none;
+        will-change: opacity;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #boot-hint {
+        margin: 0;
+        opacity: 0;
+        visibility: hidden;
+        will-change: opacity;
+        color: #d7d0c3;
+        font-family: "Songti SC", "STSong", "SimSun", Palatino, serif;
+        font-size: 22px;
+        letter-spacing: 0.30em;
+        text-indent: 0.30em; /* 补掉末字后多出来的字距，让整行看着居中 */
+        text-shadow: 0 0 22px rgba(255, 235, 210, 0.28);
+      }
+      #subtitle[data-who="同学"] { color: #d9c8c8; }
     </style>
   </head>
   <body>
@@ -68,6 +111,12 @@
       <canvas id="game-canvas"></canvas>
       <div id="vignette"></div>
       <div id="danger"></div>
+      <!-- 终局遮罩放在 #hud 外面：#hud 会整块 hidden，放里面会在离开关卡时一起消失 -->
+      <div id="fade-white" class="fade" aria-hidden="true"></div>
+      <div id="fade-black" class="fade" aria-hidden="true"></div>
+      <div id="fade-cut" class="fade" aria-hidden="true"></div>
+      <!-- 开场衔接：渐黑 → 「按 F11 获得沉浸式体验」 → 再黑 → 淡进序章 -->
+      <div id="boot-curtain" aria-hidden="true"><p id="boot-hint">按 F11 获得沉浸式体验</p></div>
 
       <div id="viewfinder" class="hidden">
         <div id="vf-screen">
@@ -171,8 +220,8 @@
               <button data-dev-go="level5" type="button">第5关</button>
               <button data-dev-go="finalelook" type="button">终局·注视</button>
               <button data-dev-go="finalechase" type="button">终局·追逐</button>
-              <button data-dev-go="epilogue" type="button">尾声</button>
-              <button data-dev-go="win" type="button">胜利</button>
+              <button data-dev-go="ending" type="button">终局·安全屋</button>
+              <button data-dev-go="badend" type="button">结束卡</button>
             </div>
             <p class="dev-section">辅助</p>
             <div class="dev-grid dev-actions">

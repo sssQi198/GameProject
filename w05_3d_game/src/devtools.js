@@ -118,9 +118,7 @@ export function setupDevTools({ game, player, level }) {
     game.cleared = false;
     game.photoLock = 0;
     game.lookT = 0;
-    game.epilogueT = 0;
-    game.endingFade = 0;
-    game.saidEnd = false;
+    game.abortEnding();
     game.notedNpc = false;
     game.saidWait = false;
     game.prepareShoot = false;
@@ -250,40 +248,32 @@ export function setupDevTools({ game, player, level }) {
         break;
       }
 
-      case 'epilogue': {
-        // 尾声
-        player.reset(LAYOUT.exitX + 0.5, LAYOUT.hall.maxZ - 0.5, Math.PI);
-        player.setScripted(false);
-        player.setControl(true);
-        player.setLamp(CONFIG.lamp * 0.7);
+      case 'ending': {
+        // 终局：走廊尽头的门 → 安全屋（整段固定演出，从这里开始没有操作）
+        player.reset(LAYOUT.doorwayX - 2.2, LAYOUT.hall.z, -Math.PI / 2);
+        player.setScripted(true);
+        player.setControl(false);
         level.reset();
         level.spawnUpTo(LEVELS);
         level.hideEntity();
         level.hideNpc();
         level.hidePickup();
         level.showExit(true);
-        game.phase = 'epilogue';
-        game.epilogueT = 0;
-        game.endingFade = 0;
-        game.saidEnd = false;
-        game.audio.stopHeartbeat();
-        game.audio.setMood('calm');
-        game.hud.setChase(false);
-        game.hud.setDanger(0);
-        game.hud.setObjective(copy.aheadPerson);
+        level.setDoorOpen(false);
+        level.loopEnabled = false;
         game.hud.setRecord(LEVELS, LEVELS);
-        showHint('已跳转到尾声');
+        game.beginEnding();
+        showHint('已跳转到终局> 门口');
         break;
       }
 
-      case 'win': {
-        // 胜利画面
-        game.phase = 'win';
-        game.hud.showPanel('win', '胜利', '一切还未结束…');
-        game.audio.setMood('calm');
-        game.audio.stopHeartbeat();
-        game.audio.win();
-        showHint('已跳转到胜利画面');
+      case 'badend': {
+        // 结束卡（不播演出）
+        game.phase = 'ending';
+        game.endStage = 12;
+        game.endT = 0;
+        game.badEnd();
+        showHint('已跳转到结束卡');
         break;
       }
 

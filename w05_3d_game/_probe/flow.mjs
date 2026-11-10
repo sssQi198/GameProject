@@ -74,11 +74,18 @@ class FakeLevel {
   spawnUpTo() {}
   setDoorOpen() {}
   showExit() {}
+  setExitGlow() {}
+  setDoorGlow() {}
+  openEndDoor() {}
+  setHallLampScale() {}
+  setHemi() {}
+  setVisible() {}
+  endDoorAimPoint() { return new THREE.Vector3(LAYOUT.doorCenterX, 1.35, LAYOUT.hall.z); }
+  showClassmateEyes() {}
+  turnClassmate() {}
   hideNpc() {}
   revealPickup() {}
   setNpcState() {}
-  showClassmateEyes() {}
-  turnClassmate() {}
   aim() { return { kind: 'none', level: 0 }; }
   getAnomalyAimPoint() { return null; }
   placeEntity(x, z) { this.entity.position.set(x, 0, z); }

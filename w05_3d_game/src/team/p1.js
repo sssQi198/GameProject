@@ -41,17 +41,26 @@ export const copy = {
   cameraOnFloor: '地上有一台相机。',
   roomChanged: '这间教室和刚才不一样。',
   backToDoor: '回到那扇门',
-  corridorLoop: '走廊的两端连着自己。',
-  runToExit: '跑向绿色 EXIT',
+  corridorLoop: '试着离开吧……',
+  /** 刚出门又立刻折回来：这一关的下一关还没铺，房间还是原来那间 */
+  corridorAgain: '还是那间教室……得往走廊深处走。',
+  /** 第 1 关捡到相机后的心声，提示"拍照"这个玩法 */
+  cameraMind: '有奇怪的东西……我该拍下来',
+  runToExit: '跑向走廊尽头那扇发光的门',
   itCame: '它来了。',
   stillAhead: '……他还在前面吗？',
-  whereAreYou: '你去哪里了？我到处在找你。',
-  eyesOnYou: '他回头看你的那双眼睛，和你刚才逃的一模一样。',
   photoHint: 'E  拿出相机 · F  拍摄',
   photoMiss: '没有记录到新异常。',
   doorOpen: '门开了',
   aheadPerson: '前面那个人',
-  winTitle: '你出来了',
+  // ── 终局安全屋 ──
+  // 旧 epilogue 文案（whereAreYou / eyesOnYou / winTitle）已作废。
+  // 原因：现在玩家能隔着门听见同学的声音、看见他走进来，旧文案「你去哪里了？我到处在找你」
+  // 是从「同学消失」直接跳结论，和新演出的时间线对不上。
+  safeWhere: '你去哪里了？我找你找了好久，还碰到了怪物……',
+  safeIsThatSo: '是吗……',
+  badTitle: '游戏结束',
+  badBody: '他不是你的同学……',
   loseTitle: '它碰到你了',
   loseBody: '按住 Shift 冲刺。它比走路更快。',
 };

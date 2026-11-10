@@ -169,8 +169,15 @@ export class Player {
     this.course = null;
   }
 
+  /** 锁死视线到某个世界坐标点：只接受点，不接受朝向。
+   *  传进来的可能是 Vector3，也可能只是 {x,y,z}（level.endDoorAimPoint 就是这样），
+   *  统一拷成自己的 Vector3，别让调用方多一条「必须是 Vector3」的隐形契约。 */
   beginLookLock(target) {
-    this.lookTarget = target.clone();
+    if (!target) {
+      this.lookTarget = null;
+      return;
+    }
+    this.lookTarget = new THREE.Vector3(target.x, target.y, target.z);
     this.pendingDX = 0;
     this.pendingDY = 0;
   }

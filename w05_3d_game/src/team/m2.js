@@ -5,7 +5,11 @@
  * group 必须用 tagAnomaly(group, level, id) 打过标记，否则拍不到。
  * parent === 'door' 时会挂到门轴上，随门打开。
  *
- * createClassmate 加载 assets/models/classmate_v01.glb，失败才退回程序化模型。
+ * createClassmate 默认加载 assets/models/classmate_v01.glb，失败才退回程序化模型。
+ *   换模型走下面的 MATE_MODEL（url / scale / yawOffset / offsetY / hideMaterials），
+ *   或者在地址栏加 ?mate=proc（程序化） / ?mate=/assets/models/xxx.glb&mateface=keep。
+ *   glb 自带的五官（Eye_White/Eye_Dark/Face_Shadow 三个材质槽）默认按材质隐藏，
+ *   给尾声的红眼和尖牙让位；换成没有五官的模型时把 hideMaterials 改成 []。
  * 同学：脚底在原点。userData.legs = [左腿, 右腿]，userData.arms = [左上臂, 右上臂]，
  *   userData.torso = 身体（用于呼吸缩放），userData.materials 用于尾声淡出。
  *   这四项在 glb 加载完成前是空的，加载后填进同一批数组。
@@ -23,10 +27,90 @@ import { disposeCharacter, loadCharacter } from '../character-model.js';
 // 要替换某一关，把对应函数填进来。
 export const anomalyFactory = {};
 
-const CLASSMATE_URL = '/assets/models/classmate_v01.glb';
+export const CLASSMATE_URL = '/assets/models/classmate_v01.glb';
+
+/** url 填这个值就完全不用 glb（= 接 glb 之前那套程序化同学）。 */
+export const PROCEDURAL_MATE = 'proc';
+
+/**
+ * 同学模型的唯一调参入口。换模型只动这里，或者用 ?mate= 在浏览器里临时覆盖。
+ *
+ * url            glb 路径；PROCEDURAL_MATE 表示跳过 glb 直接用程序化模型
+ * scale          整体缩放（模型不是 1.7 米高时用）
+ * yawOffset      朝向修正，弧度。约定的「正面」是 +Z，模型反了就填 Math.PI
+ * offsetY        整体抬高/压低，米
+ * hideMaterials  要隐藏的材质名。classmate_v01 那张头网格把眼睛和嘴也烘进去了
+ *                （Eye_White / Eye_Dark / Face_Shadow 三个材质槽），不隐藏就会和
+ *                safehouse 自己挂的红眼、尖牙打架——重影的眼、对不上的嘴。
+ *                隐藏是按材质关的（material.visible = false），不动几何。
+ *                换成一个没有五官的模型时，把它改成 []。
+ */
+export const MATE_MODEL = {
+  // 第十八轮定稿：默认就是程序化模型（A 方案）。
+  // 理由：终局要的是「脸上先亮起两个红光点，再咧嘴露出尖牙」，而 classmate_v01.glb
+  // 把眼睛和嘴烘进头网格（6 个面片材质），红眼只能贴在它上面做重影；
+  // 程序化那颗球头本来是**完全没有五官**的，红眼 / 嘴 / 牙全部由 safehouse 现挂，
+  // 想怎么亮、什么时候咧嘴都是纯参数。glb 仍然可用 `?mate=` 临时换回来。
+  url: PROCEDURAL_MATE,
+  scale: 1,
+  yawOffset: 0,
+  offsetY: 0,
+  // 程序化头没有五官，没有要藏的东西
+  hideMaterials: [],
+};
+
+/** 读一份拷贝，避免外面拿着引用改到内部状态。 */
+export function mateModelConfig() {
+  return { ...MATE_MODEL, hideMaterials: [...MATE_MODEL.hideMaterials] };
+}
+
+/**
+ * 改模型配置。没给的键保持原样（undefined 才算「没给」）。
+ * 只在 createClassmate 读配置的那一刻生效；要热换请用 safehouse.setMateModel。
+ */
+export function configureMateModel(url, options = {}) {
+  if (typeof url === 'string' && url.length > 0) MATE_MODEL.url = url;
+  for (const key of ['scale', 'yawOffset', 'offsetY']) {
+    if (typeof options[key] === 'number' && Number.isFinite(options[key])) MATE_MODEL[key] = options[key];
+  }
+  if (Array.isArray(options.hideMaterials)) MATE_MODEL.hideMaterials = [...options.hideMaterials];
+  return mateModelConfig();
+}
+
+function setDataset(key, value) {
+  if (typeof document === 'undefined' || !document.body || !document.body.dataset) return;
+  document.body.dataset[key] = value;
+}
+
+/**
+ * 按材质名把模型自带的五官关掉。返回真正关掉的材质名，方便核对与排查。
+ * 用的是 material.visible：glb 里一张网格拆成多个 primitive，three 会做成
+ * 「一个 Group + 每个 primitive 一个 Mesh」，每个 Mesh 有自己的材质，
+ * 所以按名字关不会误伤同一张头上的皮肤和头发。
+ */
+export function applyFaceOverride(root, hideMaterials) {
+  const hidden = [];
+  if (!root || !Array.isArray(hideMaterials) || hideMaterials.length === 0) return hidden;
+  const wanted = new Set(hideMaterials);
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const list = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const mat of list) {
+      if (mat && wanted.has(mat.name)) {
+        mat.visible = false;
+        hidden.push(mat.name);
+      }
+    }
+  });
+  return hidden;
+}
 
 /**
  * 序章 / 尾声的同学。先交出空组，glb 到了再把关节填进原来的数组。
+ *
+ * hooks.onReady(group) 会被调用一次，参数就是这个组。**参数必须传**：
+ * 程序化那套是同步回调的，调用点里 `const g = createClassmate(...)` 的 g 那时还在 TDZ，
+ * 回调里直接引用 g 会抛 "Cannot access 'g' before initialization"。用参数就没事。
  */
 export function createClassmate(THREE, hooks = {}) {
   const group = new THREE.Group();
@@ -35,30 +119,54 @@ export function createClassmate(THREE, hooks = {}) {
   group.userData.arms = [];
   group.userData.torso = null;
   group.userData.materials = [];
+  group.userData.hiddenMaterials = [];
+  // 这一份的模型地址在创建那一刻就定下来；后面配置再变，也不该由旧请求去改全局状态
+  const url = MATE_MODEL.url;
+  group.userData.modelUrl = url;
+  const report = (key, value) => {
+    if (url === MATE_MODEL.url) setDataset(key, value);
+  };
 
-  loadCharacter(CLASSMATE_URL).then((bound) => {
+  if (url === PROCEDURAL_MATE) {
+    adoptProcedural(group, THREE);
+    report('classmateModel', 'procedural');
+    // 程序化那套本来就没有五官可以藏；写 'none' 是为了让 data-classmate-hidden 始终有值
+    report('classmateHidden', 'none');
+    hooks.onReady?.(group);
+    return group;
+  }
+
+  loadCharacter(url).then((bound) => {
     if (group.userData.disposed) {
       disposeCharacter(bound);
       return;
     }
-    mountCharacter(group, bound);
-    document.body.dataset.classmateModel = 'glb';
-    hooks.onReady?.();
+    group.userData.disposeModel = () => disposeCharacter(bound);
+    mountCharacter(group, bound, report);
+    report('classmateModel', 'glb');
+    hooks.onReady?.(group);
   }).catch((error) => {
     console.warn('同学 GLB 加载失败，改用程序化模型。', error);
     if (!group.userData.disposed) adoptProcedural(group, THREE);
-    document.body.dataset.classmateModel = 'fallback';
-    hooks.onReady?.();
+    report('classmateModel', 'fallback');
+    report('classmateHidden', 'none');
+    hooks.onReady?.(group);
   });
   return group;
 }
 
-function mountCharacter(group, bound) {
+function mountCharacter(group, bound, report = setDataset) {
+  const { scale, yawOffset, offsetY, hideMaterials } = MATE_MODEL;
+  bound.root.scale.setScalar(scale);
+  bound.root.rotation.y = yawOffset;
+  bound.root.position.y = offsetY;
   group.add(bound.root);
   group.userData.legs.push(...bound.legs);
   group.userData.arms.push(...bound.arms);
   group.userData.materials.push(...bound.materials);
   group.userData.torso = bound.body ?? null;
+  group.userData.hiddenMaterials = applyFaceOverride(bound.root, hideMaterials);
+  report('classmateHidden', group.userData.hiddenMaterials.join(',') || 'none');
   applyOpacity(group);
 }
 
@@ -78,6 +186,10 @@ function adoptProcedural(group, THREE) {
   group.userData.arms.push(...built.userData.arms);
   group.userData.materials.push(...built.userData.materials);
   group.userData.torso = built.userData.torso ?? null;
+  // 五官接口也要一起搬：safehouse.buildFaceRig 靠 headR 把红眼 / 嘴贴到球面上，
+  // 漏了这一行，glb 加载失败后的回退模型就会退回「按 glb 尺寸猜」的 0.135，
+  // 红眼又沉进半径 0.165 的球头里（上一版红眼不见就是这个原因）。
+  if (built.userData.faceRig) group.userData.faceRig = { ...built.userData.faceRig };
   applyOpacity(group);
 }
 
@@ -140,8 +252,10 @@ function buildProceduralClassmate(THREE) {
   group.add(hip);
 
   // ── 腿（髋 pivot 单件，同现有方案） ──
-  const legGeo = new THREE.BoxGeometry(0.12, 0.62, 0.14);
-  legGeo.translate(0, -0.31, 0);
+  // 长度 0.78 而不是 0.62：髋关节在 y=0.78，腿正好落到地面。
+  // 之前 0.62 让整套下半身悬空 16 cm（换模型要靠它落地的，见 safehouse.box3）。
+  const legGeo = new THREE.BoxGeometry(0.12, 0.78, 0.14);
+  legGeo.translate(0, -0.39, 0);
   const legL = new THREE.Mesh(legGeo, pants);
   const legR = new THREE.Mesh(legGeo, pants);
   legL.position.set(-0.09, 0.78, 0);
@@ -152,8 +266,8 @@ function buildProceduralClassmate(THREE) {
   const shoeGeo = new THREE.BoxGeometry(0.09, 0.06, 0.16);
   const shoeL = new THREE.Mesh(shoeGeo, hair);
   const shoeR = new THREE.Mesh(shoeGeo, hair);
-  shoeL.position.set(-0.09, 0.19, 0.025);
-  shoeR.position.set(0.09, 0.19, 0.025);
+  shoeL.position.set(-0.09, 0.03, 0.025);
+  shoeR.position.set(0.09, 0.03, 0.025);
   group.add(shoeL, shoeR);
 
   // ── 上臂 ──
@@ -209,6 +323,15 @@ function buildProceduralClassmate(THREE) {
   group.userData.arms = [armL, armR];
   group.userData.torso = torso;
   group.userData.materials = mats;
+
+  /**
+   * 五官接口（safehouse.buildFaceRig 读）：
+   *   headY = 球心高度，headR = 球半径。
+   * 有了 headR 才能把红眼 / 嘴贴到**球面**上。上一版是按 glb 的尺寸硬写的
+   * （眼 z=0.13、牙 z=0.115），换到半径 0.165 的球头时整个五官都沉在头里面，
+   * 屏幕上只剩一张没有五官的脸 —— 这是「红眼不见了」的真正原因。
+   */
+  group.userData.faceRig = { headY: 1.585, headR: 0.165 };
 
   return group;
 }

@@ -36,6 +36,10 @@ export const CONFIG = {
   fogHall: 0.11,
   fogChase: 0.085,
   fogCalm: 0.028,
+  /** 安全屋（终局）：雾几乎抽干、环境光抬起来、曝光顶到 1.12 —— 三件事一起做才有「安全」的错觉 */
+  fogSafe: 0.010,
+  hemiSafe: 0.62,
+  exposureSafe: 1.12,
   entitySpeed: 4.45,
   entityCatch: 1.45,
   entityGap: 7.2,

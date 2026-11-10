@@ -67,3 +67,16 @@ exec(open(r'C:\Users\dqh08\Desktop\GameProject\w05_3d_game\tools\build_face.py',
   材质换成 `MeshBasicMaterial({ vertexColors: true, toneMapped: false })`
   （规划书 §4 步骤 3 要求脸不参与光照，且不被 ACES 压色）。
 * 牙、眼睛仍是各自独立的资产（`teeth`、`eyes_v01`），按提示词要求没有并进这张脸。
+
+## 第十九轮：同学的眼窝抄了这张脸的黑
+
+安全屋里的同学（`src/safehouse.js` 的 `buildFaceRig()`）要「在脸上亮起红光点」，不能有可见的眼白。
+做法不是加载这张巨脸，而是抄它的量：
+
+* 眼窝底色用这里的 `#0d0809`（比周围的哑光皮肤更黑一档），红眼用 `eyes_v01` 的 `#ff2030`；
+* 亮起方式是只有颜色和灯光强度变化（`applyReveal()` 里没有任何位移 / 缩放），
+  所以是「原地亮起」而不是「从下面升上来」；
+* 侧看 40° 时远眼会被鼻梁挡掉一半，红像素 1582 : 737——和这张脸的中轴起伏是同一套逻辑。
+
+对照图 `docs/images/classmate_v01_reveal_stages.png`、`classmate_v01_reveal_views.png`、
+`classmate_v01_reveal_ingame.png`；参数与复验见 `README.md` 第十九轮 §3、§5。

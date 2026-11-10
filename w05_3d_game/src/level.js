@@ -38,6 +38,22 @@ const CHAIR_HALF = 0.225;
 const CHAIR_HEIGHT = 0.96;
 /** 走廊灯平时的光半径（米）。追逐时换成 hallglow.js 的灯池半径。 */
 const HALL_LAMP_RADIUS = 14;
+/**
+ * 常驻点光源池容量（第二十三轮加）。整局游戏里「参与渲染的点光源」恒为这个数
+ * （见 buildLights 的注释），这样 NUM_POINT_LIGHTS 这个着色器宏在整个游戏里是常量，
+ * 换场/开灯/异常挂载都不会让全场材质重编译。
+ *
+ * 为什么是 18：不是拍的，是量出来的。
+ * ① 上限由「同时真正在照亮东西的灯」决定 —— 对第 5 关做 1 m 网格扫描
+ *    （x ∈ [-12, 68]、z ∈ [-8, 12]，判据 = intensity > 0.001、且玩家视高到灯的距离
+ *    小于灯自己的 distance，与 three 的截断衰减一致），全场最大值是 **15 盏**
+ *    （只在房间正中 2 个格点出现，14 盏的格点 14 个，其余都在 12 以下）。
+ * ② 下限由「漏一盏会不会看出来」决定 —— 池子满了会挤掉最远的一盏，所以留 3 盏余量 = 20 %。
+ * ③ 为什么不像原方案那样取 30：这个数字同时就是**每像素片元光照循环的次数**。
+ *    30 盏时第一关 p50 从 30.5 ms 涨到 40.5 ms（软光栅，+33 %）——超出真实需求的每一盏
+ *    都在为空气打光。18 盏比第一关改前的实际灯数还少，比第 5 关改前的 28–30 盏少四成。
+ */
+const POINT_POOL_SIZE = 18;
 /** 灯管自发光强度（平时）。追逐时的值见 hallChaseLamp()。 */
 const HALL_BULB_GLOW = 0.9;
 
@@ -59,7 +75,7 @@ export class Level {
         minY: -4,
         maxY: 0,
         minZ: -12,
-        maxZ: LAYOUT.alcove.backZ + 2,
+        maxZ: LAYOUT.hall.maxZ + 2,
       },
       {
         minX: LAYOUT.room.minX,
@@ -70,6 +86,24 @@ export class Level {
         maxZ: LAYOUT.room.maxZ,
       },
     ];
+    /**
+     * 所有「会亮」的点光源（房间 8 + 走廊 10 + 门灯/眼睛/眼珠/拾取物/出口 5）。
+     * 它们只当**数据源**用：统一的 `visible = false`，不进渲染器的光源列表，
+     * 每帧由 updatePointPool() 把最该亮的几盏搬进 this.pointPool。
+     */
+    this.lightSources = [];
+    /**
+     * 恒定 30 盏点光源池。为什么要池化：
+     * three.js 的 forward 渲染里 `NUM_POINT_LIGHTS` 是着色器宏，只要「参与渲染的点光源
+     * 数量」变一次，全场材质就得重新编译一遍着色器。本项目里它会变的场合有两个：
+     *   1) 进教室时异常组挂上场景 —— 组里那盏眼睛灯让计数 +1；
+     *   2) 出门进终局 —— 教室/走廊整组隐藏，计数一下掉十几盏。
+     * 实测（swiftshader，?probe=1&devLevel=5）出门那一帧计 28 → 30，
+     * renderer.info.programs 50 → 72，单帧 1494 ms。池化后计数恒定 30，这个跳变消失。
+     * 池子里的灯只增不减、永不改父节点、永不隐藏，所以宏值全程稳定。
+     */
+    this.pointPool = [];
+    this.poolActive = 0;
     this.hallLamps = [];
     /** 与 hallLamps 一一对应的灯管网格（每盏灯自己的材质，闪烁时要单独压暗）。 */
     this.hallBulbs = [];
@@ -81,6 +115,8 @@ export class Level {
     this.hallDead = new Set();
     /** 本次追逐是否已经做过「起跑时就在身后的灯」的静音清点。 */
     this.hallPrimed = false;
+    /** 终局：走廊灯整体亮度倍数（1 = 正常）。跑到发光的门跟前会压到 0，只剩门上那盏。 */
+    this.lampScale = 1;
     this.npcDone = false;
     this.npcIndex = 1;
     this.doorOpen = false;
@@ -211,6 +247,12 @@ export class Level {
     this.pickupLight.intensity = 0;
     this.hallDead.clear();
     this.hallPrimed = false;
+    // 终局留下的状态：灯的整体倍数、半球光覆盖值、门板/门光。重开必须回到「还没跑到门口」
+    this.lampScale = 1;
+    this.hemiOverride = null;
+    this.setDoorGlow(0);
+    this.openEndDoor(0);
+    this.setVisible(true);
     for (const prop of this.props) this.resetItem(prop);
   }
 
@@ -346,13 +388,16 @@ export class Level {
   }
 
   /**
-   * 爆闪/惨绿闪烁 —— 后续AI接管者注意：
+   * 爆闪/惨红闪烁 —— 后续AI接管者注意：
    * – 只有调用 triggerFlash(duration) 才激活，每帧由 update()→this.lightFlash(dt) 驱动
    * – 不要直接在 update() 或 updateLights() 里无条件调 lightFlash()，否则会永久闪
    * – 亮度曲线: flashFactor 从 20 快速衰减到 2 再到 1，峰值时 brightness ≈ 20× 正常
-   * – 闪光色调: 惨绿色 (flashColor)，亮度越高绿色越浓
+   * – 闪光色调: 血红色 (flashColor)，亮度越高红色越浓（第二十二轮由惨绿改成红，
+   *   因为这是「同学出事」那一下，红比绿更像血/警示；绿留给后面的异常提示用）
    * – 走廊灯 (hallLamps) 同步闪烁，幅度为房间灯的 40%
-   * - 恢复后房间灯和走廊灯回到原始亮度和颜色(0xffffff / 0x8ea0c0)
+   * - 恢复后房间灯和走廊灯回到**闪光前**的颜色与亮度（第二十二轮改成快照还原：
+   *   原来写死 0xffffff / 0x8ea0c0，而房间灯建的时候是 0xffb27a 暖色，
+   *   一次闪光就把序章教室的暖光永久洗白了）
    * – 如需调整闪光强度: 改 flashFactor 起始值和衰减率; 持续时长: triggerFlash(duration) 的参数
    */
   lightFlash(dt) {
@@ -360,18 +405,22 @@ export class Level {
     this._flashT += dt;
     const duration = this._flashDuration ?? 0.45;
     if (this._flashT > duration) {
-      // 完全恢复：还原到正常光照
+      // 完全恢复：还原到闪光前的光照（颜色优先用 triggerFlash 拍下的快照）
       const base = CONFIG.roomLight;
       const scaled = base * 0.46;
+      const roomHex = this._flashRoomHex;
+      const hallHex = this._flashHallHex;
       for (const light of this.roomLights) {
         light.intensity = scaled;
-        if (light.color) light.color.setHex(0xffffff);
+        if (light.color) light.color.setHex(roomHex?.[this.roomLights.indexOf(light)] ?? 0xffffff);
       }
       for (const fixture of this.roomFixtures) fixture.material.emissiveIntensity = 0.05;
       for (const light of this.hallLamps) {
         light.intensity = CONFIG.hallLamp;
-        if (light.color) light.color.setHex(0x8ea0c0);
+        if (light.color) light.color.setHex(hallHex?.[this.hallLamps.indexOf(light)] ?? 0x8ea0c0);
       }
+      this._flashRoomHex = null;
+      this._flashHallHex = null;
       this._flashT = -1;
       return;
     }
@@ -385,11 +434,11 @@ export class Level {
     } else {
       flashFactor = 2 - 1.0 * ((progress - 0.35) / 0.65);
     }
-    // 惨绿调色：闪光越强绿色越浓
-    const greenMix = Math.min(1, flashFactor / 8);
-    const r = Math.round(0xcc * (1 - greenMix * 0.55));
-    const g = Math.round(0xff);
-    const b = Math.round(0xa0 * (1 - greenMix * 0.7));
+    // 血红调色：闪光越强红色越浓（第二十二轮：绿 → 红）
+    const redMix = Math.min(1, flashFactor / 8);
+    const r = Math.round(0xff);
+    const g = Math.round(0x66 * (1 - redMix * 0.80));
+    const b = Math.round(0x50 * (1 - redMix * 0.70));
     const flashColor = (r << 16) | (g << 8) | b;
     const base = CONFIG.roomLight;
     const scaled = base * 0.46;
@@ -399,7 +448,7 @@ export class Level {
     }
     const fixtureGlow = flashFactor > 10 ? 5.0 : (flashFactor > 3 ? 3.0 : 0.05);
     for (const fixture of this.roomFixtures) fixture.material.emissiveIntensity = fixtureGlow;
-    // 走廊灯同步闪烁（走廊灯保持淡绿，亮度也放大但幅度小一些）
+    // 走廊灯同步闪烁（走廊灯跟着同一片红光，亮度放大但幅度小一些）
     const hallFactor = 1 + (flashFactor - 1) * 0.4;
     for (const light of this.hallLamps) {
       light.intensity = CONFIG.hallLamp * Math.max(1, hallFactor);
@@ -411,6 +460,9 @@ export class Level {
   triggerFlash(duration) {
     this._flashT = 0;
     this._flashDuration = duration || 0.4;
+    // 拍下闪光前的灯色，闪光结束后原样还回去（否则教室会从 0xffb27a 变纯白）
+    this._flashRoomHex = (this.roomLights || []).map((light) => (light.color ? light.color.getHex() : 0xffffff));
+    this._flashHallHex = (this.hallLamps || []).map((light) => (light.color ? light.color.getHex() : 0x8ea0c0));
   }
 
   spawnUpTo(count) {
@@ -424,6 +476,7 @@ export class Level {
       else anomaly = createAnomaly(level);
       if (anomaly.parent === 'door') this.doorPivot.add(anomaly.group);
       else this.scene.add(anomaly.group);
+      this.adoptGroupLights(anomaly.group);
       this.anomalies.push(anomaly);
       if (anomaly.whenReady?.then) {
         anomaly.whenReady.then(() => {
@@ -448,8 +501,36 @@ export class Level {
     this.prewarmed.set(level, createAnomaly(level));
   }
 
+  /** 取出预建好的异常组（只取，不挂场），给预热贴图用。 */
+  getPrewarmed(level) {
+    return this.prewarmed ? this.prewarmed.get(level) ?? null : null;
+  }
+
+  /**
+   * 把某个组里自带的点光源全部收编（异常组、安全屋、同学模型都走这条）。
+   * 为什么非收不可：只要组一显示/隐藏，参与渲染的灯数就变一次，
+   * NUM_POINT_LIGHTS 跟着变，全场材质重编译 —— 「刚进教室那一下卡」的主因就是异常组里那盏眼睛灯，
+   * 「出门进终局那一下卡」则是安全屋那几盏。收编后灯的亮度仍由各自模块每帧写，池子只负责搬。
+   */
+  adoptGroupLights(group) {
+    if (!group) return;
+    group.traverse((object) => {
+      if (object.isPointLight && this.lightSources.indexOf(object) < 0) this.adoptLight(object);
+    });
+  }
+
+  /** 撤掉异常组时，把它的灯从光源表里也摘掉；否则池子会继续按一个已 dispose 的灯照亮。 */
+  releaseAnomalyLights(group) {
+    if (!group || !this.lightSources.length) return;
+    this.lightSources = this.lightSources.filter((light) => {
+      for (let node = light; node; node = node.parent) if (node === group) return false;
+      return true;
+    });
+  }
+
   clearAnomalies() {
     for (const anomaly of this.anomalies) {
+      this.releaseAnomalyLights(anomaly.group);
       anomaly.group.removeFromParent();
       disposeObject(anomaly.group);
     }
@@ -693,6 +774,9 @@ export class Level {
     }[env.mood] ?? CONFIG.fogRoom;
     this.scene.fog.density = density / Math.max(CONFIG.brightness, 0.05);
 
+    // 必须在所有改灯强度的逻辑之后：把这一帧算出来的灯状态搬进常驻池。
+    this.updatePointPool(env);
+
     if (this.debugColliders && this._debugDoor !== this.doorOpen) this.setColliderDebug(true);
   }
 
@@ -755,59 +839,29 @@ export class Level {
           continue;
         }
         const state = hallChaseLamp(this.hallTime, i, this.hallFlicker.has(i));
-        lamp.intensity = state.intensity * bright;
+        lamp.intensity = state.intensity * bright * this.lampScale;
         lamp.distance = state.distance;
-        this.hallBulbs[i].material.emissiveIntensity = state.bulb;
+        this.hallBulbs[i].material.emissiveIntensity = state.bulb * this.lampScale;
       }
     } else {
       const lamp = calm ? CONFIG.hallLamp * 1.6 : CONFIG.hallLamp;
       for (const light of this.hallLamps) {
-        light.intensity = lamp * bright;
+        light.intensity = lamp * bright * this.lampScale;
         light.distance = HALL_LAMP_RADIUS;
       }
-      for (const bulb of this.hallBulbs) bulb.material.emissiveIntensity = HALL_BULB_GLOW;
+      for (const bulb of this.hallBulbs) bulb.material.emissiveIntensity = HALL_BULB_GLOW * this.lampScale;
     }
     const ambient = calm ? CONFIG.ambient * 2.4 : CONFIG.ambient;
     this.ambient.intensity = ambient * bright;
-    if (this.hemi) this.hemi.intensity = CONFIG.hemi * bright;
+    // hemiOverride 由终局 setHemi() 设；平时是 null，跟着 brightness 走
+    if (this.hemi) {
+      this.hemi.intensity = typeof this.hemiOverride === 'number' ? this.hemiOverride : CONFIG.hemi * bright;
+    }
   }
 
   updateNpc(dt, env) {
     if (env.npcMode === 'hide') {
       this.npc.visible = false;
-      return;
-    }
-    if (env.npcMode === 'ending') {
-      // 朝向按玩家实际位置算，而不是写死 ±π/2。
-      // 玩家冲过头、站在哪一侧都不会让「正对/背对」反过来。
-      if (this.npcBodyWrap) this.npcBodyWrap.rotation.y = 0;
-      const wasHidden = !this.npc.visible;
-      this.npc.visible = true;
-      this.npc.position.set(LAYOUT.classmateEnd.x, 0, LAYOUT.classmateEnd.z);
-
-      const px = Number(env.playerX);
-      const pz = Number(env.playerZ);
-      let targetYaw;
-      if (Number.isFinite(px) && Number.isFinite(pz)) {
-        // 模型脸在 +Z，所以「+Z 指向玩家」这个角就是正对玩家
-        const toPlayer = Math.atan2(px - this.npc.position.x, pz - this.npc.position.z);
-        targetYaw = this.npcFacingPlayer ? toPlayer : toPlayer + Math.PI;
-      } else {
-        targetYaw = typeof this.npcEndingYaw === 'number' ? this.npcEndingYaw : Math.PI / 2;
-      }
-      this.npcEndingYaw = targetYaw;
-
-      if (typeof this.npcSmoothYaw !== 'number' || wasHidden) this.npcSmoothYaw = targetYaw;
-      this.npcSmoothYaw = shortestTurn(this.npcSmoothYaw, targetYaw, dt * 2.4);
-      this.npc.rotation.y = this.npcSmoothYaw;
-
-      // 红眼只在「已经揭示」且「正面朝向玩家」时出现；其余时刻强制收起
-      if (this.npcEyes) {
-        const showEyes = !!this.npcEyesOn && !!this.npcFacingPlayer;
-        this.npcEyes.visible = showEyes;
-        if (this.npcEyeLight) this.npcEyeLight.intensity = showEyes ? 0.45 : 0;
-      }
-      this.setNpcOpacity(1 - (env.classmateFade || 0));
       return;
     }
     if (this.npcDone) return;
@@ -979,7 +1033,7 @@ export class Level {
   }
 
   buildShell() {
-    const { room, hall, wall, alcove } = LAYOUT;
+    const { room, hall, wall } = LAYOUT;
     const floorMat = this.materials.ground;
     const roomFloor = this.materials.wood;
     this.addPlane(112, 24, (hall.minX + hall.maxX) / 2, 0, 4, floorMat);
@@ -1014,16 +1068,10 @@ export class Level {
     const northOuter = hall.maxZ + t;
     span(hall.minX - t, room.minX - t, room.maxZ, faceZ, hh, this.materials.hall);
     span(room.maxX + t, hall.maxX + t, room.maxZ, faceZ, hh, this.materials.hall);
-    span(hall.minX - t, alcove.minX, hall.maxZ, northOuter, hh, this.materials.hall);
-    span(alcove.maxX, hall.maxX + t, hall.maxZ, northOuter, hh, this.materials.hall);
+    // 北墙一整条封到底：追逐走廊必须是纯直线，不能有侧向凸出的空间
+    span(hall.minX - t, hall.maxX + t, hall.maxZ, northOuter, hh, this.materials.hall);
     span(hall.minX - t, hall.minX, faceZ, hall.maxZ, hh, this.materials.hall);
     span(hall.maxX, hall.maxX + t, faceZ, hall.maxZ, hh, this.materials.hall);
-
-    const alcoveDepth = alcove.backZ - hall.maxZ;
-    span(alcove.minX - t, alcove.minX, northOuter, alcove.backZ, hh, this.materials.hall);
-    span(alcove.maxX, alcove.maxX + t, northOuter, alcove.backZ, hh, this.materials.hall);
-    span(alcove.minX - t, alcove.maxX + t, alcove.backZ, alcove.backZ + t, hh, this.materials.hall);
-    this.addPlane(alcove.maxX - alcove.minX, alcoveDepth, (alcove.minX + alcove.maxX) / 2, 0.02, (hall.maxZ + alcove.backZ) / 2, floorMat);
 
     this.addBox(room.maxX - room.minX + 1, 0.16, room.maxZ - room.minZ + 1, 0, room.height + 0.08, 0, this.materials.ceiling, false);
     const ceilZ0 = room.maxZ + t;
@@ -1036,10 +1084,197 @@ export class Level {
       if (x <= room.minX - t || x >= room.maxX + t) {
         this.addBox(0.08, 1.2, 0.06, x, 1.5, faceZ + 0.04, this.materials.hallTrim, false);
       }
-      if (x < alcove.minX - 0.5 || x > alcove.maxX + 0.5) {
-        this.addBox(0.08, 1.2, 0.06, x, 1.5, hall.maxZ - 0.04, this.materials.hallTrim, false);
-      }
+      this.addBox(0.08, 1.2, 0.06, x, 1.5, hall.maxZ - 0.04, this.materials.hallTrim, false);
     }
+
+    this.buildEndDoor();
+  }
+
+  /**
+   * 走廊东端（x = hall.maxX）那扇发光的门。终局的终点。
+   * 注意：这里不挖墙洞。玩家跑到 LAYOUT.doorwayX 就整屏换场，
+   * 门从来没有「走过去」的那一帧，所以门板只是贴在墙内侧的一块装饰。
+   */
+  buildEndDoor() {
+    const { hall } = LAYOUT;
+    const cx = LAYOUT.doorCenterX;
+    const cz = hall.z;
+    const panelH = 2.35;
+
+    // 门板材质：平时的白漆门，emissive 由 setDoorGlow 从 0 拉起来
+    this.doorSafeMat = new THREE.MeshStandardMaterial({
+      color: 0xd8cfc0,
+      roughness: 0.78,
+      emissive: 0xffe9c8,
+      emissiveIntensity: 0,
+    });
+
+    // 门框：上、左、右。深度 0.14，比门板厚一点，凸出墙面读得出「这是门」
+    this.addBox(0.14, 0.10, 1.90, cx, 2.40, cz, this.materials.hallTrim, false);
+    this.addBox(0.14, 2.40, 0.10, cx, 1.20, cz - 0.90, this.materials.hallTrim, false);
+    this.addBox(0.14, 2.40, 0.10, cx, 1.20, cz + 0.90, this.materials.hallTrim, false);
+
+    // 门板挂在铰链上：pivot 在 z = cz - 0.85（左门缝），门板相对 pivot 往 +z 铺 1.70
+    this.endDoorPivot = new THREE.Group();
+    this.endDoorPivot.position.set(cx + 0.01, 0, cz - 0.85);
+    this.scene.add(this.endDoorPivot);
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(0.06, panelH, 1.70), this.doorSafeMat);
+    panel.position.set(0, panelH / 2, 0.85);
+    markNoRay(panel);
+    this.endDoorPivot.add(panel);
+    this.endDoorAngle = 0;
+
+    // 门缝漏光：两条细长条，toneMapped=false，压不掉的白
+    this.leakMat = new THREE.MeshBasicMaterial({
+      color: 0xfff6e6,
+      transparent: true,
+      opacity: 0,
+      toneMapped: false,
+    });
+    const leakL = new THREE.Mesh(new THREE.BoxGeometry(0.02, panelH - 0.07, 0.03), this.leakMat);
+    leakL.position.set(cx - 0.04, panelH / 2, cz - 0.86);
+    markNoRay(leakL);
+    this.scene.add(leakL);
+    const leakR = new THREE.Mesh(new THREE.BoxGeometry(0.02, panelH - 0.07, 0.03), this.leakMat);
+    leakR.position.set(cx - 0.04, panelH / 2, cz + 0.86);
+    markNoRay(leakR);
+    this.scene.add(leakR);
+
+    // 门上方的光：距离收到 10 米，只照门口这一小片，不把整条走廊洗白
+    this.endDoorLight = this.adoptLight(new THREE.PointLight(0xfff2d8, 0, 10, 2));
+    this.endDoorLight.position.set(cx - 0.30, 1.35, cz);
+    this.scene.add(this.endDoorLight);
+
+    // 远处能看见的「光点」只能靠不受雾影响的发光片，不能靠灯：
+    // 追逐段的雾是 FogExp2(0.085)，25 米外透光率只剩 0.8%，
+    // 再强的自发光门板都会被雾按成背景色。Sprite 的材质把 fog 关掉，
+    // 于是 60 米外它照样是画面里的一个白点——这就是「走廊尽头有一点光」。
+    this.doorGlowTex = glowSpriteTexture();
+    const beaconMat = (opacity, size) => {
+      const mat = new THREE.SpriteMaterial({
+        map: this.doorGlowTex,
+        color: 0xfff3dc,
+        transparent: true,
+        opacity,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+        toneMapped: false,
+      });
+      const sprite = new THREE.Sprite(mat);
+      sprite.scale.set(size, size, 1);
+      markNoRay(sprite);
+      this.scene.add(sprite);
+      return sprite;
+    };
+    // 光点本体（小而硬）+ 外面一圈光晕（大而软）。两层叠出「刺眼」的过渡
+    this.doorBeacon = beaconMat(0, 1.15);
+    this.doorBeacon.position.set(cx - 0.16, 1.30, cz);
+    this.doorHalo = beaconMat(0, 4.80);
+    this.doorHalo.position.set(cx - 0.16, 1.30, cz);
+
+    // 门内的强光「透出来」：贴在门板前面的一张加色光片，离远了只是一团亮，
+    // 抵到门口就是一片压不住的白。
+    this.doorFlareMat = new THREE.MeshBasicMaterial({
+      map: this.doorGlowTex,
+      color: 0xfff6e8,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+      toneMapped: false,
+    });
+    const flare = new THREE.Mesh(new THREE.PlaneGeometry(2.10, 2.62), this.doorFlareMat);
+    flare.position.set(cx - 0.10, 1.24, cz);
+    markNoRay(flare);
+    this.scene.add(flare);
+    this.doorFlare = flare;
+
+    // 地面光斑：贴地的一张渐变亮片，补足灯打不出「门缝把地板照亮」的软过渡
+    this.endDoorGlowMat = new THREE.MeshBasicMaterial({
+      map: this.doorGlowTex,
+      color: 0xffe9c8,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+      toneMapped: false,
+    });
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(5.2, 3.8), this.endDoorGlowMat);
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.set(cx - 1.9, 0.02, cz);
+    markNoRay(glow);
+    this.scene.add(glow);
+  }
+
+  /**
+   * 门的发光强度 0..1。追逐中从 0.45 拉到 1，抵到门口时门是「亮着的一道白」。
+   * 第十七轮：整体大幅提亮。旧的 0.85 / 34 / 0.35 三个数在门口只够把门板
+   * 照成浅灰，走廊尽头一片黑；现在的比例是「门内有一盏你不敢直视的灯」。
+   */
+  setDoorGlow(k) {
+    const v = Math.max(0, Math.min(1, k));
+    if (this.doorSafeMat) this.doorSafeMat.emissiveIntensity = 2.6 * v;
+    if (this.leakMat) this.leakMat.opacity = Math.min(1, 1.3 * v);
+    if (this.endDoorLight) this.endDoorLight.intensity = 55 * v;
+    if (this.endDoorGlowMat) this.endDoorGlowMat.opacity = 0.75 * v;
+    if (this.doorFlareMat) this.doorFlareMat.opacity = 0.95 * v;
+    if (this.doorBeacon) {
+      this.doorBeacon.material.opacity = v;
+      this.doorBeacon.visible = v > 0.005;
+    }
+    if (this.doorHalo) {
+      this.doorHalo.material.opacity = 0.8 * v;
+      this.doorHalo.visible = v > 0.005;
+    }
+    this.doorGlowLevel = v;
+  }
+
+  /** 开门：to 是转过的弧度（0 = 关，1.92 ≈ 110°）。 */
+  openEndDoor(to) {
+    const v = Math.max(0, Math.min(1.92, to));
+    this.endDoorAngle = v;
+    if (this.endDoorPivot) this.endDoorPivot.rotation.y = v;
+  }
+
+  /** 门口的对焦点：镜头要「看住这扇门」时用这个。 */
+  endDoorAimPoint() {
+    return { x: LAYOUT.doorCenterX, y: 1.45, z: LAYOUT.hall.z };
+  }
+
+  /** 终局把走廊灯整体压暗 / 复原。updateLights 每帧会写 intensity，所以存成倍数。 */
+  setHallLampScale(k) {
+    this.lampScale = Math.max(0, Math.min(1, k));
+  }
+
+  /** 半球光直接改强度（安全屋换场时抬高）。传 null 交还给 updateLights。 */
+  setHemi(v) {
+    this.hemiOverride = v;
+    if (this.hemi && typeof v === 'number') this.hemi.intensity = v;
+  }
+
+  /**
+   * 整层显隐。换场到安全屋时把教室和走廊全关掉，顺带省掉那一层的绘制。
+   * 必须记快照再恢复：直接全置 true 会把同学、异常道具、EXIT 牌一起放出来。
+   * userData.keepVisible 的对象不参与（安全屋自己就在同一个 scene 里）。
+   */
+  setVisible(on) {
+    if (!on) {
+      if (this._visibleSnapshot) return;
+      this._visibleSnapshot = new Map();
+      for (const child of this.scene.children) {
+        if (child.isCamera) continue;
+        if (child.userData && child.userData.keepVisible) continue;
+        this._visibleSnapshot.set(child, child.visible);
+        child.visible = false;
+      }
+      return;
+    }
+    if (!this._visibleSnapshot) return;
+    for (const [child, wasVisible] of this._visibleSnapshot) child.visible = wasVisible;
+    this._visibleSnapshot = null;
   }
 
   buildCorridorWall() {
@@ -1374,9 +1609,11 @@ export class Level {
   }
 
   buildCharacters() {
+    // 用回调参数而不是闭包里的 customMate：程序化模型是同步回调的，
+    // 那时 `const customMate = ...` 还没赋值，引它会抛 TDZ 错误（只有 ?mate=proc 才会碰到）。
     const customMate = createClassmate(THREE, {
-      onReady: () => {
-        this.npcTorso = customMate.userData.torso ?? null;
+      onReady: (group) => {
+        this.npcTorso = group?.userData.torso ?? null;
         this.onSceneChanged?.();
       },
     });
@@ -1435,7 +1672,7 @@ export class Level {
     markNoRay(this.npcEyes);
     this.npc.add(this.npcEyes);
     // 红眼自带的微光，只做一点轮廓，别把整张脸照红
-    this.npcEyeLight = new THREE.PointLight(0xff2233, 0, 1.0, 2);
+    this.npcEyeLight = this.adoptLight(new THREE.PointLight(0xff2233, 0, 1.0, 2));
     this.npcEyeLight.position.set(0, 1.60, 0.46);
     this.npc.add(this.npcEyeLight);
     this.npcEndingYaw = Math.PI / 2;   // 背对玩家（书包朝玩家）
@@ -1445,7 +1682,7 @@ export class Level {
     this.entityFadeT = 0;
 
     this.entity = new THREE.Group();
-    this.entityLight = new THREE.PointLight(0xff2233, 0, 7, 2);
+    this.entityLight = this.adoptLight(new THREE.PointLight(0xff2233, 0, 7, 2));
     this.entityLight.position.y = 1.6;
     this.entity.add(this.entityLight);
     this.setGrin = null;
@@ -1479,6 +1716,11 @@ export class Level {
     this.entity.rotation.y = Math.PI / 2;
     this.entity.visible = false;
     this.scene.add(this.entity);
+    // m2.js 那套眼睛自带一盏红光（intensity 1.2、radius 4.5，烘托眼睛用的）。
+    // 它装在 entity 里，平时 entity 不可见 ⇒ 灯不计入渲染器；终局一露面就是 +1 盏 ⇒
+    // 整个场景的 NUM_POINT_LIGHTS 变一次 ⇒ 全场材质重编译。所以在这里就把它收编进常量池。
+    this.adoptGroupLights(this.entity);
+    this.adoptGroupLights(this.npc);
   }
 
   buildPickup() {
@@ -1487,7 +1729,7 @@ export class Level {
     this.pickup.visible = false;
     markNoRay(this.pickup);
     this.scene.add(this.pickup);
-    this.pickupLight = new THREE.PointLight(0xffe0b0, 0, 2.5, 2);
+    this.pickupLight = this.adoptLight(new THREE.PointLight(0xffe0b0, 0, 2.5, 2));
     this.pickupLight.position.set(LAYOUT.pickup.x, 0.4, LAYOUT.pickup.z);
     this.scene.add(this.pickupLight);
   }
@@ -1502,7 +1744,7 @@ export class Level {
     this.exitSign.visible = false;
     markNoRay(this.exitSign);
     this.scene.add(this.exitSign);
-    this.exitLight = new THREE.PointLight(0x39ff86, 0, 18, 2);
+    this.exitLight = this.adoptLight(new THREE.PointLight(0x39ff86, 0, 18, 2));
     this.exitLight.position.set(50.6, 2.2, LAYOUT.hall.z);
     this.scene.add(this.exitLight);
   }
@@ -1646,6 +1888,7 @@ export class Level {
   }
 
   buildLights() {
+    this.buildPointPool();
     this.ambient = new THREE.AmbientLight(0x93a0b4, CONFIG.ambient);
     this.scene.add(this.ambient);
     this.hemi = new THREE.HemisphereLight(0x1b2433, 0x1a120c, CONFIG.hemi);
@@ -1660,7 +1903,7 @@ export class Level {
     // 走廊 106 米长，雾的可见距离只有十几米，5 米一盏等于让每帧多算一倍光照。
     // 改成 10 米一盏，近处观感几乎不变，片元光照循环少一半。
     for (let x = LAYOUT.hall.minX + 10; x <= LAYOUT.hall.maxX - 5; x += 10) {
-      const lamp = new THREE.PointLight(0x8ea0c0, CONFIG.hallLamp, HALL_LAMP_RADIUS, 2);
+      const lamp = this.adoptLight(new THREE.PointLight(0x8ea0c0, CONFIG.hallLamp, HALL_LAMP_RADIUS, 2));
       lamp.position.set(x, 2.55, LAYOUT.hall.z);
       this.scene.add(lamp);
       this.hallLamps.push(lamp);
@@ -1681,8 +1924,107 @@ export class Level {
     });
   }
 
+  /**
+   * 常驻点光源池：POINT_POOL_SIZE 盏只建一次、只 add 一次、永不改父节点、永不隐藏的 PointLight。
+   * 池灯数量恒定 ⇒ 着色器宏 NUM_POINT_LIGHTS 恒定 ⇒ 换场时不会整场重编译材质。
+   * 它们的亮度每帧由 updatePointPool() 从 this.lightSources 里搬过来。
+   */
+  buildPointPool() {
+    for (let i = 0; i < POINT_POOL_SIZE; i += 1) {
+      const light = new THREE.PointLight(0xffffff, 0, 12, 2);
+      light.position.set(0, -50, 0);
+      // setVisible(false) 会把 scene 的每个子对象都关掉，池灯必须免疫，
+      // 否则换场到安全屋时它也跟着被隐藏：安全屋的灯全是池子里的副本，池子一暗，整间屋子全黑。
+      light.userData.keepVisible = true;
+      this.scene.add(light);
+      this.pointPool.push(light);
+    }
+  }
+
+  /**
+   * 把一盏点光源降级成「数据源」：`visible = false` 让它退出渲染器的光源收集，
+   * 但仍留在原来的父节点里 —— 位置/闪烁/强度这套逻辑一个字都不用改，
+   * 每帧 updatePointPool() 会读它的世界坐标和强度，搬进常驻池。
+   * 必须这么做的原因见文件顶部 POINT_POOL_SIZE 的注释：只要参与渲染的灯数变一次，
+   * NUM_POINT_LIGHTS 这个着色器宏就变，全场材质重编译，那一帧 500–1500 ms。
+   */
+  adoptLight(light) {
+    light.visible = false;
+    this.lightSources.push(light);
+    return light;
+  }
+
+  /**
+   * 页面上「真的在亮」的判定：光源自己虽然是 visible=false（故意的，见 adoptLight），
+   * 但从它往上每一层都必须可见，且最上一层必须挂在 scene 上 ——
+   * 组被隐藏（进门前、异常组还没挂、安全屋没开灯）就等于原来的「灯不存在」，
+   * 池子也就不会拿一个已经离场的灯去照亮空气。
+   */
+  lightIsLive(light) {
+    let root = light;
+    for (let node = light.parent; node; node = node.parent) {
+      if (node.visible === false) return false;
+      root = node;
+    }
+    return root === this.scene;
+  }
+
+  /**
+   * 每帧把「对玩家贡献最大的 18 盏」搬进常驻池（容量见文件顶部 POINT_POOL_SIZE）。
+   * 排序按距离（decay = 2，衰减是 1/d²），超出灯自身 distance 的本来就不照亮任何东西，连名额都不占
+   * —— 这条判据和 three 的截断衰减是同一个式子，所以「被算作不亮」的灯本来就贡献 0。
+   * 搬的只有 position / color / intensity / distance / decay 五个量，池灯其余状态保持出厂值。
+   * 实测全游戏同时最多 15 盏真的在照亮（第 5 关 1 m 网格扫描），18 个名额留 3 盏余量，
+   * 所以正常玩法下不会挤掉任何一盏；只有同时超过 18 盏才按距离丢最远的，
+   * 而那一刻它本来就已经处在衰减尾端（贡献趋近 0）。
+   *
+   * `origin` 是挑灯用的「眼睛位置」：正常玩法走玩家的视高，终局那几段玩家在轨道镜头上
+   * （`ending` / `badEnd` 不调 level.update），由 game 显式传摄像机世界坐标进来。
+   */
+  updatePointPool(env, origin = null) {
+    const pool = this.pointPool;
+    if (!pool || !pool.length) return;
+    const ox = origin && Number.isFinite(origin.x) ? origin.x : env.playerX;
+    const oz = origin && Number.isFinite(origin.z) ? origin.z : env.playerZ;
+    const px = Number.isFinite(ox) ? ox : 0;
+    const pz = Number.isFinite(oz) ? oz : 0;
+    const py = origin && Number.isFinite(origin.y) ? origin.y : 1.62; // 玩家视高；只用来挑最近的那几盏，不需要精确
+    const cand = this._poolCand || (this._poolCand = []);
+    const tmp = this._poolTmp || (this._poolTmp = new THREE.Vector3());
+    cand.length = 0;
+    for (const light of this.lightSources) {
+      if (!(light.intensity > 0.001)) continue;
+      if (!this.lightIsLive(light)) continue;
+      light.getWorldPosition(tmp);
+      const dx = tmp.x - px;
+      const dy = tmp.y - py;
+      const dz = tmp.z - pz;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const range = light.distance;
+      if (range > 0 && range * range < d2) continue;
+      cand.push({ wx: tmp.x, wy: tmp.y, wz: tmp.z, d2, light });
+    }
+    cand.sort((a, b) => a.d2 - b.d2);
+    const n = Math.min(cand.length, pool.length);
+    for (let i = 0; i < n; i += 1) {
+      const c = cand[i];
+      const slot = pool[i];
+      slot.position.set(c.wx, c.wy, c.wz);
+      slot.color.copy(c.light.color);
+      slot.intensity = c.light.intensity;
+      slot.distance = c.light.distance;
+      slot.decay = c.light.decay;
+    }
+    for (let i = n; i < pool.length; i += 1) {
+      const slot = pool[i];
+      slot.intensity = 0;
+      slot.distance = 0;
+    }
+    this.poolActive = n;
+  }
+
   addRoomLight(x, z) {
-    const light = new THREE.PointLight(0xffb27a, CONFIG.roomLight, 12, 2);
+    const light = this.adoptLight(new THREE.PointLight(0xffb27a, CONFIG.roomLight, 12, 2));
     light.position.set(x, 2.72, z);
     this.scene.add(light);
     this.roomLights.push(light);
@@ -2142,6 +2484,25 @@ function posterTexture() {
   ctx.fillText('↑', 128, 190);
   ctx.font = '24px "Microsoft YaHei", sans-serif';
   ctx.fillText('本教室', 128, 260);
+  return canvasTexture(canvas, false);
+}
+
+/**
+ * 一张径向渐变的白点贴图：中间全白，往外一圈暖白，边缘全透明。
+ * 走廊尽头那个「光点」、门内的强光、地上那摊光都是同一张图缩放出来的。
+ */
+function glowSpriteTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.28, 'rgba(255,248,232,0.72)');
+  g.addColorStop(0.62, 'rgba(255,238,208,0.22)');
+  g.addColorStop(1, 'rgba(255,232,200,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
   return canvasTexture(canvas, false);
 }
 

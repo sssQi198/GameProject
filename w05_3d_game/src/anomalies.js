@@ -626,6 +626,27 @@ function zeroPuppetPose(pose) {
   }
 }
 
+function copyPuppetPose(src, dst) {
+  for (const key of PUPPET_KEYS) {
+    const a = src[key];
+    const b = dst[key];
+    b[0] = a[0];
+    b[1] = a[1];
+    b[2] = a[2];
+  }
+}
+
+/** 把 pose 从 from 往目标姿势插值 k（0 = 保持 from，1 = 目标）。急停时用来抹掉姿势突变。 */
+function blendPuppetPose(from, pose, k) {
+  for (const key of PUPPET_KEYS) {
+    const a = from[key];
+    const b = pose[key];
+    b[0] = a[0] + (b[0] - a[0]) * k;
+    b[1] = a[1] + (b[1] - a[1]) * k;
+    b[2] = a[2] + (b[2] - a[2]) * k;
+  }
+}
+
 function setPuppet(pose, key, x, y, z) {
   const row = pose[key];
   row[0] = x;
@@ -786,12 +807,217 @@ function sampleCharge(phase, pose) {
 }
 
 /**
+ * 冲刺急停后的「贴脸定格」。头正对玩家、微微上仰，脸占满画面正中，
+ * 手臂在身侧张开、一条腿还半屈着，像刚砸在你面前停住。
+ * 这一副姿势一直保持到下一次瞬移：不再回到随机静止姿势——那副姿势的头是歪的、低着的，
+ * 停在玩家脸前时既没有冲击感，也会让刚加的咧嘴弧线看不见。
+ */
+function sampleFaceOff(pose) {
+  zeroPuppetPose(pose);
+  // 上身压在限位上的前倾（body 只能 ±0.04，剩下的靠头给）
+  setPuppet(pose, 'body', 0.04, 0, 0);
+  // 一前一后：右腿还半屈着、左腿撑直，重心落在两脚之间
+  setPuppet(pose, 'legL', -0.3, 0, 0.1);
+  setPuppet(pose, 'shinL', 0.16, 0, 0);
+  setPuppet(pose, 'footL', -0.1, 0, -0.05);
+  setPuppet(pose, 'legR', 0.26, 0, -0.08);
+  setPuppet(pose, 'shinR', 0.62, 0, 0);
+  setPuppet(pose, 'footR', -0.34, 0, 0.04);
+  // 手臂张开在身侧，掌心朝玩家
+  setPuppet(pose, 'armL', -0.18, 0, -0.62);
+  setPuppet(pose, 'foreL', -0.3, 0, 0.5);
+  setPuppet(pose, 'handL', 0.5, 0.3, 0.4);
+  setPuppet(pose, 'armR', -0.18, 0, 0.62);
+  setPuppet(pose, 'foreR', -0.3, 0, -0.5);
+  setPuppet(pose, 'handR', -0.45, -0.3, -0.4);
+  // 头：不歪不偏，负的 x 是抬头——玩家眼睛比它的头顶低一点点，正对着看进你眼里
+  setPuppet(pose, 'head', -0.22, 0, 0);
+  return 0;
+}
+
+/**
+ * 人偶脸上的「简笔画」：两个黑点当眼睛、一条弧线当嘴 —— 没有别的五官。
+ *
+ * 两样都做成「墨写在纸上、还微微往下渗」的样子，四层叠出来：
+ *   1) 实心笔触：不透明的近黑色 0x140805，`MeshBasicMaterial` 不吃场景灯，灯灭了也看得见；
+ *   2) 湿边：同一走向、放大 1.8–2 倍、透明度 0.2 出头，并且**整体往下压 1.5 mm**
+ *      —— 墨洇进纸里各向都有，但受重力往下更多；压下去才像「渗」，不压就是「发光」；
+ *   3) 外沿淡晕：再放大到 2.6–2.9 倍、往下压 4–6 mm、只有 0.09，把湿边的硬边化开，
+ *      于是从笔触往外是「黑 → 深灰 → 淡灰 → 脸皮」的连续过渡，而不是一圈描边；
+ *   4) 墨滴：右眼下面一滴、嘴下面两滴（一长一短，位置不对称才有手画味），
+ *      从笔触最低点往脸下挂 8–15 mm，越往下越细，末端一颗小珠子。
+ *
+ * 晕和墨滴都压扁/贴着脸上：脸是鼓的，横放的球外沿会被脸皮切出一条硬边，
+ * 所以眼睛的晕用射线采样铺成扇形（patch），嘴的晕跟着弧线走成管子（stroke）。
+ *
+ * 所有点都沿 -Z 打射线贴到脸皮上：脸是鼓的，笔画不能浮在脸前面也不能陷进脸里。
+ * 用细管子而不是 Line：Line 永远是 1 像素，贴脸时看不清笔触。
+ */
+function addPuppetFace(head) {
+  head.updateWorldMatrix(true, true);
+  const meshes = [];
+  head.traverse((o) => { if (o.isMesh && o.geometry && !o.userData.puppetFace) meshes.push(o); });
+  if (!meshes.length) return;
+  // 头骨局部空间的包围盒（与头此刻的世界朝向无关）
+  const toLocal = head.matrixWorld.clone().invert();
+  const mn = new THREE.Vector3(Infinity, Infinity, Infinity);
+  const mx = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+  const m = new THREE.Matrix4();
+  const p = new THREE.Vector3();
+  for (const mesh of meshes) {
+    const geo = mesh.geometry;
+    if (!geo.boundingBox) geo.computeBoundingBox();
+    const bb = geo.boundingBox;
+    m.multiplyMatrices(toLocal, mesh.matrixWorld);
+    for (let k = 0; k < 8; k++) {
+      p.set(k & 1 ? bb.max.x : bb.min.x, k & 2 ? bb.max.y : bb.min.y, k & 4 ? bb.max.z : bb.min.z);
+      p.applyMatrix4(m);
+      mn.min(p);
+      mx.max(p);
+    }
+  }
+  const size = new THREE.Vector3().subVectors(mx, mn);
+  if (!(size.x > 0.02 && size.y > 0.02 && size.z > 0.01)) return;
+
+  const cx = (mn.x + mx.x) / 2;
+  const raycaster = new THREE.Raycaster();
+  const dir = new THREE.Vector3(0, 0, -1).transformDirection(head.matrixWorld).normalize();
+  const origin = new THREE.Vector3();
+  const hit = new THREE.Vector3();
+  let lastZ = mx.z;
+  /** 脸上 (x, y) 那一点的 z（头骨局部坐标）。射线打空就沿用上一次的着点。 */
+  const surfaceZ = (x, y) => {
+    const yy = Math.max(mn.y + 0.006, Math.min(y, mx.y - 0.006));
+    origin.set(x, yy, mx.z + 0.3).applyMatrix4(head.matrixWorld);
+    raycaster.set(origin, dir);
+    const hits = raycaster.intersectObjects(meshes, false);
+    if (hits.length) {
+      head.worldToLocal(hit.copy(hits[0].point));
+      lastZ = Math.min(hit.z, mx.z);
+    }
+    return lastZ;
+  };
+
+  const INK = 0x140805;
+  const inkCore = () => new THREE.MeshBasicMaterial({ color: INK });
+  const inkBleed = (opacity) => new THREE.MeshBasicMaterial({
+    color: INK, transparent: true, opacity, depthWrite: false,
+  });
+  const mark = (mesh, name) => {
+    mesh.name = name;
+    mesh.userData.puppetFace = true;
+    head.add(mesh);
+    return mesh;
+  };
+  /** 沿一串点铺一根管子。 */
+  const stroke = (points, radius, material, name, seg = 20) => {
+    const curve = new THREE.CatmullRomCurve3(points);
+    return mark(new THREE.Mesh(new THREE.TubeGeometry(curve, seg, radius, 6, false), material), name);
+  };
+  /** 一团墨：球压扁贴脸。 */
+  const blob = (pos, radius, material, name, flat = 0.42) => {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 12, 10), material);
+    mesh.position.copy(pos);
+    mesh.scale.z = flat;
+    return mark(mesh, name);
+  };
+  /**
+   * 一团贴着脸皮的晕：按射线逐点取 z 铺成两个同心环，比压扁的球服帖
+   * （球的外沿会被脸皮切出一条硬边）。顶点色带 alpha：中心 1、外沿 0，
+   * 于是边界是渐变不是一圈描边 —— 墨往四周洇开该是这个样子。
+   */
+  const patch = (x, y, rx, ry, material, name, dz = 0.0013) => {
+    const seg = 16;
+    const pos = [];
+    const col = [];
+    const push = (px, py, ca) => {
+      pos.push(px, py, surfaceZ(px, py) + dz);
+      col.push(1, 1, 1, ca);
+    };
+    push(x, y, 1);
+    for (let i = 0; i < seg; i++) {
+      const a = (i / seg) * Math.PI * 2;
+      push(x + Math.cos(a) * rx * 0.5, y + Math.sin(a) * ry * 0.5, 1);
+    }
+    for (let i = 0; i < seg; i++) {
+      const a = (i / seg) * Math.PI * 2;
+      push(x + Math.cos(a) * rx, y + Math.sin(a) * ry, 0);
+    }
+    const idx = [];
+    for (let i = 0; i < seg; i++) {
+      const b = 1 + i, b2 = 1 + ((i + 1) % seg);
+      const c = 1 + seg + i, c2 = 1 + seg + ((i + 1) % seg);
+      idx.push(0, b, b2);
+      idx.push(b, c, c2, b, c2, b2);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+    geo.setIndex(idx);
+    material.vertexColors = true;
+    return mark(new THREE.Mesh(geo, material), name);
+  };
+  /** 一滴往下挂的墨：贴着脸上的着点往下走，末端一颗珠子。 */
+  const drip = (x, y, len, drift, radius = size.x * 0.011) => {
+    const points = [];
+    for (const f of [0, 0.5, 1]) {
+      const px = x + drift * f;
+      const py = y - len * f;
+      points.push(new THREE.Vector3(px, py, surfaceZ(px, py) + 0.0016));
+    }
+    stroke(points, radius, inkBleed(0.55), 'PuppetInkDrip', 12);
+    const tip = points[2];
+    blob(new THREE.Vector3(tip.x, tip.y - radius * 0.5, tip.z + 0.0002),
+      radius * 1.5, inkBleed(0.6), 'PuppetInkDrip', 0.5);
+  };
+
+  // ── 嘴：一条两端微微上翘的弧线，横跨脸宽的 50%，位置在下巴往上 28% ──
+  const half = size.x * 0.25;
+  const baseY = mn.y + size.y * 0.28;
+  const lift = size.y * 0.085;
+  const N = 9;
+  const arc = [];
+  const arcY = (t) => baseY + lift * t * t;
+  for (let i = 0; i < N; i++) {
+    const t = (i / (N - 1)) * 2 - 1;
+    const x = cx + t * half;
+    arc.push(new THREE.Vector3(x, arcY(t), surfaceZ(x, arcY(t)) + 0.0015));
+  }
+  stroke(arc, 0.0045, inkCore(), 'PuppetSmile', 24);
+  // 湿边：紧贴笔触，往下压 1.6 mm
+  stroke(arc.map((q) => new THREE.Vector3(q.x, q.y - 0.0016, q.z + 0.0009)),
+    0.0092, inkBleed(0.26), 'PuppetSmileBleed', 24);
+  // 外沿淡晕：再往下压 6 mm、铺到 12 mm 宽，只有 0.09 —— 硬边化开，墨像是顺着重力洇下去
+  stroke(arc.map((q) => new THREE.Vector3(q.x, q.y - 0.0062, q.z + 0.0004)),
+    0.0118, inkBleed(0.09), 'PuppetSmileFringe', 24);
+  for (const [t, len, drift] of [[-0.28, 0.014, 0.0007], [0.12, 0.0085, -0.0005]]) {
+    drip(cx + t * half, arcY(t), len, drift);
+  }
+
+  // ── 眼睛：两个黑点，在下巴往上 66% 处、左右各偏脸宽 17% ──
+  const eyeY = mn.y + size.y * 0.66;
+  const eyeDx = size.x * 0.17;
+  const eyeR = Math.max(0.0045, size.x * 0.036);
+  for (const s of [-1, 1]) {
+    const ex = cx + s * eyeDx;
+    const ez = surfaceZ(ex, eyeY);
+    patch(ex, eyeY - 0.0042, eyeR * 3.2, eyeR * 2.8, inkBleed(0.12), 'PuppetEyeFringe');
+    patch(ex, eyeY - 0.0016, eyeR * 2.2, eyeR * 1.95, inkBleed(0.28), 'PuppetEyeBleed');
+    blob(new THREE.Vector3(ex, eyeY, ez + 0.0013), eyeR, inkCore(), 'PuppetEye', 0.4);
+  }
+  // 只挂一边：两只眼都挂墨滴会像在流眼泪，一边才是「刚写上去还没干」
+  drip(cx + eyeDx - eyeR * 0.3, eyeY - eyeR * 0.9, 0.015, 0.0006, size.x * 0.0095);
+}
+
+/**
  * 红色人偶瞬移惊吓异常。外形用 assets/models/puppet_v03.glb（木人偶），
  * 脚底在本地 Y=0。瞬移和冲刺的时机不变。
  * - 每 4 次灯灭触发一次瞬移
  * - 第 3/6/9… 次瞬移为"冲刺贴脸"：从玩家视野前方约 2m 处以 3.4m/s 冲向玩家面前急停
  * - 不冲刺时姿势不动。每次瞬移到新位置才换下一副静止姿势
- * - 冲刺时支撑脚踩地，另一条腿屈膝前摆，停下后停在这次换好的姿势上
+ * - 冲刺时支撑脚踩地，另一条腿屈膝前摆，急停后定格成「贴脸」姿势：头正对玩家、脸占满画面
+ * - 脸上是简笔画：两个黑点当眼睛 + 一条两端上翘的弧线当嘴，笔画外还有墨晕和
+ *   往下挂的墨滴（见 addPuppetFace），冲刺贴脸时正对着玩家
  * - 躯干不跟着玩家转。只有头在脖子限度内转向玩家
  */
 function createRedDoll() {
@@ -825,6 +1051,8 @@ function createRedDoll() {
     limbs.handR = bound.hands[1] ?? null;
     limbs.head = bound.head ?? null;
     limbs.body = bound.body ?? null;
+    // 脸上的简笔画：两个黑点当眼睛、一条弧线当嘴，笔画都带墨晕和往下挂的墨滴
+    if (limbs.head) addPuppetFace(limbs.head);
     document.body.dataset.puppetModel = 'glb';
   }).catch((error) => {
     console.warn('木偶 GLB 加载失败，第 4 关人偶没有模型。', error);
@@ -859,6 +1087,13 @@ function createRedDoll() {
   let chargeMaxDist = 0;          // 总距离
   const CHARGE_SPEED = 3.4;       // m/s 冲刺速度
   const LAUNCH_DIST = 1.8;        // 出现距离玩家多远
+  const FACE_DIST = 0.42;         // 急停后停在离玩家眼睛多近：脸要占满画面
+  const FACE_SETTLE = 0.14;       // 急停时从冲刺姿势过渡到贴脸姿势的时间（秒）
+
+  // 贴脸定格：冲刺停在玩家面前后一直保持，直到下一次瞬移
+  let faceOff = false;
+  let faceOffT = 0;
+  const faceFrom = makePuppetPose();   // 急停那一帧的姿势，用来做过渡
 
   // 每次瞬移换一副静止姿势，不冲刺时就停在这一副上
   let holdI = -1;
@@ -877,6 +1112,7 @@ function createRedDoll() {
 
   function advanceHold(env) {
     holdI = (holdI + 1) % PUPPET_HOLDS.length;
+    faceOff = false;          // 换了姿势/位置，贴脸定格结束
     woodClick(env);
   }
 
@@ -932,10 +1168,13 @@ function createRedDoll() {
         const step = CHARGE_SPEED * dt;
         const remaining = chargeMaxDist * (1 - chargeProgress);
         if (step >= remaining) {
-          // 到达目标（玩家脸前）
+          // 到达目标（玩家脸前）：从这里开始定格，先记下冲刺最后那一帧的姿势做过渡
           group.position.set(chargeTargetX, groundY, chargeTargetZ);
           charging = false;
           chargeProgress = 1;
+          copyPuppetPose(pose, faceFrom);
+          faceOff = true;
+          faceOffT = 0;
         } else {
           chargeProgress += step / chargeMaxDist;
           const t = chargeProgress;
@@ -987,9 +1226,9 @@ function createRedDoll() {
             // 获取玩家视角朝向的 yaw 角度（弧度）
             const playerYaw = env.playerYaw ?? 0;
 
-            const FINAL_DISTANCES = [0.55, 0.65, 0.75, 0.85, 1.0, 1.2, 1.5];
+            const FINAL_DISTANCES = [FACE_DIST, 0.65, 0.75, 0.85, 1.0, 1.2, 1.5];
             // 以玩家视角方向为中心，小角度偏移，确保正面冲来
-            const angleOffsets = [0, 0.3, -0.3, 0.6, -0.6, 0.9, -0.9, 1.2, -1.2];
+            const angleOffsets = [0, 0.18, -0.18, 0.3, -0.3, 0.6, -0.6, 0.9, -0.9, 1.2, -1.2];
             for (const dist of FINAL_DISTANCES) {
               for (const aOff of angleOffsets) {
                 const angle = playerYaw - aOff;
@@ -1087,6 +1326,18 @@ function createRedDoll() {
       }
 
       // ===== 3. 提线动作。刚起步的冲刺只摆出第一步。头单独转向玩家 =====
+      if (faceOff) {
+        // 冲刺急停：贴脸定格。前 0.14 秒从冲刺姿势插值过来，抹掉姿势突变
+        faceOffT += dt;
+        const k = Math.min(1, faceOffT / FACE_SETTLE);
+        sampleFaceOff(pose);
+        if (k < 1) blendPuppetPose(faceFrom, pose, k);
+        applyPuppetPose(limbs, pose);
+        group.position.y = groundY;
+        lookHead(px, pz);
+        group.userData.puppetAct = 'faceoff';
+        return;
+      }
       if (charging) {
         sampleCharge(0, pose);
         applyPuppetPose(limbs, pose);
@@ -1521,16 +1772,97 @@ function createFleshWall() {
   buildBackWall();
 
   // ---- 垂直向下流淌的血液（随机分布在整个天花板下，贴墙处密度增大） ----
+  // 这两份材质由所有血滴共用（原来每片血滴都 clone 一份，只为改 opacity，
+  // 结果 988 片 = 988 次绘制 + 988 个材质）。现在每片的透明度改由顶点色 alpha 承载：
+  // three 的 USE_COLOR_ALPHA 是 `diffuseColor *= vColor`，乘在 material.opacity 之后，
+  // 所以 vertexColors 打开、material.opacity 保持 1，效果与原 material.opacity = a 完全等价。
   const dripMatRed = new THREE.MeshBasicMaterial({
     color: 0x8a0c10,
     transparent: true,
     side: THREE.DoubleSide,
+    vertexColors: true,
   });
   const darkDripMat = new THREE.MeshBasicMaterial({
     color: 0x3a0508,
     transparent: true,
     side: THREE.DoubleSide,
+    vertexColors: true,
   });
+
+  // 血滴合批缓冲：摊平的 7 元组 (x, y, z, w, h, rotY, alpha)。
+  // 用数组而不是对象，是为了不在 988 次循环里造 988 个临时对象。
+  const redQuads = [];
+  const darkQuads = [];
+
+  function emitQuad(list, x, y, z, w, h, rotY, alpha) {
+    list.push(x, y, z, w, h, rotY, alpha);
+  }
+
+  /**
+   * 把 emitQuad 攒下的四边形烘成一个 BufferGeometry（一次绘制）。
+   * 顶点的排布与 THREE.PlaneGeometry(w, h) 完全一致（顺序 -x+y / +x+y / -x-y / +x-y，
+   * 索引 0,2,1 / 2,3,1），因此法线、朝向、剔除行为都与改动前相同。
+   */
+  function bakeQuads(list, material, name) {
+    const n = list.length / 7;
+    if (n === 0) return null;
+    const pos = new Float32Array(n * 12);
+    const nor = new Float32Array(n * 12);
+    const uv = new Float32Array(n * 8);
+    const col = new Float32Array(n * 16);
+    const idx = new Uint32Array(n * 6);
+    for (let i = 0; i < n; i++) {
+      const o = i * 7;
+      const x = list[o];
+      const y = list[o + 1];
+      const z = list[o + 2];
+      const hw = list[o + 3] / 2;
+      const hh = list[o + 4] / 2;
+      const ry = list[o + 5];
+      const a = list[o + 6];
+      const c = Math.cos(ry);
+      const s = Math.sin(ry);
+      for (let k = 0; k < 4; k++) {
+        const lx = (k === 0 || k === 2) ? -hw : hw;
+        const ly = (k < 2) ? hh : -hh;
+        const vi = (i * 4 + k) * 3;
+        // 绕 Y 轴旋转：x' = c*lx，z' = -s*lx（局部 z 恒为 0）
+        pos[vi] = x + c * lx;
+        pos[vi + 1] = y + ly;
+        pos[vi + 2] = z - s * lx;
+        nor[vi] = s;
+        nor[vi + 1] = 0;
+        nor[vi + 2] = c;
+        const ui = (i * 4 + k) * 2;
+        uv[ui] = (k === 0 || k === 2) ? 0 : 1;
+        uv[ui + 1] = (k < 2) ? 1 : 0;
+        const ci = (i * 4 + k) * 4;
+        col[ci] = 1;
+        col[ci + 1] = 1;
+        col[ci + 2] = 1;
+        col[ci + 3] = a;
+      }
+      const base = i * 4;
+      const io = i * 6;
+      idx[io] = base;
+      idx[io + 1] = base + 2;
+      idx[io + 2] = base + 1;
+      idx[io + 3] = base + 2;
+      idx[io + 4] = base + 3;
+      idx[io + 5] = base + 1;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geo, material);
+    mesh.name = name + '×' + n;
+    group.add(mesh);
+    return mesh;
+  }
 
   /**
    * 在教室天花板下随机生成垂直血条。
@@ -1570,35 +1902,21 @@ function createFleshWall() {
       const rotY = rng() * Math.PI; // 随机朝向
 
       // 十字交叉的两个平面
-      const geo = new THREE.PlaneGeometry(stripW, stripH);
-      const m1 = new THREE.Mesh(geo, dripMatRed.clone());
-      m1.position.set(x, yPos, z);
-      m1.rotation.y = rotY;
-      m1.material.opacity = opacity;
-      group.add(m1);
-
-      const m2 = new THREE.Mesh(geo, dripMatRed.clone());
-      m2.position.set(x, yPos, z);
-      m2.rotation.y = rotY + Math.PI / 2;
-      m2.material.opacity = opacity * 0.7;
-      group.add(m2);
+      emitQuad(redQuads, x, yPos, z, stripW, stripH, rotY, opacity);
+      emitQuad(redQuads, x, yPos, z, stripW, stripH, rotY + Math.PI / 2, opacity * 0.7);
 
       // 末端变淡延伸
+      // 注意：这个 if 的左操作数 rng() 每次都会执行（短路求值），改写时必须保留，
+      // 否则随机序列整体错位、整个第五关的布局都会跳变。
       if (rng() > 0.5 && stripH > 1.0) {
         const extH = 0.15 + rng() * 0.4;
         const extW = stripW * (0.3 + rng() * 0.5);
-        const extGeo = new THREE.PlaneGeometry(extW, extH);
         const ey = yPos - stripH / 2 - extH / 2;
-        const e1 = new THREE.Mesh(extGeo, dripMatRed.clone());
-        e1.position.set(x + (rng() - 0.5) * 0.03, ey, z);
-        e1.rotation.y = rotY;
-        e1.material.opacity = opacity * 0.4;
-        group.add(e1);
-        const e2 = new THREE.Mesh(extGeo, dripMatRed.clone());
-        e2.position.set(x + (rng() - 0.5) * 0.03, ey, z);
-        e2.rotation.y = rotY + Math.PI / 2;
-        e2.material.opacity = opacity * 0.3;
-        group.add(e2);
+        // 两片延伸各自取一次 rng()（原代码就是两次独立调用，不能合并成一个变量）
+        const ex1 = x + (rng() - 0.5) * 0.03;
+        const ex2 = x + (rng() - 0.5) * 0.03;
+        emitQuad(redQuads, ex1, ey, z, extW, extH, rotY, opacity * 0.4);
+        emitQuad(redQuads, ex2, ey, z, extW, extH, rotY + Math.PI / 2, opacity * 0.3);
       }
     }
 
@@ -1620,17 +1938,16 @@ function createFleshWall() {
       const stainW = 0.04 + rng() * 0.1;
       const yPos = yCeil - 0.09 - rng() * 0.35;
       const sRotY = rng() * Math.PI;
-      const s1 = new THREE.Mesh(new THREE.PlaneGeometry(stainW, stainH), darkDripMat.clone());
-      s1.position.set(x, yPos, z);
-      s1.rotation.y = sRotY;
-      s1.material.opacity = 0.3 + rng() * 0.3;
-      group.add(s1);
-      const s2 = new THREE.Mesh(new THREE.PlaneGeometry(stainW * 0.5, stainH * 0.5), darkDripMat.clone());
-      s2.position.set(x, yPos, z);
-      s2.rotation.y = sRotY + Math.PI / 2;
-      s2.material.opacity = 0.2 + rng() * 0.2;
-      group.add(s2);
+      // 两次 opacity 取值的顺序必须与改写前一致（s1 在前、s2 在后）
+      const s1a = 0.3 + rng() * 0.3;
+      const s2a = 0.2 + rng() * 0.2;
+      emitQuad(darkQuads, x, yPos, z, stainW, stainH, sRotY, s1a);
+      emitQuad(darkQuads, x, yPos, z, stainW * 0.5, stainH * 0.5, sRotY + Math.PI / 2, s2a);
     }
+
+    // 988 片血滴 / 血渍 → 2 次绘制
+    bakeQuads(redQuads, dripMatRed, 'bloodDripsRed');
+    bakeQuads(darkQuads, darkDripMat, 'bloodStainsDark');
   }
   // 生成约 300 条随机血条（密度在贴墙处自然增大）
   addRandomDrips(300, xMin, xMax, zMin, zMax);

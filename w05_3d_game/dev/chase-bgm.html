@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>追逐伴奏试听 · 四份候选</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 28px 32px 40px;
+        background: radial-gradient(1200px 600px at 50% -10%, #1a1216 0%, #0a0709 55%, #060405 100%);
+        color: #e8e2dd;
+        font: 14px/1.7 "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+      }
+      h1 { margin: 0 0 4px; font-size: 19px; letter-spacing: 0.06em; font-weight: 600; }
+      .sub { margin: 0 0 22px; color: #8d827d; font-size: 12.5px; }
+      .sub code { color: #c8b6ab; background: #171012; padding: 1px 5px; border-radius: 3px; }
+
+      .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 20px; }
+      @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+      .card {
+        position: relative;
+        text-align: left;
+        padding: 14px 15px 12px;
+        border: 1px solid #2a1f22;
+        border-radius: 8px;
+        background: linear-gradient(180deg, #15100f 0%, #0d0a0b 100%);
+        color: inherit;
+        font: inherit;
+        cursor: pointer;
+        transition: border-color 0.15s, transform 0.12s, background 0.15s;
+      }
+      .card:hover { border-color: #5c3a34; transform: translateY(-1px); }
+      .card.on { border-color: #b8362c; background: linear-gradient(180deg, #24100f 0%, #120a0a 100%); box-shadow: 0 0 0 1px #b8362c inset, 0 6px 26px -12px #ff3a2a; }
+      .card .id {
+        display: inline-block; margin-bottom: 6px;
+        font-size: 11px; letter-spacing: 0.16em; color: #b8362c; text-transform: uppercase;
+      }
+      .card .name { display: block; font-size: 15.5px; font-weight: 600; margin-bottom: 4px; }
+      .card .brief { display: block; color: #9a8d88; font-size: 12px; line-height: 1.55; }
+      .card .ref { display: block; margin-top: 7px; color: #6d625f; font-size: 11.5px; }
+      .card .bpm { position: absolute; top: 12px; right: 13px; color: #5c514e; font-size: 11px; font-variant-numeric: tabular-nums; }
+
+      .panel {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 18px;
+        padding: 14px 16px; border: 1px solid #241b1d; border-radius: 8px; background: #0c0809;
+      }
+      .panel label { display: flex; align-items: center; gap: 9px; color: #9a8d88; font-size: 12.5px; }
+      input[type="range"] { width: 150px; accent-color: #b8362c; }
+      output { min-width: 34px; color: #d8c9c2; font-variant-numeric: tabular-nums; }
+
+      button.act {
+        padding: 8px 16px; border: 1px solid #3a2a2c; border-radius: 6px;
+        background: #171011; color: #e8e2dd; font: inherit; cursor: pointer;
+      }
+      button.act:hover { border-color: #6b3b34; }
+      button.act.primary { border-color: #b8362c; background: #2a1210; }
+      button.act.primary:hover { background: #3a1714; }
+      button.act[aria-pressed="true"] { border-color: #b8362c; color: #ff8b7a; }
+
+      .meter { margin-top: 18px; display: flex; align-items: center; gap: 12px; color: #6d625f; font-size: 12px; }
+      .bar { flex: 1; height: 6px; border-radius: 3px; background: #1a1214; overflow: hidden; }
+      .bar > i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, #7a2a20, #ff3a2a); transition: width 0.06s linear; }
+
+      .hint { margin-top: 22px; color: #6d625f; font-size: 12px; line-height: 1.8; }
+      .hint b { color: #a89892; font-weight: 600; }
+      .hint code { color: #c8b6ab; background: #171012; padding: 1px 5px; border-radius: 3px; }
+    </style>
+  </head>
+  <body>
+    <h1>追逐伴奏 · 四份候选</h1>
+    <p class="sub">
+      全部是程序化合成（振荡器 + 噪声 + 滤波），没有采样任何外部音乐，所以没有版权问题。
+      点任意一张卡就是换那一首，正在放的话会直接切过去。
+    </p>
+
+    <div class="grid" id="tracks"></div>
+
+    <div class="panel">
+      <button class="act primary" id="toggle" type="button">▶ 播放</button>
+      <label>强度 <input type="range" id="intensity" min="0" max="100" value="60" /><output id="intensityOut">0.60</output></label>
+      <label>音量 <input type="range" id="volume" min="0" max="100" value="70" /><output id="volumeOut">0.70</output></label>
+      <button class="act" id="use" type="button">设为本局伴奏</button>
+    </div>
+
+    <div class="meter">
+      <span>电平</span>
+      <div class="bar"><i id="level"></i></div>
+      <span id="status">未开始</span>
+    </div>
+
+    <p class="hint">
+      <b>强度</b>就是游戏里「怪物离你多近」——拉满等于贴着背跑：BPM 更高、滤波更开、每一下更响。<br />
+      <b>设为本局伴奏</b>会把选择写进 <code>localStorage: wf-chase</code>，之后进游戏就放这一份（也可以<b>右键复制对应链接</b>）。<br />
+      <b>没挑过的时候</b>游戏放的是 <code>3</code>（C · 锤击）；这一页跟着显示同一份，点开听到的就是进游戏听到的。
+      地址栏参数：<code>?chase=1</code>（A 脉搏）、<code>2</code>（B 锯弦）、<code>3</code>（C 锤击）、<code>4</code>（D 耳语）、<code>0</code>（不放伴奏）。<br />
+      想听游戏里的实际效果：<code>?devLevel=finalechase</code> 直接跳到追逐段（不加 <code>chase</code> 就是这一页选中的那份）。
+    </p>
+
+    <script type="module">
+      import { ChaseMusic, CHASE_TRACKS, seeded } from '../src/chasemusic.js';
+
+      const params = new URLSearchParams(location.search);
+      // 默认那份和游戏里保持一致（src/audio.js 的 DEFAULT_CHASE_TRACK = 3 = C · 锤击）。
+      // 优先级：?track= → 上次点过「设为本局伴奏」的那份 → 默认。存的是 0（关）时试听页
+      // 仍然放默认那份——「关」在试听页里没有意义。
+      const DEFAULT_TRACK = 3;
+      const clampTrack = (n) => {
+        const v = Math.round(Number(n));
+        return Number.isFinite(v) && v >= 1 && v <= CHASE_TRACKS.length ? v : DEFAULT_TRACK;
+      };
+      const stored = (() => {
+        try {
+          return localStorage.getItem('wf-chase');
+        } catch {
+          return null;
+        }
+      })();
+      let index = clampTrack(params.get('track') ?? (Number(stored) > 0 ? stored : DEFAULT_TRACK));
+
+      let ctx = null;
+      let master = null;
+      let analyser = null;
+      let music = null;
+      let playing = false;
+
+      const el = (id) => document.getElementById(id);
+      const grid = el('tracks');
+      const toggleBtn = el('toggle');
+      const useBtn = el('use');
+      const levelBar = el('level');
+      const statusText = el('status');
+
+      // ── 卡片 ────────────────────────────────────────────────────────────
+      const cards = CHASE_TRACKS.map((t, i) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'card';
+        btn.dataset.index = String(i + 1);
+        btn.innerHTML = `
+          <span class="bpm">${t.bpm[0]}–${t.bpm[1]} BPM</span>
+          <span class="id">TRACK ${String.fromCharCode(65 + i)}</span>
+          <span class="name">${t.name}</span>
+          <span class="brief">${t.brief}</span>
+          <span class="ref">${t.ref}</span>`;
+        btn.addEventListener('click', () => {
+          index = i + 1;
+          paint();
+          if (!playing) start();
+          else {
+            music.setTrack(index);
+            statusText.textContent = `播放中：${CHASE_TRACKS[index - 1].name}`;
+          }
+        });
+        grid.append(btn);
+        return btn;
+      });
+
+      function paint() {
+        cards.forEach((c, i) => c.classList.toggle('on', i + 1 === index));
+        toggleBtn.textContent = playing ? '■ 停止' : '▶ 播放';
+        toggleBtn.setAttribute('aria-pressed', playing ? 'true' : 'false');
+      }
+
+      // ── 音频图 ──────────────────────────────────────────────────────────
+      function ensureCtx() {
+        if (ctx) return;
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        ctx = new Ctx();
+        master = ctx.createGain();
+        master.gain.value = Number(el('volume').value) / 100;
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        master.connect(analyser);
+        analyser.connect(ctx.destination);
+        music = new ChaseMusic(ctx, master);
+        music.setTrack(index);
+        music.setIntensity(Number(el('intensity').value) / 100);
+      }
+
+      function start() {
+        ensureCtx();
+        if (ctx.state === 'suspended') ctx.resume();
+        music.setTrack(index);
+        music.start();
+        playing = true;
+        statusText.textContent = `播放中：${CHASE_TRACKS[index - 1].name}`;
+        paint();
+      }
+
+      function stop() {
+        if (music) music.stop(0.35);
+        playing = false;
+        statusText.textContent = '已停止';
+        paint();
+      }
+
+      toggleBtn.addEventListener('click', () => (playing ? stop() : start()));
+
+      el('intensity').addEventListener('input', (e) => {
+        const v = Number(e.target.value) / 100;
+        el('intensityOut').textContent = v.toFixed(2);
+        if (music) music.setIntensity(v);
+      });
+
+      el('volume').addEventListener('input', (e) => {
+        const v = Number(e.target.value) / 100;
+        el('volumeOut').textContent = v.toFixed(2);
+        if (master) master.gain.setTargetAtTime(v, ctx.currentTime, 0.05);
+      });
+
+      useBtn.addEventListener('click', () => {
+        try {
+          localStorage.setItem('wf-chase', String(index));
+          statusText.textContent = `已设为：${CHASE_TRACKS[index - 1].name}（进游戏生效）`;
+        } catch {
+          statusText.textContent = '这个浏览器不让写 localStorage';
+        }
+      });
+
+      // ── 调度 + 电平表 ───────────────────────────────────────────────────
+      const buf = new Float32Array(1024);
+      let peak = 0;
+      function frame() {
+        requestAnimationFrame(frame);
+        if (music) music.update();
+        if (!analyser) return;
+        analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i += 1) sum += buf[i] * buf[i];
+        const rms = Math.sqrt(sum / buf.length);
+        peak = Math.max(rms, peak * 0.90);
+        levelBar.style.width = `${Math.min(100, peak * 240).toFixed(1)}%`;
+      }
+      frame();
+      paint();
+      document.body.dataset.preview = 'ok';
+
+      // 给自动化核对用：?autoplay=1 直接起播（浏览器不给手势就静音跑）
+      if (params.get('autoplay') === '1') start();
+      window.__chasePreview = {
+        start,
+        stop,
+        tracks: CHASE_TRACKS.map((t) => ({ id: t.id, name: t.name })),
+        seeded: (n) => seeded(n)(),
+        info: () => (music ? music.info() : null),
+      };
+    </script>
+  </body>
+</html>

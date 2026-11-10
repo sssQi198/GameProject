@@ -29,7 +29,10 @@ const MUSIC_GAIN_MAX = 1.0;     // 音乐增益上限，防止与其它层叠加
 let proxOverlay = null;         // 惰性创建的红光遮罩层
 let proxDisplay = 0;            // 平滑后的亲密度（越近越大）
 
-/** 与 audio.js setMood 的音乐音量保持一致：menu 0.12 / chase 0.23 / 其余 0.18。 */
+/**
+ * 与 audio.js setMood 的音乐音量保持一致：menu 0.12 / 其余 0.18。
+ * （chase 那一档已作废：第二十一轮起追逐段不再播默认 BGM，只放追逐伴奏。）
+ */
 function musicBase(mood) {
   if (mood === 'menu') return 0.12;
   if (mood === 'chase') return 0.23;
@@ -40,10 +43,22 @@ function musicBase(mood) {
 function stepMusicGain(env, p) {
   const audio = env.audio;
   if (!audio?.musicGain || !audio.ctx) return; // 尚未 unlock，还没有音乐节点
+  // 第二十一轮：audio.js 在追逐一开始就把默认 BGM 真的 pause 了（musicOff），
+  // 之后到安全屋、结局都不再放。这里每帧 setTargetAtTime 会把音量硬拽回 0.36，
+  // 所以必须先让路：关掉的、正在追逐的，一律按 0 写，别去抬它。
+  if (audio.musicOff || env.mood === 'chase') {
+    audio.musicGain.gain.setTargetAtTime(0.0001, audio.ctx.currentTime, 0.12);
+    return;
+  }
+  // 开场衔接的淡入段：斜坡时间常数由 audio.js 给（setMood 的 musicTau）。
+  // 第二十一轮修过一次坑：原先靠 musicHold 让路，可 restoreMusic() 会把 hold 清掉，
+  // 于是开局那一帧就被这里用 0.08s 拽到满值——听上去是「突然响起」而不是「渐起」。
+  // 现在不靠 hold，改成跟着 audio.musicTau 走：开局传 1.25 就是 1.25 的指数上升。
+  if (audio.musicHold) return;
   let target = musicBase(env.mood) * MUSIC_GAIN_MULT;
   if (env.mood === 'chase') target += p * PROX_MUSIC_ADD;
   target = Math.min(target, MUSIC_GAIN_MAX);
-  audio.musicGain.gain.setTargetAtTime(target, audio.ctx.currentTime, 0.08);
+  audio.musicGain.gain.setTargetAtTime(target, audio.ctx.currentTime, audio.musicTau || 0.08);
 }
 
 /** 屏幕上的红光：越近越浓。用 screen 混合，呈“红色灯光逼近”的加色效果。 */

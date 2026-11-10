@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>同学的脸 · 红眼与尖牙预览</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #05060a; color: #cfd6e2;
+    font: 13px/1.6 "Microsoft YaHei", system-ui, sans-serif;
+    overflow: hidden;
+  }
+  #stage { position: fixed; inset: 0; }
+  canvas { display: block; }
+  #panel {
+    position: fixed; left: 16px; top: 16px; width: 268px; padding: 14px 16px;
+    background: rgba(12, 14, 20, 0.86); border: 1px solid #232a38; border-radius: 10px;
+    backdrop-filter: blur(6px);
+  }
+  #panel h1 { margin: 0 0 2px; font-size: 15px; letter-spacing: 0.02em; }
+  #panel .sub { margin: 0 0 12px; color: #7d879c; font-size: 12px; }
+  .row { margin: 10px 0; }
+  .row label { display: flex; justify-content: space-between; font-size: 12px; color: #9aa5ba; }
+  .row label b { color: #e3e9f5; font-weight: 600; font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #b3202c; }
+  .btns { display: flex; gap: 8px; margin: 12px 0 6px; }
+  button {
+    flex: 1; padding: 7px 0; font: inherit; color: #e7ecf6; cursor: pointer;
+    background: #1a2030; border: 1px solid #2c3547; border-radius: 7px;
+  }
+  button:hover { background: #232c40; }
+  button.on { background: #4a1119; border-color: #8d1f2b; }
+  #info { margin-top: 10px; font-size: 12px; color: #7d879c; }
+  #info b { color: #cfd6e2; font-weight: 600; }
+  #hint { margin-top: 8px; font-size: 11px; color: #5d6577; }
+  .chk { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #9aa5ba; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="panel">
+  <h1>同学 · 红眼与尖牙</h1>
+  <p class="sub">按终局的节奏在脸上点亮，嘴同时咧开</p>
+
+  <div class="row">
+    <label>红眼 <b><span id="eyeVal">0</span>%</b></label>
+    <input id="eye" type="range" min="0" max="100" value="0" />
+  </div>
+  <div class="row">
+    <label>咧嘴 / 尖牙 <b><span id="mouthVal">0</span>%</b></label>
+    <input id="mouth" type="range" min="0" max="100" value="0" />
+  </div>
+  <div class="row">
+    <label>视距 <b><span id="distVal">0.60</span> m</b></label>
+    <input id="dist" type="range" min="30" max="150" value="60" />
+  </div>
+  <div class="btns">
+    <button id="play">播一遍</button>
+    <button id="loop" class="on">循环</button>
+  </div>
+  <div class="btns">
+    <button id="front" class="on">正面</button>
+    <button id="side">侧面 40°</button>
+  </div>
+  <label class="chk"><input id="glow" type="checkbox" checked /> 眼部红光外溢（关掉只看眼睛本体）</label>
+  <div id="info">
+    眼睛 <b id="nEye">–</b> · 尖牙 <b id="nFang">–</b> · 头半径 <b id="nHead">–</b>
+  </div>
+  <div id="hint">拖动滑杆能停在任何一帧；「播一遍」用终局的时间（红眼 0.85 s，咧嘴 1.35 s）。</div>
+</div>
+
+<script type="module">
+import * as THREE from '../vendor/three.module.js';
+import { createSafehouse, SAFEHOUSE } from '../src/safehouse.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+document.getElementById('stage').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05060a);
+scene.fog = null;
+
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.02, 40);
+
+const sh = createSafehouse(scene);
+const info = sh.mateModelInfo();
+sh.setVisible(true);      // 整间屋子默认是隐藏的，进安全屋那一刻才亮
+sh.placeMate(SAFEHOUSE.spawn.x, SAFEHOUSE.spawn.z, 0); // 站进灯底下的位置，脸才看得见
+sh.setMateYaw?.(0);
+sh.setMateVisible(true);
+
+const EYE_T = 0.85;   // 终局第 9 段：红眼 0.05→0.85 s
+const MOUTH_T = 1.35; // 咧嘴 0.55→1.90 s
+const ease = (t) => { const k = Math.min(1, Math.max(0, t)); return k * k * (3 - 2 * k); };
+
+let eyeT = 0;
+let mouthT = 0;
+let playing = false;
+let looping = true;
+let elapsed = 0;
+let dist = 0.60;
+let turn = 0;   // 同学自己绕 Y 轴转的角度，镜头始终在正面
+
+const $ = (id) => document.getElementById(id);
+const eyeSlider = $('eye');
+const mouthSlider = $('mouth');
+
+function applyReveal(eye, mouth) {
+  eyeT = Math.min(1, Math.max(0, eye));
+  mouthT = Math.min(1, Math.max(0, mouth));
+  sh.setReveal(eyeT, mouthT);
+  if (eyeLight) {
+    lightIntensity = eyeLight.intensity;
+    if (!glowOn) eyeLight.intensity = 0;
+  }
+  eyeSlider.value = String(Math.round(eyeT * 100));
+  mouthSlider.value = String(Math.round(mouthT * 100));
+  $('eyeVal').textContent = String(Math.round(eyeT * 100));
+  $('mouthVal').textContent = String(Math.round(mouthT * 100));
+  document.body.dataset.reveal = `${eyeT.toFixed(3)},${mouthT.toFixed(3)}`;
+}
+
+// 终局时间轴 → (眼, 嘴)
+function timeline(t) {
+  return [ease((t - 0.05) / EYE_T), ease((t - 0.55) / MOUTH_T)];
+}
+
+eyeSlider.addEventListener('input', () => {
+  playing = false;
+  applyReveal(eyeSlider.value / 100, mouthT);
+});
+mouthSlider.addEventListener('input', () => {
+  playing = false;
+  applyReveal(eyeT, mouthSlider.value / 100);
+});
+$('play').addEventListener('click', () => { elapsed = 0; playing = true; });
+$('loop').addEventListener('click', () => {
+  looping = !looping;
+  $('loop').classList.toggle('on', looping);
+  if (looping) { elapsed = 0; playing = true; }
+});
+$('dist').addEventListener('input', (ev) => {
+  dist = Number(ev.target.value) / 100;
+  $('distVal').textContent = dist.toFixed(2);
+});
+$('front').addEventListener('click', () => { turn = 0; });
+$('side').addEventListener('click', () => { turn = 0.70; });
+
+$('nEye').textContent = String(info.eyes);
+$('nFang').textContent = String(info.fangs);
+$('nHead').textContent = info.headR.toFixed(3);
+
+// 脸上的红色点光会让整张脸发红，想单看眼睛本体时把它关掉
+let glowOn = true;
+let lightIntensity = 0;
+const eyeLight = (() => {
+  let found = null;
+  sh.group.traverse((o) => {
+    if (!found && o.isPointLight && o.color.getHex() === 0xff2030) found = o;
+  });
+  return found;
+})();
+if (eyeLight) lightIntensity = eyeLight.intensity;
+$('glow').addEventListener('change', (ev) => {
+  glowOn = ev.target.checked;
+  if (eyeLight) eyeLight.intensity = glowOn ? lightIntensity : 0;
+});
+
+// 页面自检用：?reveal=1 直接定格在完全变形的那一帧
+const params = new URLSearchParams(location.search);
+const forced = params.get('reveal');
+const forcedMouth = params.get('mouth');
+const shot = params.get('shot');
+if (params.get('dist')) {
+  dist = Math.min(1.5, Math.max(0.30, Number(params.get('dist'))));
+  $('dist').value = String(Math.round(dist * 100));
+  $('distVal').textContent = dist.toFixed(2);
+}
+if (params.get('yaw')) turn = Number(params.get('yaw'));
+if (params.get('glow') === '0') {
+  glowOn = false;
+  $('glow').checked = false;
+}
+// ?fill=1 是「检视模式」：只有这个页面加的补光，游戏里没有。房间本来就暗，
+// 不加补光的话侧面轮廓和皮肤基本是黑的，看不清模型本身。
+if (params.get('fill') === '1') {
+  const key = new THREE.DirectionalLight(0xfff2e2, 3.2);
+  key.position.set(1.2, 2.0, 3.0);
+  scene.add(key);
+  scene.add(new THREE.AmbientLight(0x8899bb, 0.55));
+}
+
+function layout() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', layout);
+layout();
+
+const headY = info.headY;
+const mateObj = sh.group.children.find((c) => c.name === 'Classmate') ?? sh.group;
+const head = new THREE.Vector3();
+const clock = new THREE.Clock();
+applyReveal(
+  forced === null ? 0 : Number(forced),
+  forcedMouth === null ? (forced === null ? 0 : Number(forced)) : Number(forcedMouth),
+);
+if (forced !== null) { playing = false; looping = false; }
+if (shot === '1') {
+  // 截图模式：把面板收起来，只留脸
+  document.getElementById('panel').style.display = 'none';
+}
+document.body.dataset.rig = `eyes=${info.eyes},fangs=${info.fangs},headR=${info.headR.toFixed(4)}`;
+
+function frame() {
+  const dt = Math.min(0.05, clock.getDelta());
+
+  if (playing) {
+    elapsed += dt;
+    const total = MOUTH_T + 0.55;
+    if (elapsed > total + 0.6) {
+      if (looping) elapsed = 0;
+      else { playing = false; elapsed = total; }
+    }
+    const [e, m] = timeline(elapsed);
+    applyReveal(e, m);
+  }
+
+  // 同学站在安全屋里的某个坐标上，镜头要跟着他的世界坐标走（房间把整层平移过）。
+  sh.setMateYaw(turn);   // 转同学本人，镜头不动，头始终在画面中间
+  mateObj.getWorldPosition(head);
+  head.y += headY - 0.012;
+  camera.position.set(
+    head.x,
+    head.y + 0.024,
+    head.z + dist,
+  );
+  camera.lookAt(head);
+  sh.update(dt);
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+frame();
+
+window.__facePreview = {
+  applyReveal,
+  timeline,
+  rig: () => sh.mateModelInfo(),
+  debug: () => {
+    const wp = mateObj.getWorldPosition(new THREE.Vector3());
+    const centre = new THREE.Vector3(wp.x, headY, wp.z).project(camera);
+    const top = new THREE.Vector3(wp.x, headY + info.headR, wp.z).project(camera);
+    const sx = (centre.x * 0.5 + 0.5) * renderer.domElement.clientWidth;
+    const sy = (-centre.y * 0.5 + 0.5) * renderer.domElement.clientHeight;
+    const px = Math.abs(top.y - centre.y) * 0.5 * renderer.domElement.clientHeight;
+    return {
+      camera: camera.position.toArray().map((v) => +v.toFixed(3)),
+      mateWorld: wp.toArray().map((v) => +v.toFixed(3)),
+      mateVisible: mateObj.visible,
+      groupPos: sh.group.position.toArray(),
+      near: camera.near,
+      children: scene.children.length,
+      drawCalls: renderer.info.render.calls,
+      triangles: renderer.info.render.triangles,
+      canvas: [renderer.domElement.clientWidth, renderer.domElement.clientHeight],
+      headPx: [Math.round(sx), Math.round(sy), Math.round(px)],
+    };
+  },
+};
+</script>
+</body>
+</html>
