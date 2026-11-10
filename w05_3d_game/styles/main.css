@@ -237,8 +237,8 @@ body { min-width: 320px; }
   font-size: calc(17 * var(--u));
 }
 
-/* 图片按钮：Start / Watch Demo / Mute */
-.ui-btn, .ui-mute {
+/* 图片按钮：Start / Watch Demo */
+.ui-btn {
   padding: 0;
   border: none;
   background: transparent;
@@ -246,39 +246,29 @@ body { min-width: 320px; }
   line-height: 0;
 }
 
-.ui-btn img, .ui-mute img {
+.ui-btn img {
   width: 100%;
   display: block;
   transition: filter 0.15s ease;
 }
 
-.ui-btn:hover, .ui-mute:hover { border: none; }
-.ui-btn:hover img, .ui-btn:focus-visible img,
-.ui-mute:hover img, .ui-mute:focus-visible img { filter: brightness(1.28); }
+.ui-btn:hover { border: none; }
+.ui-btn:hover img, .ui-btn:focus-visible img { filter: brightness(1.28); }
 
 #btn-start { left: 1.61%;  top: 46.39%; width: 15.71%; }
 #btn-demo  { left: 22.08%; top: 46.39%; width: 13.76%; }
-.ui-mute   { left: 2.41%;  top: 69.70%; width: 17.37%; }
-
-/* 静音勾选块：盖在图片内方框的位置，静音时填红 */
-.mute-check {
-  position: absolute;
-  left: 84.5%;
-  top: 24.3%;
-  width: 8.9%;
-  aspect-ratio: 1;
-  background: #a02318;
-  box-shadow: 0 0 8px rgba(160, 35, 24, 0.85);
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.mute-toggle.muted .mute-check { opacity: 1; }
 
 /* 音量条：盖在标签右侧，红色填充 + 暗灰底槽 + 红圆头 */
 .ui-volume {
   left: 16.35%;
-  top: 64.82%;
+  /*
+   * top 按「文字视觉中线」对齐，不是按标签图片外框对齐：
+   * volume-label.png 是 220x74，但字形只占 y 41~73（上方 40px 是透明留白），
+   * 所以文字实际中心在 61.71% * 901 + 57 = 613px（设计稿坐标）。
+   * 滑块高 14px，top = (613 - 7) / 901 = 67.26%，轨道中线正好落在 613。
+   * 旧值 64.82% 是按图片外框对齐的，结果滑块比文字高了 22px。
+   */
+  top: 67.26%;
   width: 15.48%;
   aspect-ratio: 270 / 14;
   display: flex;
@@ -737,14 +727,14 @@ body { letter-spacing: 0.045em; }
 .ui-controls { opacity: 0.82; filter: grayscale(0.45) sepia(0.16) contrast(1.16); }
 .ui-title { filter: grayscale(0.3) sepia(0.2) contrast(1.3) drop-shadow(0 0 12px rgba(100, 17, 23, 0.3)); }
 
-.ui-btn, .ui-mute {
+.ui-btn {
   border: 1px solid rgba(125, 34, 37, 0.44);
   background: linear-gradient(90deg, rgba(56, 10, 15, 0.76), rgba(111, 23, 29, 0.36));
   box-shadow: inset 0 0 0 1px rgba(8, 5, 6, 0.65), 0 0 18px rgba(86, 12, 18, 0.18);
   clip-path: polygon(0 4%, 97% 0, 100% 92%, 4% 100%);
   transition: filter 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 }
-.ui-btn::after, .ui-mute::after {
+.ui-btn::after {
   content: "";
   position: absolute;
   inset: 4px;
@@ -752,12 +742,12 @@ body { letter-spacing: 0.045em; }
   border: 1px solid rgba(213, 177, 153, 0.14);
   clip-path: polygon(0 8%, 100% 0, 96% 90%, 4% 100%);
 }
-.ui-btn:hover, .ui-btn:focus-visible, .ui-mute:hover, .ui-mute:focus-visible {
+.ui-btn:hover, .ui-btn:focus-visible {
   transform: translateX(4px);
   filter: brightness(1.3) saturate(1.2);
   box-shadow: inset 0 0 0 1px rgba(234, 185, 159, 0.25), 0 0 22px rgba(145, 26, 32, 0.46);
 }
-.ui-btn img, .ui-mute img { filter: grayscale(0.28) sepia(0.18) contrast(1.16); }
+.ui-btn img { filter: grayscale(0.28) sepia(0.18) contrast(1.16); }
 
 #btn-start { background: linear-gradient(90deg, rgba(113, 20, 27, 0.92), rgba(52, 8, 13, 0.64)); }
 #btn-start::before {
@@ -806,7 +796,7 @@ h1, h2 {
 }
 #panel-title { color: #d5c9bb; }
 #panel-text, .volume { color: #9e958a; }
-.menu-actions button, #btn-exit-demo, #btn-mute-hud {
+.menu-actions button, #btn-exit-demo {
   position: relative;
   overflow: hidden;
   border-color: rgba(168, 50, 53, 0.5);
@@ -862,8 +852,7 @@ button:hover { border-color: #c45c58; color: #fff4e7; }
 
 #record,
 #timer,
-#objective,
-#btn-mute-hud {
+#objective {
   font-size: calc(32 * var(--u));
   line-height: 1.35;
 }
@@ -875,11 +864,6 @@ button:hover { border-color: #c45c58; color: #fff4e7; }
 }
 
 #objective { margin-top: calc(11.2 * var(--u)); }
-
-#btn-mute-hud {
-  padding: calc(24 * var(--u)) calc(35.2 * var(--u));
-  letter-spacing: 0.08em;
-}
 
 #chase,
 #prompt {
