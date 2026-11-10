@@ -324,11 +324,15 @@ export class Hud {
     el.classList.add('on');
   }
 
+  /**
+   * 同步静音状态到 UI。
+   * 界面上已经没有静音按钮了（主菜单的图片按钮和 HUD 的文本按钮都已移除），
+   * 现在只能按 M 切换；这里保留遍历逻辑，以后再加带 data-mute 的按钮会自动接上。
+   */
   syncMute(muted) {
     const label = muted ? 'Unmute  恢复声音' : 'Mute  静音';
     for (const button of this.muteButtons) {
       if (button.classList.contains('mute-toggle')) {
-        // 主菜单静音钮是设计稿图片，只切换方框里的红色勾选块
         button.classList.toggle('muted', muted);
       } else {
         button.textContent = label;
