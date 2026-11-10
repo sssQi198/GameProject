@@ -42,9 +42,9 @@ export const panelCopy = {
     title: '意识~~涣~~散',
     body: '别挣扎了……它们正在门外。\n你的理智值正在流失……你确定要面对门后的东西吗？',
     actions: {
-      resume: '送死（继续噩梦）',
-      restart: '重新开始（无尽的折磨）',
-      menu: '懦夫（放弃求生）',
+      resume: '继续噩梦',
+      restart: '重新开始',
+      menu: '放弃，懦夫',
     },
   },
   lose: {
