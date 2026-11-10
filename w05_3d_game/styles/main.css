@@ -7,6 +7,26 @@
   --bg: #07080c;
   /* 1u = 设计稿 1744×901 上的 1px，再乘 0.375（在 0.75 的基础上再缩小一半）。窗口不是这个尺寸时，按更紧的一边缩放，不拉伸。 */
   --u: min(calc(100vw / 1744 * 0.375), calc(100vh / 901 * 0.375));
+  /* 取景窗几何单点：窗口（#vf-screen）与机身（#vf-body / #vf-lip）共用同一组 inset。
+     任何一处再写死百分比，都会在非整数缩放下与另两处差 1px。
+     【2026-11-10 五次修订】7%/9% → 8.5%/10.5%，按用户"取景框再稍微做小一点"。
+     窗口从 86%×82% 收到 83%×79%（1080p 上窗口 929→896px 高），边框厚了 16px（上下）/29px（左右），
+     机身的占比更像一台真机器。副作用是窗口下沿从 93% 抬到 91.5%（1004→988px），
+     手露出的量顺势少了 16px——所以 camera-rig.js 的 raised 姿态只往下微调，
+     两个改动合起来才是最终读数（见 _tools/rig_pose_check.py 的实时输出）。 */
+  --vf-inset-y: 8.5%;
+  --vf-inset-x: 10.5%;
+  /* 机身色阶：外缘黑 → 机身深灰 → 近窗抬起 → 遮光槽 */
+  --vfb-0: #050507;
+  --vfb-1: #0e0d10;
+  --vfb-2: #141317;
+  --vfb-3: #1b1a18;
+  --vfb-seam: #09080a;
+  --vfb-lip: rgba(198, 184, 165, 0.16);
+  /* 整机抬起/放下的行程（抬/放对称，按视口高度算，改分辨率观感一致）。
+     抬/放走纯位移，允许机身上沿扫进画面——那是"相机盖上来"的真实观感；
+     静止态上沿在 -6u，仍然零缝隙。后坐力相反：它绝不能露缝，所以自带 scale。 */
+  --vf-travel: 16vh;
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
@@ -473,16 +493,135 @@ input[type="range"]::-moz-range-progress {
   inset: 0;
   z-index: 2;
   pointer-events: none;
+  /* 抬/放动画的旋转中心放在底边中点：向上生长不会露出画面下缘。 */
+  transform-origin: 50% 100%;
 }
 
 #vf-screen {
   position: absolute;
-  inset: 7% 9%;
-  border-radius: calc(8 * var(--u));
+  inset: var(--vf-inset-y) var(--vf-inset-x);
+  border-radius: calc(3 * var(--u));
   border: calc(2 * var(--u)) solid rgba(240, 230, 210, 0.3);
   box-shadow: inset 0 0 calc(40 * var(--u)) rgba(0, 0, 0, 0.6);
   overflow: hidden;
   background: transparent;
+}
+
+/* ===== 机身：取景窗以外全部改为不透明 =====
+   结构：index.html 里 #vf-body（4 块 .vf-cover）与 #vf-lip 都在 #vf-screen 之前，
+   所以它们永远画在窗口下面，不可能盖住画面。
+
+   铁律 1：#vf-body 与 .vf-cover 绝不做 transform / scale。
+           孔洞是这四块面板的内沿，一平移就与 #vf-screen 脱同步。后坐只能给 3D 模型或 #vf-screen。
+   铁律 2：面板内沿必须与 #vf-screen 的 inset 共用 --vf-inset-y / --vf-inset-x。
+   铁律 3：向外溢出的 6u 只加在各面板自己的 top/left/right/bottom 上，
+           不能加在 #vf-body 上——那会让面板内的百分比重新按放大的盒子解析。 */
+
+#vf-body {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* 外缘内阴影：靠近屏幕四周压黑，让机身四周"融进"暗角。
+   窗口内沿最近的一边（上下）也有 220u，70u 的模糊半径碰不到它，所以不会啃进画面。 */
+#vf-body::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 calc(70 * var(--u)) rgba(0, 0, 0, 0.9);
+}
+
+.vf-cover {
+  position: absolute;
+  background-repeat: no-repeat;
+}
+
+/* 上 / 下机身：内沿分别贴住窗口的上沿 / 下沿 */
+.vf-cover-t,
+.vf-cover-b {
+  left: calc(-6 * var(--u));
+  right: calc(-6 * var(--u));
+  height: calc(var(--vf-inset-y) + 6 * var(--u));
+}
+
+.vf-cover-t {
+  top: calc(-6 * var(--u));
+  background-image:
+    repeating-linear-gradient(to right,
+      rgba(255, 255, 255, 0.02) 0 1px,
+      rgba(255, 255, 255, 0) 1px 3px),
+    linear-gradient(to bottom,
+      var(--vfb-0) 0%,
+      var(--vfb-1) 34%,
+      var(--vfb-2) 58%,
+      var(--vfb-3) 76%,
+      var(--vfb-seam) 100%);
+}
+
+.vf-cover-b {
+  bottom: calc(-6 * var(--u));
+  background-image:
+    repeating-linear-gradient(to right,
+      rgba(255, 255, 255, 0.02) 0 1px,
+      rgba(255, 255, 255, 0) 1px 3px),
+    linear-gradient(to top,
+      var(--vfb-0) 0%,
+      var(--vfb-1) 34%,
+      var(--vfb-2) 58%,
+      var(--vfb-3) 76%,
+      var(--vfb-seam) 100%);
+}
+
+/* 左 / 右机身：内沿分别贴住窗口的左沿 / 右沿；竖直方向做满高，保证四角不留缝 */
+.vf-cover-l,
+.vf-cover-r {
+  top: 0;
+  bottom: 0;
+  width: calc(var(--vf-inset-x) + 6 * var(--u));
+}
+
+.vf-cover-l {
+  left: calc(-6 * var(--u));
+  background-image:
+    repeating-linear-gradient(to bottom,
+      rgba(255, 255, 255, 0.018) 0 1px,
+      rgba(255, 255, 255, 0) 1px 3px),
+    linear-gradient(to right,
+      var(--vfb-0) 0%,
+      var(--vfb-1) 30%,
+      var(--vfb-2) 56%,
+      var(--vfb-3) 78%,
+      var(--vfb-seam) 100%);
+}
+
+.vf-cover-r {
+  right: calc(-6 * var(--u));
+  background-image:
+    repeating-linear-gradient(to bottom,
+      rgba(255, 255, 255, 0.018) 0 1px,
+      rgba(255, 255, 255, 0) 1px 3px),
+    linear-gradient(to left,
+      var(--vfb-0) 0%,
+      var(--vfb-1) 30%,
+      var(--vfb-2) 56%,
+      var(--vfb-3) 78%,
+      var(--vfb-seam) 100%);
+}
+
+/* 唇边 + 遮光槽。box-shadow 是非 inset 的，只会向窗口矩形之外长，
+   不会漏进画面；同时补掉圆角处那道 1u 级的斜边漏光。
+   层次（由内向外）：1u 冷高光 → 5u 金属唇 → 3u 遮光槽 → 54u 深槽投影。 */
+#vf-lip {
+  position: absolute;
+  inset: var(--vf-inset-y) var(--vf-inset-x);
+  border-radius: calc(3 * var(--u));
+  pointer-events: none;
+  box-shadow:
+    0 0 0 calc(1 * var(--u)) rgba(240, 234, 222, 0.14),
+    0 0 0 calc(6 * var(--u)) var(--vfb-lip),
+    0 0 0 calc(9 * var(--u)) rgba(0, 0, 0, 0.9),
+    0 0 calc(40 * var(--u)) calc(14 * var(--u)) rgba(0, 0, 0, 0.85);
 }
 
 #vf-tint {
@@ -613,12 +752,74 @@ input[type="range"]::-moz-range-progress {
   color: rgba(240, 230, 210, 0.85);
 }
 
+/* ===== 整机"抬起 / 放下" =====
+   为什么动 #viewfinder 而不是 #vf-body：
+   "窗口"是四块面板的内沿，动面板＝动洞。但 #viewfinder 是机身+唇边+窗口的
+   公共父级，整层一起位移时洞跟着一起走，永远不会和 #vf-screen 脱节。
+   这是唯一能让机身产生真实轨迹、又不违反"机身绝不单独 transform"的做法。
+
+   【2026-11-10 二次修订 · 为什么第一版看不出来】
+   第一版是 translateY(6vh) + scale(1.07) 成对配平：缩放把上沿向上抬 0.07H，
+   位移又把它向下落 0.06H，相减后上沿**全程钉在画面外 -1%H**（-10.8px@1080p），
+   零缝隙是做到了，但"看得见的运动"也被一起消掉：唯一线索只剩窗口内沿移动 24px，
+   而那 24px 还叠在机身淡入里。整屏均匀的缩放+位移在没有参照物时几乎不可感知。
+   → 上沿就是参考线。现在去掉 scale，改成纯位移，让上沿真的扫进画面：
+   抬相机本来就该先看见机身以上的一层教室，机身盖上来才封住。
+   "零缝隙"只对抬起完成后的静止态成立（那时上沿在 -6u，严丝合缝）。
+
+   行程只由 --vf-travel 一个变量控制，抬/放对称；静止态与它无关。 */
+/* 【2026-11-10 四次修订 · 让框"慢一步"】0.34s → 0.40s。
+   用户原话："把动作进程加快一点、取景框出现的慢一点"。动作那侧压到 0.30s 就停稳了，
+   框这侧要慢到能被看成"第二步"：0.30s 手到位 → 0.32s 机身封死外圈 → 0.40s 整框落定。
+   三者错开 20ms/80ms，才有"手先把相机举起来、机身随后合拢"的先后感；同为 0.34s 时
+   那 40ms 差距只有一两帧，看上去仍是同时。上限仍是 game.js 的 CAMERA_DRAW_TIME(0.45s)，
+   留 50ms 余量——超了会在切 .on 时被截断，视觉上就是"框没落稳就跳一下"。 */
+#viewfinder.opening {
+  animation: vf-assembly-in 0.4s cubic-bezier(0.26, 0.62, 0.3, 1) forwards;
+  will-change: transform;
+}
+
+#viewfinder.closing {
+  animation: vf-assembly-out 0.4s cubic-bezier(0.52, 0, 0.74, 0.4) forwards;
+  will-change: transform;
+}
+
+@keyframes vf-assembly-in {
+  0% { transform: translateY(var(--vf-travel)); }
+  100% { transform: translateY(0); }
+}
+
+@keyframes vf-assembly-out {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(var(--vf-travel)); }
+}
+
+/* 后坐：整机被推一下再弹回。B3 让 3D 机身的 recoilZ 失效了，这一条补它的位置。
+   位移取"向下 + 微放大"，因为向下的位移不会让顶边离开画面上缘
+   （顶边 = -(k-1)H + t，k=1.012 时 -0.012H + 0.005H < 0 ✓）。
+   想往上跳就必须把 scale 抬到 1.02 以上，否则顶部露缝。 */
+#viewfinder.shooting {
+  animation: vf-recoil 0.35s ease-out forwards;
+  will-change: transform;
+}
+
+@keyframes vf-recoil {
+  0% { transform: translateY(0) scale(1); }
+  18% { transform: translateY(0.5vh) scale(1.012); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* 关键帧一律只向"外"缩放（scale ≥ 1）。
+   scale < 1 会把窗口边界线画进画面里，与不透明机身正面冲突：
+   scale(0.72) 时框会内缩 220px / 130px，机身露出的就不是窗，而是一圈"缩小的旧窗"。 */
 #viewfinder.opening #vf-screen {
-  animation: vf-open 0.45s ease-out forwards;
+  /* 与整机位移同长（0.40s）：窗口睁开是"框落定"的最后一步，不能比位移先结束，
+     否则位移还在走、窗口已经张开，看起来像窗口从机身上滑过去。 */
+  animation: vf-open 0.4s ease-out forwards;
 }
 
 @keyframes vf-open {
-  0% { transform: scale(0.72); opacity: 0; }
+  0% { transform: scale(1.03); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
 }
 
@@ -633,7 +834,7 @@ input[type="range"]::-moz-range-progress {
 
 @keyframes vf-shoot {
   0% { transform: scale(1); }
-  50% { transform: scale(0.96); }
+  50% { transform: scale(1.02); }
   100% { transform: scale(1); }
 }
 
@@ -643,7 +844,41 @@ input[type="range"]::-moz-range-progress {
 
 @keyframes vf-close {
   0% { transform: scale(1); opacity: 1; }
-  100% { transform: scale(0.72); opacity: 0; }
+  100% { transform: scale(1.04); opacity: 0; }
+}
+
+/* 机身跟随状态淡入淡出。
+   【2026-11-10 三次修订 · 时机对齐】用户反馈"取景框出现了、动作还没做完"。
+   现在抬手的一整段动作 0.34s 里，手在 0.30s 就停稳了（camera-rig.js 的 TRANSITION.drawing
+   + 方向缓动）；机身用 0.06s 延迟 + 0.26s 淡入 → 0.32s 实心，正好卡在手停住之后 20ms：
+   手先伸进窗口并落位，机身紧接着把外圈封死，整框再到 0.40s 落定。原来 0.12s 就实心，
+   比手快了 0.2 秒，看起来像"框先出现、手后补位"。
+   延迟必须配 fill-mode: both：否则延迟那 0.06s 会先用基础 opacity(=1) 把机身全亮出来。
+   总时长 0.32s 仍短于 game.js 的 CAMERA_DRAW_TIME(0.45s)，不会被状态切换截断。
+   基础 opacity 必须是 1：viewfinder.js 每次切状态都会先清掉所有状态类再加一个，
+   所以 shooting / on 这些状态之间不存在其它类兜底，写成 0 会让机身整个消失。
+   真正的"隐藏"始终靠父元素 .hidden（display:none），不靠这里。 */
+#viewfinder.opening #vf-body,
+#viewfinder.opening #vf-lip {
+  animation: vf-body-in 0.26s ease-out 0.06s both;
+}
+
+#viewfinder.closing #vf-body,
+#viewfinder.closing #vf-lip {
+  animation: vf-body-out 0.4s ease-out forwards;
+}
+
+@keyframes vf-body-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* 收尾用 ease-out 而不是 ease-in：viewfinder.js 的 setTimeout(400) 与这个 0.4s 动画
+   不是同一时刻启动的，超时可能早动画一帧触发。ease-out 在 96% 处已经≈0，
+   即使被提前一帧切断也不会留下可见残影。 */
+@keyframes vf-body-out {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 /* ===== 恐怖悬疑视觉重构：仅覆盖视觉层，不改变 DOM / 交互逻辑 ===== */
@@ -917,8 +1152,25 @@ button:hover { border-color: #c45c58; color: #fff4e7; }
 
 @media (prefers-reduced-motion: reduce) {
   #menu::after, #hud::after { animation: none; }
+  /* 整机位移【不能】直接取消。它是"相机真的动了"的唯一视觉回答：
+     砍掉之后抬手＝框凭空出现、收手＝框凭空消失，用户会判定成动画坏了
+     （而不是"我开了减弱动效"）。这里改成压短压小：行程 40%、时长 0.22s、纯直线。 */
+  #viewfinder.opening {
+    animation: vf-assembly-in-reduced 0.22s linear forwards;
+  }
+  #viewfinder.closing {
+    animation: vf-assembly-out-reduced 0.22s linear forwards;
+  }
   #viewfinder.opening #vf-screen {
-    animation: vf-open-reduced 0.45s ease-out forwards;
+    animation: vf-open-reduced 0.22s ease-out forwards;
+  }
+  /* 机身的淡入也要跟着压短：减弱模式下抬手补间只有 0.19s（0.34×55%），
+     机身还按 0.32s 慢慢合拢的话，就变回"框比手慢"的老毛病了。
+     正常模式的顺序（手 0.30 → 机身 0.32 → 框 0.40）按比例压成
+     手 0.167 → 机身 0.20 → 框 0.22。 */
+  #viewfinder.opening #vf-body,
+  #viewfinder.opening #vf-lip {
+    animation: vf-body-in 0.16s ease-out 0.04s both;
   }
   #viewfinder.closing #vf-screen {
     animation: vf-close-reduced 0.4s ease-in forwards;
@@ -940,6 +1192,18 @@ button:hover { border-color: #c45c58; color: #fff4e7; }
 @keyframes vf-close-reduced {
   0% { opacity: 1; }
   100% { opacity: 0; }
+}
+
+/* 减弱动效下的整机位移：行程 40%、纯直线、不缩放。
+   注意 calc 里是"长度 × 数字"，别写成 40%（v-单位不能直接乘） */
+@keyframes vf-assembly-in-reduced {
+  0% { transform: translateY(calc(var(--vf-travel) * 0.4)); }
+  100% { transform: translateY(0); }
+}
+
+@keyframes vf-assembly-out-reduced {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(calc(var(--vf-travel) * 0.4)); }
 }
 
 @keyframes vf-shoot-reduced {

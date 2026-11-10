@@ -121,6 +121,15 @@
       <div id="boot-curtain" aria-hidden="true"><p id="boot-hint">按 F11 获得沉浸式体验</p></div>
 
       <div id="viewfinder" class="hidden">
+        <!-- 机身：取景窗以外的不透明部分（4 块面板 + 唇边）。
+             必须位于 #vf-screen 之前，保证窗口永远画在机身之上。 -->
+        <div id="vf-body" aria-hidden="true">
+          <div class="vf-cover vf-cover-t"></div>
+          <div class="vf-cover vf-cover-b"></div>
+          <div class="vf-cover vf-cover-l"></div>
+          <div class="vf-cover vf-cover-r"></div>
+        </div>
+        <div id="vf-lip" aria-hidden="true"></div>
         <div id="vf-screen">
           <div id="vf-tint"></div>
           <div id="vf-grain"></div>

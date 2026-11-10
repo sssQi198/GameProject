@@ -27,6 +27,16 @@ export class Viewfinder {
     this.mode = 'eye';
     this.provider = null;
     this.hideTimer = null;
+
+    // 构建标记。排查"改完没反应"时先看控制台这两行：
+    // 第 1 行出现 = 浏览器加载的确实是磁盘上这份代码；没出现 = 你看的是旧缓存/旧副本。
+    // 第 2 行 reduce-motion=true 就说明系统"减少动画"是开的——它会让 CSS 动画
+    // 被替换成缩短版、也让 3D 手臂不再逐帧插值，是"改完没变化"最常见的单点原因。
+    console.log('[vf] build 6 · 窗口收小到 83%×79%、握持位放低（静止露手 65px）；时间轴仍是手 0.30s → 机身 0.32s → 框 0.40s');
+    console.log(
+      '[vf] reduce-motion =',
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? '(不支持)'
+    );
   }
 
   setState(state) {
