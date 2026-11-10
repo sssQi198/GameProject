@@ -193,7 +193,7 @@ export class Game {
     this.player.setControl(false);
     this.intentionalUnlock = true;
     if (document.pointerLockElement) document.exitPointerLock();
-    this.hud.showPanel('pause', copy.pauseTitle, copy.pauseBody);
+    this.hud.showPanel('pause');
   }
 
   resume() {
@@ -771,7 +771,7 @@ export class Game {
     this.hud.setChase(false);
     this.hud.setDanger(0);
     if (this.cameraState !== 'none') this.setCameraState('holstered');
-    this.hud.showPanel('win', copy.winTitle, copy.eyesOnYou);
+    this.hud.showPanel('win');
   }
 
   lose() {
@@ -785,7 +785,7 @@ export class Game {
     this.audio.lose();
     this.hud.setChase(false);
     if (this.cameraState !== 'none') this.setCameraState('holstered');
-    this.hud.showPanel('lose', copy.loseTitle, copy.loseBody);
+    this.hud.showPanel('lose');
   }
 
   updatePresentation() {
