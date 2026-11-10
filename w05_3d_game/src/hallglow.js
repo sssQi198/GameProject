@@ -1,14 +1,9 @@
 /**
- * 追逐段的走廊灯「灯池」。
+ * 终局追逐的走廊灯。
  *
- * 平时走廊是 10 米一盏、半径 14 米 —— 光摊平，整条走廊一个亮度，
- * 只靠雾远近拉开层次。追逐要的是相反的观感：灯下一小片很亮，
- * 两盏灯中间有一小段明显更暗的路，其中一两盏还在抖。
- *
- * 做法只有一条：把光半径收到比「两灯中点到灯」的距离（√(5² + 2.55²) ≈ 5.6 米）
- * 还小，中点就一盏灯的光都拿不到，只剩环境光；灯正下方拿满。
- * 衰减窗口在半径边缘是平滑收尾（three 的 `pow2(saturate(1 - pow4(d/D)))`），
- * 不会切出一圈硬边。
+ * 点亮距离和走廊平时相同：CONFIG.hallLampReach（20 米）。
+ * 灯每隔 10 米一盏，20 米才够到前面的下一盏。
+ * 追逐只多三件事：灯更亮（hallPoolGain）、其中两盏会抖、被甩在身后的灯永久熄灭。
  *
  * 这里只算纯数值、不碰 THREE，`_probe/hallglow.mjs` 可以直接验。
  */
@@ -57,7 +52,7 @@ export function hallChaseLamp(t, index, flicker) {
   const k = flicker ? hallFlicker(t, index) : 1;
   return {
     intensity: CONFIG.hallLamp * CONFIG.hallPoolGain * k,
-    distance: CONFIG.hallPoolRadius,
+    distance: CONFIG.hallLampReach,
     /** 灯管自发光（正常 0.9）：追随时整体更亮，闪的那盏跟着压暗 */
     bulb: 1.6 * k,
     on: k,

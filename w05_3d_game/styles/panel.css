@@ -8,6 +8,7 @@
    ============================================================ */
 
 #screen-panel {
+  overflow: hidden;
   --blood-pool: #3a0d09;
   --blood-dry: #57190f;
   --blood-crust: #6d2a14;
@@ -39,10 +40,10 @@
 }
 
 @keyframes panel-static {
-  0% { transform: translate(0, 0); opacity: 0.72; }
-  33% { transform: translate(-1.4%, 0.8%); opacity: 0.52; }
-  66% { transform: translate(1.1%, -0.6%); opacity: 0.86; }
-  100% { transform: translate(0, 0); opacity: 0.72; }
+  0% { background-position: 0 0, 0 0; opacity: 0.72; }
+  33% { background-position: -8px 4px, 0 1px; opacity: 0.52; }
+  66% { background-position: 6px -3px, 0 -1px; opacity: 0.86; }
+  100% { background-position: 0 0, 0 0; opacity: 0.72; }
 }
 
 /* 血管：SVG 描边路径，粗细不一的暗红脉络爬过整个画面 */
@@ -165,8 +166,8 @@
 }
 
 @keyframes title-breathe {
-  0%, 100% { transform: translate(0, 0); letter-spacing: 0.2em; }
-  50% { transform: translate(calc(1.5 * var(--u)), calc(-1 * var(--u))); letter-spacing: 0.215em; }
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(calc(1.5 * var(--u)), calc(-1 * var(--u))); }
 }
 
 /* 被划掉 / 抓花的字：暗哑、边缘被腐蚀掉一块 */

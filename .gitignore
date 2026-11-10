@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .DS_Store
+# Blender 导出中间文件（tools/build_goat_head.py）
+work/
 *.log
 .env
 .env.*

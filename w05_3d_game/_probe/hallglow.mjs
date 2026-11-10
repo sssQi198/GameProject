@@ -57,34 +57,34 @@ function floorIlluminance(x, states) {
 }
 
 const chaseStates = lampX.map((_, i) => hallChaseLamp(0, i, flickerIdx.includes(lampX[i])));
-const normalStates = lampX.map(() => ({ intensity: CONFIG.hallLamp, distance: 14 }));
+const normalStates = lampX.map(() => ({ intensity: CONFIG.hallLamp, distance: CONFIG.hallLampReach }));
 
-// ── 3. 参数：更亮、半径更小 ──
-const midDistance = Math.hypot(SPACING / 2, LAMP_Y);
+// ── 3. 参数：追逐和走廊用同一个点亮距离，追逐只是更亮 ──
 ok(
   chaseStates.every((s) => Math.abs(s.intensity - CONFIG.hallLamp * CONFIG.hallPoolGain) < 1e-9),
   '追逐时灯亮度 = hallLamp × hallPoolGain',
   `${chaseStates[0].intensity.toFixed(1)}（平时 ${CONFIG.hallLamp}）`,
 );
 ok(
-  chaseStates.every((s) => s.distance === CONFIG.hallPoolRadius),
-  '追逐时光半径换成灯池半径',
-  `${CONFIG.hallPoolRadius} m`,
+  chaseStates.every((s) => s.distance === CONFIG.hallLampReach),
+  '追逐点亮距离和走廊相同',
+  `${CONFIG.hallLampReach} m`,
 );
 ok(
-  CONFIG.hallPoolRadius < midDistance,
-  '灯池半径小于「两灯中点」到灯的距离，中点才真的吃不到光',
-  `${CONFIG.hallPoolRadius} < ${midDistance.toFixed(2)}`,
+  CONFIG.hallLampReach >= 20 && CONFIG.hallLampReach < 30,
+  '距离够到前面下一盏（20 米），再下一盏（30 米）不亮',
+  `${CONFIG.hallLampReach} m`,
 );
 
-// ── 4. 地面照度：灯下 vs 灯间 ──
+// ── 4. 地面照度：灯下仍然比灯间亮，但 20 米处的下一盏已经在范围内 ──
 const ambientFloor = CONFIG.ambient + CONFIG.hemi; // 环境光 + 半球光（朝上的面拿满）
 const poolE = floorIlluminance(lampX[4], chaseStates); // x = 10 正下方
 const gapE = floorIlluminance(lampX[4] + SPACING / 2, chaseStates); // x = 15 两灯正中
 const normalPoolE = floorIlluminance(lampX[4], normalStates);
+const nextLampE = floorIlluminance(lampX[4] + SPACING * 2, chaseStates);
 
 console.log('\n离灯距离(m)  照度(追逐)   照度(平时)   追逐/平时');
-for (const off of [0, 1, 2, 3, 3.5, 4, 4.5, 5]) {
+for (const off of [0, 1, 2, 3, 3.5, 4, 4.5, 5, 10, 20]) {
   const chase = floorIlluminance(lampX[4] + off, chaseStates);
   const normal = floorIlluminance(lampX[4] + off, normalStates);
   console.log(
@@ -93,23 +93,11 @@ for (const off of [0, 1, 2, 3, 3.5, 4, 4.5, 5]) {
   );
 }
 
-ok(gapE < 1e-6, '两灯正中拿不到任何一盏灯的光（只剩环境光）', `E=${gapE.toExponential(2)}`);
+ok(nextLampE > ambientFloor, '前面下一盏（20 米）脚下还有这盏灯的光', `E=${nextLampE.toFixed(3)}`);
 ok(poolE > normalPoolE * 1.5, '灯下比平时更亮', `${poolE.toFixed(1)} vs ${normalPoolE.toFixed(1)}`);
 ok(poolE / ambientFloor > 10, '灯下是环境光的十几倍（肉眼是「一坨亮」）',
   `${(poolE / ambientFloor).toFixed(0)}× 环境光`);
-ok(poolE / Math.max(gapE + ambientFloor, 1e-6) > 8, '灯下 / 灯间 反差够大',
-  `${(poolE / ambientFloor).toFixed(1)} : 1`);
-
-// 暗区宽度：沿地板从灯走到中点，照度掉到峰值 15% 以下算「暗」
-const samples = [];
-for (let off = 0; off <= SPACING / 2 + 0.001; off += 0.05) {
-  samples.push({ off, e: floorIlluminance(lampX[4] + off, chaseStates) });
-}
-const darkFrom = samples.find((s) => s.e < poolE * 0.15);
-ok(darkFrom && darkFrom.off > 2.5 && darkFrom.off < 4.6, '暗区从离灯 2.5–4.6 米处开始',
-  darkFrom ? `从 ${darkFrom.off.toFixed(2)} m 开始` : '没有暗区');
-ok(gapE + ambientFloor < poolE * 0.1, '灯间亮度低于灯下的 10%',
-  `${((ambientFloor / poolE) * 100).toFixed(1)}%`);
+ok(poolE > gapE, '灯下仍比两灯正中更亮', `${poolE.toFixed(1)} > ${gapE.toFixed(1)}`);
 
 // ── 5. 闪烁 ──
 const SECONDS = 4;

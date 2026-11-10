@@ -18,6 +18,7 @@ html, body, #app {
   min-height: 100%;
   background: var(--bg);
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body { min-width: 320px; }
@@ -310,7 +311,7 @@ body { min-width: 320px; }
   justify-content: center;
   align-items: center;
   padding: calc(40.545 * var(--u)) calc(55.808 * var(--u));
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .menu-card {

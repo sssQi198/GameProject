@@ -26,11 +26,12 @@ export const CONFIG = {
   roomLight: 15.75,
   hallLamp: 36,
   /**
-   * 追逐时走廊灯的「灯池」：半径收到 5.5 米（比两灯中点到灯的 5.6 米还小），
-   * 于是灯下很亮、两灯之间那一小段只剩环境光，暗得下来。
-   * 想更亮就调 hallPoolGain，想灯池更窄/间隙更宽就调小 hallPoolRadius。
+   * 走廊灯的点亮距离（米）。灯每隔 10 米一盏。
+   * 15 米只点亮身边那盏，20 米才够到前面的下一盏。灯管和光照都收到这里。
+   * 平时和终局追逐用同一个数。
    */
-  hallPoolRadius: 5.5,
+  hallLampReach: 20,
+  /** 追逐时灯比平时亮的倍数。点亮距离不在这里，和走廊共用 hallLampReach。 */
   hallPoolGain: 2,
   lampDim: 0.35,
   lamp: 0.7,

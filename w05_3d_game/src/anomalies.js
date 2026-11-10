@@ -15,15 +15,16 @@ export function anomalyLine(level) {
 }
 
 /**
- * 每一关只多一个可拍照目标。旧的留在场景里，但打中它们不算过关。
+ * 每一关只多一个可拍照目标。前四关的旧异常留在场景里，但打中它们不算过关。
+ * 进入第 5 关时，前四关异常撤掉，只留血肉墙。
  * 挂到网格上的 userData.anomalyLevel 是拍照射线要认的标记。
  */
 export function createAnomaly(level) {
   const custom = anomalyFactory[level];
   if (typeof custom === 'function') return custom(level);
   switch (level) {
-    case 1: return createSeat();
-    case 2: return createBoard();
+    case 1: return createBoard();
+    case 2: return createRamSkull();
     case 3: return createSummoningCircle();
     case 4: return createRedDoll();
     case 5: return createFleshWall();
@@ -61,74 +62,123 @@ function addSphere(group, mat, r, x, y, z, scale = [1, 1, 1]) {
   return mesh;
 }
 
-/* ---------------------------------------------------------------- 第 1 关 */
+/* ---------------------------------------------------------------- 第 2 关 */
+
+/** 顶点坐标哈希，血渍斑块每次都落在同一处。 */
+function skullNoise(x, y, z) {
+  const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453;
+  return s - Math.floor(s);
+}
+
+function skullFade(t, a, b) {
+  const k = Math.max(0, Math.min(1, (t - a) / (b - a)));
+  return k * k * (3 - 2 * k);
+}
 
 /**
- * 后排坐着的人影：校服、趴在桌上的头、摊在桌面上的手。
- * 身体朝 +X（面向黑板），原点在椅子上。
+ * 干涸血渍。顶点色乘在骨面贴图上：白是原样，暗红是血。
+ * 局部 z=0 贴墙、+Z 是脸；血在鼻骨下颌、额骨和角根，角身和后脑保持骨头本色。
  */
-function createSeat() {
+function stainGoatSkull(root) {
+  const blood = { r: 0x4a / 255, g: 0x10 / 255, b: 0x0e / 255 };
+  root.traverse((node) => {
+    if (!node.isMesh || !node.geometry?.attributes?.position) return;
+    const pos = node.geometry.attributes.position;
+    const colors = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i += 1) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const z = pos.getZ(i);
+      const front = Math.max(0, Math.min(1, z / 0.3802));
+      const up = (y + 0.131) / 0.262;
+      const side = Math.abs(x) / 0.175;
+      const onFace = 1 - skullFade(side, 0.35, 0.72);
+      const jaw = skullFade(front, 0.5, 0.92) * skullFade(1 - up, 0.32, 0.88) * onFace;
+      const brow = skullFade(front, 0.38, 0.78) * skullFade(up, 0.42, 0.7) * skullFade(1 - side, 0.15, 0.72);
+      const horn = skullFade(up, 0.58, 0.84)
+        * skullFade(side, 0.1, 0.32)
+        * (1 - skullFade(side, 0.42, 0.68))
+        * skullFade(front, 0.12, 0.48);
+      const n = skullNoise(x * 42, y * 42, z * 42);
+      const n2 = skullNoise(x * 17 + 2.2, y * 17, z * 17);
+      const blotch = 0.32 + 0.68 * n * n2;
+      let amount = Math.max(jaw * 0.92, brow * 0.62, horn * 0.4) * blotch;
+      if (n > 0.84 && front > 0.34 && side < 0.5) {
+        amount = Math.max(amount, (n - 0.84) * 3.2 * front);
+      }
+      amount = Math.min(0.82, amount);
+      colors[i * 3] = 1 + (blood.r - 1) * amount;
+      colors[i * 3 + 1] = 1 + (blood.g - 1) * amount;
+      colors[i * 3 + 2] = 1 + (blood.b - 1) * amount;
+    }
+    node.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const list = Array.isArray(node.material) ? node.material : [node.material];
+    const next = list.map((material) => {
+      if (!material) return material;
+      const copy = material.clone();
+      copy.vertexColors = true;
+      material.dispose();
+      return copy;
+    });
+    node.material = Array.isArray(node.material) ? next : next[0];
+  });
+}
+
+/**
+ * 羊头骨静物。摆在南墙根和地板的夹角，第 5 关裂口从这里裂上来。
+ * 模型贴墙的一面在局部 z=0，正面朝 +Z。干涸血渍写在顶点色上。不动画。
+ * 未缩放包围：x ±0.175，y ±0.131，z 0–0.3802。3.6 比上一档 4.5 再小一截。
+ */
+const SKULL_SCALE = 3.6;
+const SKULL_FLOOR = 0.03;
+
+function createRamSkull() {
   const group = new THREE.Group();
-  group.position.set(LAYOUT.seat.x, 0, LAYOUT.seat.z);
+  const { skull } = LAYOUT;
+  const y = SKULL_FLOOR + 0.131 * SKULL_SCALE;
+  group.position.set(skull.x, y, skull.z);
+  group.scale.setScalar(SKULL_SCALE);
+  const halfW = 0.175 * SKULL_SCALE;
+  const height = 0.262 * SKULL_SCALE;
+  const depth = 0.3802 * SKULL_SCALE;
 
-  const uniform = new THREE.MeshStandardMaterial({ color: 0x151a24, roughness: 0.93 });
-  const uniformDark = new THREE.MeshStandardMaterial({ color: 0x0e1218, roughness: 0.95 });
-  const skin = new THREE.MeshStandardMaterial({ color: 0x7d6757, roughness: 0.88 });
-  const hair = new THREE.MeshStandardMaterial({ color: 0x08080a, roughness: 0.98 });
-  const collar = new THREE.MeshStandardMaterial({ color: 0x9a978c, roughness: 0.8 });
+  loadCharacter('/assets/models/goat_head_v01.glb').then((bound) => {
+    if (group.userData.disposed) {
+      disposeCharacter(bound);
+      return;
+    }
+    stainGoatSkull(bound.root);
+    group.add(bound.root);
+    document.body.dataset.goatHeadModel = 'glb';
+  }).catch((error) => {
+    console.warn('山羊头 GLB 加载失败，第 2 关没有头骨。', error);
+    document.body.dataset.goatHeadModel = 'fallback';
+  });
 
-  // 腿
-  addBox(group, uniformDark, 0.34, 0.13, 0.15, 0.14, 0.47, -0.11);
-  addBox(group, uniformDark, 0.34, 0.13, 0.15, 0.14, 0.47, 0.11);
-  addBox(group, uniformDark, 0.13, 0.40, 0.14, 0.30, 0.24, -0.11);
-  addBox(group, uniformDark, 0.13, 0.40, 0.14, 0.30, 0.24, 0.11);
-  addBox(group, uniformDark, 0.21, 0.08, 0.15, 0.38, 0.05, -0.11);
-  addBox(group, uniformDark, 0.21, 0.08, 0.15, 0.38, 0.05, 0.11);
-
-  // 髋部与躯干
-  addBox(group, uniform, 0.30, 0.20, 0.36, -0.01, 0.56, 0);
-  const torso = addBox(group, uniform, 0.26, 0.44, 0.38, 0.06, 0.86, 0, -0.30);
-  const shoulder = addBox(group, uniform, 0.23, 0.10, 0.40, 0.16, 1.03, 0, -0.30);
-  addBox(group, collar, 0.19, 0.05, 0.30, 0.20, 1.09, 0, -0.30);
-  addBox(group, uniformDark, 0.26, 0.30, 0.02, 0.06, 0.86, -0.195, -0.30);
-
-  // 手臂：前臂平摊在桌面上
-  for (const side of [-1, 1]) {
-    addBox(group, uniform, 0.12, 0.30, 0.12, 0.17, 0.99, side * 0.17, -0.55);
-    addBox(group, uniform, 0.30, 0.10, 0.11, 0.34, 0.85, side * 0.17);
-    addBox(group, skin, 0.11, 0.06, 0.12, 0.50, 0.83, side * 0.17);
-  }
-
-  // 头：扣在桌面上，头发盖住后颈
-  addBox(group, skin, 0.09, 0.10, 0.09, 0.28, 0.99, 0, -0.7);
-  const head = addSphere(group, skin, 0.115, 0.43, 0.90, 0, [1.05, 0.95, 1]);
-  const hairCap = addSphere(group, hair, 0.122, 0.415, 0.925, 0, [1.05, 0.85, 1.02]);
-  hairCap.rotation.z = -0.25;
-  addBox(group, hair, 0.16, 0.12, 0.02, 0.47, 0.86, 0, -0.3);
-
-  tag(group, 1, 'seat');
-  const baseShoulderY = 1.03;
+  tag(group, 2, 'skull');
 
   return {
-    level: 1,
-    id: 'seat',
+    level: 2,
+    id: 'skull',
     group,
     stand: { ...LAYOUT.photoStand },
-    aimY: 0.95,
-    head,
-    update(dt, env) {
-      const target = baseShoulderY + (env.flickerDark ? 0.045 : 0);
-      shoulder.position.y += (target - shoulder.position.y) * Math.min(1, dt * 9);
-      torso.rotation.z = -0.30 + Math.sin(env.time * 1.1) * 0.012;
-      head.position.y = 0.90 + Math.sin(env.time * 1.6) * 0.004;
+    aim: { x: 0, y: 0, z: 0.19 },
+    collider: {
+      minX: skull.x - halfW,
+      maxX: skull.x + halfW,
+      minY: SKULL_FLOOR,
+      maxY: SKULL_FLOOR + height,
+      minZ: skull.z,
+      maxZ: skull.z + depth,
     },
+    update() {},
   };
 }
 
-/* ---------------------------------------------------------------- 第 2 关 */
+/* ---------------------------------------------------------------- 第 1 关 */
 
 /**
- * 黑板：只有一行字，笔画歪斜、粗细不匀，字里往外渗血。
+ * 黑板：一行暗红血字，写成草书，字与字牵丝相连，血从字里往下淌。
  * 不再做重复的第二行，也不再画下方的计数划痕。
  */
 function createBoard() {
@@ -138,112 +188,96 @@ function createBoard() {
   const ctx = canvas.getContext('2d');
   const rand = seeded(20251031);
 
-  ctx.fillStyle = '#141c17';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // 底板留空。整块不透明的深色面会比真正的黑板更亮，看起来像反光。
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // 擦不干净的陈年粉笔灰
-  ctx.globalAlpha = 0.07;
-  ctx.fillStyle = '#dfe6dc';
-  for (let i = 0; i < 70; i += 1) {
-    ctx.fillRect(rand() * canvas.width, rand() * canvas.height, 20 + rand() * 46, 2 + rand() * 2);
-  }
-  ctx.globalAlpha = 1;
-
-  // 被擦过又没擦掉的一片
-  const smear = ctx.createLinearGradient(140, 0, 760, 0);
-  smear.addColorStop(0, 'rgba(205,215,205,0)');
-  smear.addColorStop(0.45, 'rgba(205,215,205,0.08)');
-  smear.addColorStop(1, 'rgba(205,215,205,0)');
-  ctx.fillStyle = smear;
-  ctx.fillRect(140, 128, 640, 116);
-
-  const text = '你把它带进来了';
+  const text = '你就是下一个';
   const baseY = 188;
-  const fontOf = (size) => `${size}px "STKaiti", "KaiTi", "STSong", "Microsoft YaHei", sans-serif`;
+  const baseSize = 132;
+  // 行楷是系统里最接近草书的一款。不加粗，免得连笔被涂死。
+  const fontOf = (size) => `400 ${size}px "STXingkai", "华文行楷", "KaiTi", "STKaiti", "Microsoft YaHei", sans-serif`;
 
-  // 量出每个字的宽度，好逐个歪着画
-  ctx.font = fontOf(88);
+  ctx.font = fontOf(baseSize);
   const widths = [...text].map((ch) => ctx.measureText(ch).width);
-  const total = widths.reduce((a, b) => a + b, 0);
-  let cursor = 512 - total / 2;
 
-  // 每个字各自的旋转、缩放、上下漂移：基线不平，大小不匀
+  // 行楷自己已经是连笔。这里只轻轻侧过身，字距收一点，好让牵丝接得上。
+  const rhythm = [0.96, 1.06, 0.94, 1.08, 0.92, 1.02];
   const glyphs = [...text].map((ch, i) => ({
     ch,
-    size: 88 * (0.82 + rand() * 0.34),
-    rot: (rand() - 0.5) * 0.34,
-    dx: (rand() - 0.5) * 18,
-    dy: (rand() - 0.5) * 32,
-    weight: 0.6 + rand() * 0.4,
+    size: baseSize * rhythm[i],
+    rot: -0.1 + (rand() - 0.5) * 0.06,
+    skew: 0.1 + rand() * 0.04,
+    sx: 0.96,
+    sy: 1.04,
+    gap: 0.78 + rand() * 0.08,
+    dx: (rand() - 0.5) * 3,
+    dy: Math.sin(i * 0.95) * 8 + (rand() - 0.5) * 4,
+    weight: 1,
     x: 0,
   }));
-  let drift = 0;
+  let cursor = 0;
   for (let i = 0; i < glyphs.length; i += 1) {
     glyphs[i].x = cursor + widths[i] / 2;
-    cursor += widths[i];
-    drift += (rand() - 0.5) * 7;
-    glyphs[i].dy += drift;
+    cursor += widths[i] * glyphs[i].gap;
   }
+  const mid = (glyphs[0].x + glyphs[glyphs.length - 1].x) / 2;
+  for (const g of glyphs) g.x += 512 - mid;
 
-  // 先垫一层暗红晕，让字像是从血里浮出来
-  ctx.globalAlpha = 0.45;
-  for (const g of glyphs) {
-    ctx.save();
-    ctx.translate(g.x + g.dx + 2, baseY + g.dy + 3);
-    ctx.rotate(g.rot);
+  const placeGlyph = (g, extraRot = 0) => {
+    ctx.translate(g.x + g.dx, baseY + g.dy);
+    ctx.rotate(g.rot + extraRot);
+    ctx.transform(g.sx, g.skew * 0.55, g.skew, g.sy, 0, 0);
     ctx.font = fontOf(g.size);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillStyle = 'rgba(96,10,14,0.85)';
-    ctx.fillText(g.ch, 2, 3);
-    ctx.restore();
+  };
+
+  // 牵丝先铺在字底下：一笔的收尾拖进下一字的起笔
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  for (let i = 0; i < glyphs.length - 1; i += 1) {
+    const a = glyphs[i];
+    const b = glyphs[i + 1];
+    const x1 = a.x + a.dx + a.size * 0.16;
+    const y1 = baseY + a.dy + a.size * 0.22;
+    const x2 = b.x + b.dx - b.size * 0.3;
+    const y2 = baseY + b.dy - b.size * 0.08;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.quadraticCurveTo((x1 + x2) / 2, Math.max(y1, y2) + 22, x2, y2);
+    ctx.strokeStyle = 'rgba(132,14,18,1)';
+    ctx.lineWidth = 3.2;
+    ctx.globalAlpha = 0.7;
+    ctx.stroke();
   }
+
+  // 末字收笔拉出一条长锋
+  const last = glyphs[glyphs.length - 1];
+  ctx.beginPath();
+  ctx.moveTo(last.x + last.dx + last.size * 0.12, baseY + last.dy + last.size * 0.16);
+  ctx.quadraticCurveTo(
+    last.x + last.dx + 78,
+    baseY + last.dy + 36,
+    last.x + last.dx + 128,
+    baseY + last.dy - 6,
+  );
+  ctx.strokeStyle = 'rgba(136,14,18,1)';
+  ctx.lineWidth = 4.5;
+  ctx.globalAlpha = 0.85;
+  ctx.stroke();
   ctx.globalAlpha = 1;
 
-  // 主笔画：粉笔白，笔画粗细不匀
+  // 主笔两遍：一遍侧锋垫厚，一遍压在上面，边沿留一点飞白
   for (const g of glyphs) {
     ctx.save();
-    ctx.translate(g.x + g.dx, baseY + g.dy);
-    ctx.rotate(g.rot);
-    ctx.font = fontOf(g.size);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.globalAlpha = 0.5 * g.weight;
-    ctx.fillStyle = 'rgba(232,226,210,1)';
-    ctx.fillText(g.ch, -1.6, 1.6);
-    ctx.globalAlpha = 0.7 * g.weight;
-    ctx.fillStyle = 'rgba(228,222,204,1)';
-    ctx.fillText(g.ch, 1.2, -1.1);
-    ctx.globalAlpha = 0.92 * g.weight;
-    ctx.fillStyle = 'rgba(238,233,220,1)';
+    placeGlyph(g);
+    ctx.fillStyle = 'rgba(150,16,20,1)';
+    ctx.globalAlpha = g.weight;
+    ctx.fillText(g.ch, 1.5, 1.5);
     ctx.fillText(g.ch, 0, 0);
     ctx.restore();
   }
   ctx.globalAlpha = 1;
-
-  // 有两个字被袖子抹开了一半：不是挖空，是糊上一层粉笔灰
-  for (const g of glyphs) {
-    if (g.ch !== '把' && g.ch !== '了') continue;
-    ctx.save();
-    ctx.translate(g.x + g.dx, baseY + g.dy);
-    ctx.rotate(g.rot + 0.16);
-    for (let i = 0; i < 4; i += 1) {
-      ctx.globalAlpha = 0.10 + i * 0.03;
-      ctx.fillStyle = '#ded9c8';
-      ctx.fillRect(-g.size * 0.34 + i * 6, -g.size * 0.26 + i * 9, g.size * 0.62, 7 + i * 3);
-    }
-    ctx.globalAlpha = 0.5;
-    ctx.strokeStyle = 'rgba(20,28,23,0.55)';
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 3; i += 1) {
-      ctx.beginPath();
-      ctx.moveTo(-g.size * 0.3, -g.size * 0.2 + i * 26);
-      ctx.lineTo(g.size * 0.3, -g.size * 0.24 + i * 26);
-      ctx.stroke();
-    }
-    ctx.restore();
-    ctx.globalAlpha = 1;
-  }
 
   // 血迹：从字里往下淌
   const drip = (x, top, len, width, alpha) => {
@@ -263,23 +297,27 @@ function createBoard() {
     ctx.globalAlpha = 1;
   };
 
-  // 沿基线撒 15 处血迹，长短不一
+  const glyphX = glyphs.map((g) => g.x + g.dx);
+  const left = Math.min(...glyphX) - 28;
+  const span = Math.max(...glyphX) - left + 56;
+
+  // 沿这行字撒血迹，长短不一
   for (let i = 0; i < 15; i += 1) {
-    const x = 262 + rand() * 500;
+    const x = left + rand() * span;
     const top = 150 + rand() * 60;
     const len = 10 + rand() * 86;
     const width = 2.2 + rand() * 5;
     drip(x, top, len, width, 0.55 + rand() * 0.4);
   }
 
-  // 三处拖到底的长痕
-  for (const x of [312, 505, 688]) {
-    drip(x, 176 + rand() * 26, 150 + rand() * 60, 3.4 + rand(), 0.5);
+  // 三个字底下拖到底的长痕
+  for (const g of [glyphs[0], glyphs[2], glyphs[5]]) {
+    drip(g.x + g.dx, baseY + g.dy + 16, 130 + rand() * 70, 3.4 + rand(), 0.62);
   }
 
   // 溅点
   for (let i = 0; i < 40; i += 1) {
-    const x = 240 + rand() * 545;
+    const x = left + rand() * span;
     const y = 130 + rand() * 150;
     const r = 0.8 + rand() * 2.6;
     ctx.globalAlpha = 0.25 + rand() * 0.45;
@@ -290,30 +328,51 @@ function createBoard() {
   }
   ctx.globalAlpha = 1;
 
+  // 抗锯齿会在笔画边上留下几乎透明的浅色像素，叠在黑板上就像一圈反光。
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = pixels.data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 12) {
+      data[i] = 0;
+      data[i + 1] = 0;
+      data[i + 2] = 0;
+      data[i + 3] = 0;
+    }
+  }
+  ctx.putImageData(pixels, 0, 0);
+
   const map = new THREE.CanvasTexture(canvas);
   map.colorSpace = THREE.SRGBColorSpace;
   map.anisotropy = 4;
+  map.premultiplyAlpha = false;
 
-  const mat = new THREE.MeshBasicMaterial({ map, transparent: true, opacity: 1 });
+  const mat = new THREE.MeshBasicMaterial({
+    map,
+    transparent: true,
+    depthWrite: false,
+    alphaTest: 0.04,
+  });
   mat.toneMapped = false;
+  mat.polygonOffset = true;
+  mat.polygonOffsetFactor = -2;
+  mat.polygonOffsetUnits = -2;
 
   const group = new THREE.Group();
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(2.55, 0.95), mat);
   group.add(plane);
   group.position.set(LAYOUT.board.x, LAYOUT.board.y, LAYOUT.board.z);
-  group.rotation.y = -Math.PI / 2;
-  tag(group, 2, 'board');
+  group.rotation.y = Math.PI / 2;
+  tag(group, 1, 'board');
 
   let scratchIn = 0;
   return {
-    level: 2,
+    level: 1,
     id: 'board',
     group,
-    stand: { x: 6.2, z: 0 },
+    stand: { x: -6.2, z: 0 },
     aimY: 0,
     update(dt, env) {
-      const wave = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(env.time * 2.4));
-      mat.opacity = env.flickerDark ? 1 : wave;
+      mat.opacity = 1;
       plane.position.z = Math.sin(env.time * 0.9) * 0.004;
       if (env.flickerDark) {
         scratchIn += dt;
@@ -1693,17 +1752,16 @@ function createFleshWall() {
   // ---- 后墙：必须给窗户留洞，否则整排窗会被血肉从内侧糊死 ----
   // 窗位必须和 level.js 的 addWindowRun 严格对齐，否则会露出实墙或切到窗框。
   // 常量抄自 level.js:868-873 与 DOOR_FRAME（jambW = 0.12）。
-  const WIN = { count: 3, w: 1.9, sill: 0.95, top: 2.28, jamb: 0.12 };
+  const WIN = { count: 6, w: 1.9, sill: 0.95, top: 2.28, jamb: 0.12 };
   function windowGaps() {
-    const outer = doorHalf + WIN.jamb;
+    const doorX = door.x;
+    const x0 = xMin;
+    const x1 = doorX - doorHalf - WIN.jamb;
     const gaps = [];
-    const runs = [[xMin, -outer], [outer, xMax]];
-    for (const [x0, x1] of runs) {
-      const pier = ((x1 - x0) - WIN.count * WIN.w) / (WIN.count + 1);
-      for (let i = 0; i < WIN.count; i += 1) {
-        const xa = x0 + (i + 1) * pier + i * WIN.w;
-        gaps.push([xa, xa + WIN.w]);
-      }
+    const pier = ((x1 - x0) - WIN.count * WIN.w) / (WIN.count + 1);
+    for (let i = 0; i < WIN.count; i += 1) {
+      const xa = x0 + (i + 1) * pier + i * WIN.w;
+      gaps.push([xa, xa + WIN.w]);
     }
     return gaps;
   }
@@ -1747,7 +1805,7 @@ function createFleshWall() {
 
     // 按 y 切 4 条横带，每条带内按 x 扣掉该带的缺口
     const gaps = windowGaps();
-    const doorGap = [[-doorHalf, doorHalf]];
+    const doorGap = [[door.x - doorHalf, door.x + doorHalf]];
     const bands = [
       [0, WIN.sill, doorGap],
       [WIN.sill, WIN.top, doorGap.concat(gaps)],

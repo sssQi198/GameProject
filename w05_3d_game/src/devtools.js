@@ -157,7 +157,7 @@ export function setupDevTools({ game, player, level }) {
         player.reset(LAYOUT.spawn.x, LAYOUT.spawn.z, LAYOUT.spawn.yaw);
         player.setScripted(false);
         player.setLamp(CONFIG.lampDim);
-        level.setDoorAjar(true);
+        level.setDoorOpen(false, true);
         level.setNpcState('idle');
         level.beginPrologue();
         // 重置 intro 状态

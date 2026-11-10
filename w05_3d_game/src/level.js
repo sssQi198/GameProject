@@ -21,7 +21,7 @@ const CURTAIN_W = 0.72;
 const CURTAIN_TOP = 2.72;
 const CURTAIN_HEM = 1.0;
 const CURTAIN_H = CURTAIN_TOP - CURTAIN_HEM;
-/** 与 generate_furniture_glb.py 同一套偏移。第一关那套桌椅（−7.4, 4）保持原位。 */
+/** 与 generate_furniture_glb.py 同一套偏移。第二关那套桌椅（−7.4, 4）保持原位。 */
 const SHOVED_DESK_YAW = [
   { x: -7.4, z: -4, yaw: 0.3 },
   { x: 4.6, z: -1.5, yaw: -0.26 },
@@ -37,8 +37,14 @@ const TURNED_CHAIR_YAW = [
 /** 座面金属框 0.45 见方。转过角度后，轴对齐盒子要包住四个角。 */
 const CHAIR_HALF = 0.225;
 const CHAIR_HEIGHT = 0.96;
-/** 走廊灯平时的光半径（米）。追逐时换成 hallglow.js 的灯池半径。 */
-const HALL_LAMP_RADIUS = 14;
+/** 走廊灯离玩家超过 CONFIG.hallLampReach 就灭。平时和终局追逐用同一个距离。 */
+function hallLampAwake(light, playerX, playerZ) {
+  if (!Number.isFinite(playerX) || !Number.isFinite(playerZ)) return true;
+  const reach = CONFIG.hallLampReach;
+  const dx = light.position.x - playerX;
+  const dz = light.position.z - playerZ;
+  return dx * dx + dz * dz <= reach * reach;
+}
 /**
  * 常驻点光源池容量（第二十三轮加）。整局游戏里「参与渲染的点光源」恒为这个数
  * （见 buildLights 的注释），这样 NUM_POINT_LIGHTS 这个着色器宏在整个游戏里是常量，
@@ -66,6 +72,10 @@ export class Level {
     this.scene = scene;
     this.staticColliders = [];
     this.doorCollider = null;
+    /** 打开的门扇切成多段轴对齐盒子，贴着旋转后的门板。 */
+    this.doorLeafBoxes = Array.from({ length: 8 }, () => ({
+      minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0,
+    }));
     this.colliders = [];
     this.anomalies = [];
     this.props = [];
@@ -127,6 +137,7 @@ export class Level {
     this.debugColliders = false;
     this.debugGroup = null;
     this._debugDoor = null;
+    this._debugDoorAngle = 0;
     this.furnitureVisuals = [];
     this.centerSlots = [];
     this.centerFurniture = [];
@@ -329,7 +340,7 @@ export class Level {
   /** 每帧由 game.js 调用来检测等待释放条件 */
   checkNpcWait(playerX, playerZ) {
     if (this.npcState !== 'waiting') return;
-    const toDoor = Math.hypot(playerX, playerZ - (LAYOUT.room.maxZ + LAYOUT.wall / 2));
+    const toDoor = Math.hypot(playerX - LAYOUT.door.x, playerZ - (LAYOUT.room.maxZ + LAYOUT.wall / 2));
     const inside = playerZ <= LAYOUT.room.maxZ;
     // 释放条件：玩家距门<3.5m，或已进房间，或15s倒计时由game.js处理
     // 这里只负责状态切换
@@ -344,7 +355,7 @@ export class Level {
   /** 玩家距离门 <1.5m 时触发门推开 */
   checkNpcDoorPush(playerX, playerZ) {
     if (this.doorOpen) return;
-    const dist = Math.hypot(playerX, playerZ - (LAYOUT.room.maxZ + LAYOUT.wall / 2));
+    const dist = Math.hypot(playerX - LAYOUT.door.x, playerZ - (LAYOUT.room.maxZ + LAYOUT.wall / 2));
     if (dist < 1.5 && !this.npcDoorReopen) {
       this.npcDoorReopen = true;
       this.setDoorOpen(true, false);
@@ -415,10 +426,18 @@ export class Level {
         light.intensity = scaled;
         if (light.color) light.color.setHex(roomHex?.[this.roomLights.indexOf(light)] ?? 0xffffff);
       }
-      for (const fixture of this.roomFixtures) fixture.material.emissiveIntensity = 0.05;
-      for (const light of this.hallLamps) {
+      for (const fixture of this.roomFixtures) {
+        fixture.material.emissive.setHex(0xffc89a);
+        fixture.material.emissiveIntensity = 0.05;
+      }
+      for (let i = 0; i < this.hallLamps.length; i += 1) {
+        const light = this.hallLamps[i];
+        if (!hallLampAwake(light, this._lampPx, this._lampPz)) {
+          light.intensity = 0;
+          continue;
+        }
         light.intensity = CONFIG.hallLamp;
-        if (light.color) light.color.setHex(hallHex?.[this.hallLamps.indexOf(light)] ?? 0x8ea0c0);
+        if (light.color) light.color.setHex(hallHex?.[i] ?? 0x8ea0c0);
       }
       this._flashRoomHex = null;
       this._flashHallHex = null;
@@ -448,10 +467,17 @@ export class Level {
       if (light.color) light.color.setHex(flashColor);
     }
     const fixtureGlow = flashFactor > 10 ? 5.0 : (flashFactor > 3 ? 3.0 : 0.05);
-    for (const fixture of this.roomFixtures) fixture.material.emissiveIntensity = fixtureGlow;
+    for (const fixture of this.roomFixtures) {
+      fixture.material.emissive.setHex(flashColor);
+      fixture.material.emissiveIntensity = fixtureGlow;
+    }
     // 走廊灯同步闪烁（走廊灯跟着同一片红光，亮度放大但幅度小一些）
     const hallFactor = 1 + (flashFactor - 1) * 0.4;
     for (const light of this.hallLamps) {
+      if (!hallLampAwake(light, this._lampPx, this._lampPz)) {
+        light.intensity = 0;
+        continue;
+      }
       light.intensity = CONFIG.hallLamp * Math.max(1, hallFactor);
       if (light.color) light.color.setHex(flashColor);
     }
@@ -467,8 +493,11 @@ export class Level {
   }
 
   spawnUpTo(count) {
+    // 第 5 关进场时前四关异常已经完成使命，从教室里撤掉，也不再补回来。
+    if (count >= 5) this.removeAnomaliesBefore(5);
     let added = false;
     for (let level = 1; level <= count; level += 1) {
+      if (count >= 5 && level < 5) continue;
       if (this.anomalies.some((item) => item.level === level)) continue;
       // 预建缓存优先：第 5 关那种重场景可以提前建好（比如玩家还在菜单/走廊时），
       // 避免进屋那一刻才建 1000+ 网格和 512² 血肉纹理造成掉帧。
@@ -529,6 +558,27 @@ export class Level {
     });
   }
 
+  /** 撤掉比 level 更早的异常。预建缓存里的也一起丢掉，避免下一帧又被挂回来。 */
+  removeAnomaliesBefore(level) {
+    const keep = [];
+    for (const anomaly of this.anomalies) {
+      if (anomaly.level >= level) {
+        keep.push(anomaly);
+        continue;
+      }
+      this.releaseAnomalyLights(anomaly.group);
+      anomaly.group.removeFromParent();
+      disposeObject(anomaly.group);
+    }
+    this.anomalies = keep;
+    if (!this.prewarmed) return;
+    for (const [index, anomaly] of this.prewarmed) {
+      if (index >= level) continue;
+      disposeObject(anomaly.group);
+      this.prewarmed.delete(index);
+    }
+  }
+
   clearAnomalies() {
     for (const anomaly of this.anomalies) {
       this.releaseAnomalyLights(anomaly.group);
@@ -574,8 +624,59 @@ export class Level {
     out.length = 0;
     for (const box of this.staticColliders) out.push(box);
     for (const box of extraColliders()) out.push(box);
-    if (!this.doorOpen) out.push(this.doorCollider);
+    for (const anomaly of this.anomalies) {
+      if (anomaly.collider) out.push(anomaly.collider);
+    }
+    // 门关严时用门洞那一块。转开后换成贴着门扇的盒子，门洞可以过，门板不能穿。
+    if (Math.abs(this.doorAngle) < 0.04) out.push(this.doorCollider);
+    else {
+      this.fillDoorLeafColliders();
+      for (const box of this.doorLeafBoxes) out.push(box);
+    }
     return out;
+  }
+
+  /**
+   * 门轴在 doorPivot，门板沿局部 +X 伸出，绕 Y 转到 doorAngle。
+   * 和 three 的 rotation.y 同一套：x' = x cos + z sin，z' = -x sin + z cos。
+   */
+  fillDoorLeafColliders() {
+    const angle = this.doorAngle;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const hingeX = this.doorPivot.position.x;
+    const hingeZ = this.doorPivot.position.z;
+    const length = LAYOUT.door.half * 2;
+    const halfT = 0.04;
+    const boxes = this.doorLeafBoxes;
+    const segments = boxes.length;
+    const minY = 0;
+    const maxY = LAYOUT.door.height;
+    for (let i = 0; i < segments; i += 1) {
+      const x0 = (length * i) / segments;
+      const x1 = (length * (i + 1)) / segments;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minZ = Infinity;
+      let maxZ = -Infinity;
+      for (const lx of [x0, x1]) {
+        for (const lz of [-halfT, halfT]) {
+          const wx = hingeX + lx * cos + lz * sin;
+          const wz = hingeZ - lx * sin + lz * cos;
+          if (wx < minX) minX = wx;
+          if (wx > maxX) maxX = wx;
+          if (wz < minZ) minZ = wz;
+          if (wz > maxZ) maxZ = wz;
+        }
+      }
+      const box = boxes[i];
+      box.minX = minX;
+      box.maxX = maxX;
+      box.minY = minY;
+      box.maxY = maxY;
+      box.minZ = minZ;
+      box.maxZ = maxZ;
+    }
   }
 
   aim(raycaster) {
@@ -778,7 +879,9 @@ export class Level {
     // 必须在所有改灯强度的逻辑之后：把这一帧算出来的灯状态搬进常驻池。
     this.updatePointPool(env);
 
-    if (this.debugColliders && this._debugDoor !== this.doorOpen) this.setColliderDebug(true);
+    if (this.debugColliders && (this._debugDoor !== this.doorOpen || Math.abs(this.doorAngle - this._debugDoorAngle) > 0.05)) {
+      this.setColliderDebug(true);
+    }
   }
 
   updateShowcase(time, camera) {
@@ -790,11 +893,13 @@ export class Level {
    * 灯光调节 —— 后续AI接管者注意：
    * – 整体亮度：只改 `CONFIG.brightness`（1 = 原版暗光）
    * – 走廊灯颜色/亮度：调 `CONFIG.hallLamp`（config._lighting）或下方 `this.hallLamps`
-   * – 追逐时的走廊灯池（灯下很亮、灯间一小段暗、两盏在抖）：只改 config 的
-   *   `hallPoolGain` / `hallPoolRadius` 和 hallglow.js 里的 `HALL_FLICKER_X`、闪烁节奏
+   * – 走廊灯点亮距离：`CONFIG.hallLampReach`。平时和终局追逐同一个数。
+   *   追逐只额外更亮（`hallPoolGain`）、两盏会抖、身后的灯会灭。闪烁节奏在 hallglow.js。
    * - 环境光/雾：调 `CONFIG.ambient` 和 scene.fog.density
    */
   updateLights(env, dt = 0) {
+    this._lampPx = Number(env.playerX);
+    this._lampPz = Number(env.playerZ);
     const menu = env.mood === 'menu';
     const chase = env.mood === 'chase';
     const calm = env.mood === 'calm';
@@ -825,6 +930,7 @@ export class Level {
           if (hallLampPassed(playerX, this.hallLamps[i].position.x)) this.hallDead.add(i);
         }
       }
+      const playerZ = Number(env.playerZ);
       for (let i = 0; i < this.hallLamps.length; i += 1) {
         const lamp = this.hallLamps[i];
         if (!this.hallDead.has(i) && hallLampPassed(playerX, lamp.position.x)) {
@@ -834,7 +940,7 @@ export class Level {
             env.audio?.lampDeath?.(hallLampPan(playerX, lamp.position.x));
           }
         }
-        if (this.hallDead.has(i)) {
+        if (this.hallDead.has(i) || !hallLampAwake(lamp, playerX, playerZ)) {
           lamp.intensity = 0;
           this.hallBulbs[i].material.emissiveIntensity = 0;
           continue;
@@ -846,11 +952,15 @@ export class Level {
       }
     } else {
       const lamp = calm ? CONFIG.hallLamp * 1.6 : CONFIG.hallLamp;
-      for (const light of this.hallLamps) {
-        light.intensity = lamp * bright * this.lampScale;
-        light.distance = HALL_LAMP_RADIUS;
+      const playerX = Number(env.playerX);
+      const playerZ = Number(env.playerZ);
+      for (let i = 0; i < this.hallLamps.length; i += 1) {
+        const light = this.hallLamps[i];
+        const on = hallLampAwake(light, playerX, playerZ);
+        light.intensity = on ? lamp * bright * this.lampScale : 0;
+        light.distance = CONFIG.hallLampReach;
+        this.hallBulbs[i].material.emissiveIntensity = on ? HALL_BULB_GLOW * this.lampScale : 0;
       }
-      for (const bulb of this.hallBulbs) bulb.material.emissiveIntensity = HALL_BULB_GLOW * this.lampScale;
     }
     const ambient = calm ? CONFIG.ambient * 2.4 : CONFIG.ambient;
     this.ambient.intensity = ambient * bright;
@@ -1015,6 +1125,7 @@ export class Level {
     }
     if (!on) return;
     this._debugDoor = this.doorOpen;
+    this._debugDoorAngle = this.doorAngle;
     const group = new THREE.Group();
     const material = new THREE.LineBasicMaterial({ color: 0x39ff88 });
     for (const box of this.getColliders()) {
@@ -1051,14 +1162,16 @@ export class Level {
     };
 
     span(room.minX - t, room.maxX + t, room.minZ - t, room.minZ, roomWallH, this.materials.wall);
-    span(room.maxX, room.maxX + t, room.minZ, room.maxZ + t, roomWallH, this.materials.wall);
-    span(room.minX - t, room.minX, room.minZ, room.maxZ + t, roomWallH, this.materials.wall);
+    // 东西山墙的北端面朝走廊，和走廊墙用同一份朝外受光的材质，转角才不会是一条黑缝。
+    span(room.maxX, room.maxX + t, room.minZ, room.maxZ + t, roomWallH, this.materials.wallOuter);
+    span(room.minX - t, room.minX, room.minZ, room.maxZ + t, roomWallH, this.materials.wallOuter);
 
     const doorHalf = LAYOUT.door.half;
+    const doorX = LAYOUT.door.x;
     this.buildCorridorWall();
     this.doorCollider = {
-      minX: -doorHalf,
-      maxX: doorHalf,
+      minX: doorX - doorHalf,
+      maxX: doorX + doorHalf,
       minY: 0,
       maxY: LAYOUT.door.height,
       minZ: room.maxZ,
@@ -1081,7 +1194,7 @@ export class Level {
 
     // 墙面线脚每 4 米一条，±20 米对调后仍然对齐
     for (let x = hall.minX + 4; x < hall.maxX; x += 4) {
-      if (Math.abs(x) < 1.4) continue;
+      if (Math.abs(x - LAYOUT.door.x) < LAYOUT.door.half + 0.7) continue;
       if (x <= room.minX - t || x >= room.maxX + t) {
         this.addBox(0.08, 1.2, 0.06, x, 1.5, faceZ + 0.04, this.materials.hallTrim, false);
       }
@@ -1286,27 +1399,32 @@ export class Level {
     const t = LAYOUT.wall;
     const z = room.maxZ + LAYOUT.wall / 2;
     const outer = door.half + jambW;
+    const doorX = door.x;
     const lintelTop = door.height + headH;
     const lintelH = h - lintelTop;
-    this.addBox(outer * 2, lintelH, t, 0, lintelTop + lintelH / 2, z, this.materials.wall, false);
+    this.addBox(outer * 2, lintelH, t, doorX, lintelTop + lintelH / 2, z, this.materials.wallOuter, false);
     this.curtains = [];
     this.windowIndex = 0;
-    // 窗洞不再铺实墙，只留窗台、窗间墙和过梁
-    this.addWindowRun(room.minX, -outer, z, t, h);
-    this.addWindowRun(outer, room.maxX, z, t, h);
-    this.curtainFar = this.curtains[5] ?? null;
-    this.curtainNear = this.curtains[6] ?? null;
+    // 门在讲台一端。窗只排在门西侧那一长段；门东侧到墙角只剩一窄墩，铺实墙。
+    // 6 扇、宽 1.9，和 anomalies.js 血肉墙的窗洞用同一套切分。
+    this.addWindowRun(room.minX, doorX - outer, z, t, h, 6);
+    const pier0 = doorX + outer;
+    if (room.maxX - pier0 > 0.02) {
+      this.addBox(room.maxX - pier0, h, t, (pier0 + room.maxX) / 2, h / 2, z, this.materials.wallOuter, true);
+    }
+    const last = this.curtains.length;
+    this.curtainFar = this.curtains[last - 2] ?? null;
+    this.curtainNear = this.curtains[last - 1] ?? null;
   }
 
-  addWindowRun(x0, x1, northZ, t, h) {
-    const count = 3;
+  addWindowRun(x0, x1, northZ, t, h, count = 3) {
     const winW = 1.9;
     const sill = 0.95;
     const winTop = 2.28;
     const span = x1 - x0;
     const pier = (span - count * winW) / (count + 1);
     const mid = (x0 + x1) / 2;
-    const wall = this.materials.wall;
+    const wall = this.materials.wallOuter;
     this.addBox(span, sill, t, mid, sill / 2, northZ, wall, true);
     this.addBox(span, h - winTop, t, mid, winTop + (h - winTop) / 2, northZ, wall, false);
     let cursor = x0;
@@ -1477,30 +1595,17 @@ export class Level {
     }
     const teacherDesk = this.addBox(0.72, 0.78, 1.7, 8.2, 0.39, 0, this.materials.desk, true);
     this.furnitureVisuals.push(teacherDesk);
-    const boardX = room.maxX - 0.07;
-    const board = this.addBox(0.08, 1.45, 4.2, boardX, 1.75, 0, this.materials.board, false);
-    const frame = this.addBox(0.06, 1.7, 4.5, boardX + 0.05, 1.75, 0, this.materials.trim, false);
-    this.furnitureVisuals.push(board, frame);
-    markNoRay(board);
-    markNoRay(frame);
-
-    const clock = new THREE.Mesh(
-      new THREE.CircleGeometry(0.28, 24),
-      new THREE.MeshBasicMaterial({ map: clockTexture(), toneMapped: false }),
-    );
-    clock.position.set(room.minX + 0.04, 2.25, -2.4);
-    clock.rotation.y = Math.PI / 2;
-    markNoRay(clock);
-    this.scene.add(clock);
-
-    const poster = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.7, 0.9),
-      new THREE.MeshBasicMaterial({ map: posterTexture(), toneMapped: false }),
-    );
-    poster.position.set(room.minX + 0.04, 1.45, 2.6);
-    poster.rotation.y = Math.PI / 2;
-    markNoRay(poster);
-    this.scene.add(poster);
+    const frontX = room.maxX - 0.07;
+    const front = this.addBox(0.08, 1.45, 4.2, frontX, 1.75, 0, this.materials.board, false);
+    const frontFrame = this.addBox(0.06, 1.7, 4.5, frontX + 0.05, 1.75, 0, this.materials.trim, false);
+    const backX = room.minX + 0.07;
+    const back = this.addBox(0.08, 1.45, 4.2, backX, 1.75, 0, this.materials.board, false);
+    const backFrame = this.addBox(0.06, 1.7, 4.5, backX - 0.05, 1.75, 0, this.materials.trim, false);
+    this.furnitureVisuals.push(front, frontFrame, back, backFrame);
+    markNoRay(front);
+    markNoRay(frontFrame);
+    markNoRay(back);
+    markNoRay(backFrame);
   }
 
   addDesk(x, z) {
@@ -1568,7 +1673,7 @@ export class Level {
 
   buildDoor() {
     this.doorPivot = new THREE.Group();
-    this.doorPivot.position.set(-LAYOUT.door.half, 0, LAYOUT.room.maxZ + LAYOUT.wall / 2);
+    this.doorPivot.position.set(LAYOUT.door.x - LAYOUT.door.half, 0, LAYOUT.room.maxZ + LAYOUT.wall / 2);
     const doorW = LAYOUT.door.half * 2;
     const doorH = LAYOUT.door.height;
     const doorGeo = new THREE.BoxGeometry(doorW, doorH, 0.08);
@@ -1599,14 +1704,14 @@ export class Level {
     const { door, room, wall } = LAYOUT;
     const { jambW, jambD, headH } = DOOR_FRAME;
     const z = room.maxZ + wall / 2;
-    const leftX = -door.half - jambW / 2;
-    const rightX = door.half + jambW / 2;
+    const leftX = door.x - door.half - jambW / 2;
+    const rightX = door.x + door.half + jambW / 2;
     const left = this.addBox(jambW, door.height, jambD, leftX, door.height / 2, z, this.materials.door, true);
     const right = this.addBox(jambW, door.height, jambD, rightX, door.height / 2, z, this.materials.door, true);
     turnBoxGrain(left.geometry);
     turnBoxGrain(right.geometry);
     const span = door.half * 2 + jambW * 2;
-    this.addBox(span, headH, jambD, 0, door.height + headH / 2, z, this.materials.door, false);
+    this.addBox(span, headH, jambD, door.x, door.height + headH / 2, z, this.materials.door, false);
   }
 
   buildCharacters() {
@@ -1642,11 +1747,11 @@ export class Level {
     this.audioX = 0;
     this.audioZ = 0;
     this.npcPath = [
-      new THREE.Vector3(-6.7, 0, LAYOUT.hall.z),
-      new THREE.Vector3(0.15, 0, LAYOUT.hall.z),
-      new THREE.Vector3(0.15, 0, LAYOUT.room.maxZ - 0.85),
+      new THREE.Vector3(LAYOUT.npcStand.x, 0, LAYOUT.npcStand.z),
+      new THREE.Vector3(LAYOUT.door.x, 0, LAYOUT.hall.z),
+      new THREE.Vector3(LAYOUT.door.x, 0, LAYOUT.room.maxZ - 0.85),
     ];
-    this.npcStandPos = new THREE.Vector3(-6.7, 0, LAYOUT.hall.z);
+    this.npcStandPos = new THREE.Vector3(LAYOUT.npcStand.x, 0, LAYOUT.npcStand.z);
     markNoRay(this.npc);
     // 模型本体加一层包裹，供尾声整体转 180° 用（平时保持 0，序章走路不受影响）
     const bodyWrap = new THREE.Group();
@@ -1904,7 +2009,7 @@ export class Level {
     // 走廊 106 米长，雾的可见距离只有十几米，5 米一盏等于让每帧多算一倍光照。
     // 改成 10 米一盏，近处观感几乎不变，片元光照循环少一半。
     for (let x = LAYOUT.hall.minX + 10; x <= LAYOUT.hall.maxX - 5; x += 10) {
-      const lamp = this.adoptLight(new THREE.PointLight(0x8ea0c0, CONFIG.hallLamp, HALL_LAMP_RADIUS, 2));
+      const lamp = this.adoptLight(new THREE.PointLight(0x8ea0c0, CONFIG.hallLamp, CONFIG.hallLampReach, 2));
       lamp.position.set(x, 2.55, LAYOUT.hall.z);
       this.scene.add(lamp);
       this.hallLamps.push(lamp);
@@ -2031,6 +2136,7 @@ export class Level {
     this.roomLights.push(light);
     const fixture = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.07, 0.26), this.fixtureMat.clone());
     fixture.position.set(x, 3.05, z);
+    fixture.rotation.y = Math.PI / 2;
     markNoRay(fixture);
     this.scene.add(fixture);
     this.roomFixtures.push(fixture);
@@ -2235,6 +2341,8 @@ transformed += curtainOff(position);
  * 点光源不看墙。走廊灯在 z≈8.6，距离够得到教室。
  * whole：整份材质都丢掉走廊灯。教室墙、窗框、门框用这个，窗洞侧壁才不会剩半截亮边。
  * 否则只丢掉 z 小于门内沿的片段。教室和走廊共用的天花板用这个。
+ * face：只丢掉不朝走廊的面。教室外墙朝走廊的那一面和走廊墙吃同一盏灯，颜色才一致；
+ * 朝教室的一面和窗洞侧壁仍然挡光。
  */
 function blockHallLight(material, whole = false) {
   if (!material || !material.isMaterial || material.userData.blockHall) return;
@@ -2243,13 +2351,17 @@ function blockHallLight(material, whole = false) {
   const previousKey = material.customProgramCacheKey;
   const faceZ = (LAYOUT.room.maxZ + 0.05).toFixed(3);
   const hallZ = (LAYOUT.room.maxZ + 1).toFixed(3);
-  const gate = whole
-    ? `hallLightWorld.z > ${hallZ}`
-    : `hallLightWorld.z > ${hallZ} && hallFragWorld.z < ${faceZ}`;
+  const facing = whole === 'face';
+  const gate = facing
+    ? `hallLightWorld.z > ${hallZ} && hallNormalWorld.z < 0.35`
+    : whole
+      ? `hallLightWorld.z > ${hallZ}`
+      : `hallLightWorld.z > ${hallZ} && hallFragWorld.z < ${faceZ}`;
   // 必须用普通函数并 call 回材质。原型方法被摘出来直接调用时 this 是 undefined。
   material.customProgramCacheKey = function customProgramCacheKey() {
     const prev = previousKey ? previousKey.call(this) : 'std';
-    return `block-hall-${whole ? 'room' : 'span'}:${prev}`;
+    const kind = facing ? 'face' : whole ? 'room' : 'span';
+    return `block-hall-${kind}:${prev}`;
   };
   material.onBeforeCompile = function onBeforeCompile(shader, renderer) {
     if (previous) previous.call(this, shader, renderer);
@@ -2266,6 +2378,11 @@ function blockHallLight(material, whole = false) {
 					dot(viewMatrix[1].xyz, geometryPosition),
 					dot(viewMatrix[2].xyz, geometryPosition)
 				) + cameraPosition;
+				vec3 hallNormalWorld = normalize(vec3(
+					dot(viewMatrix[0].xyz, geometryNormal),
+					dot(viewMatrix[1].xyz, geometryNormal),
+					dot(viewMatrix[2].xyz, geometryNormal)
+				));
 				if (${gate}) directLight.color = vec3(0.0);
 			}`;
     const chunk = THREE.ShaderChunk.lights_fragment_begin.replace(
@@ -2346,9 +2463,12 @@ function makeMaterials() {
   });
   // 走廊墙、线脚、走廊天花板要保留走廊灯。先克隆，再给教室这份整面挡光。
   // 教室天花板有一截伸到墙外，按片段 z 切割会在墙顶留下一条亮带。
+  // 朝走廊的教室外墙单独一份：贴图和颜色跟走廊墙相同，只有朝外的一面吃走廊灯。
   const hall = wall.clone();
+  const wallOuter = wall.clone();
   const hallTrim = trim.clone();
   const hallCeiling = ceiling.clone();
+  blockHallLight(wallOuter, 'face');
   for (const material of [wall, ceiling, wood, desk, chair, board, trim, curtain, curtainSoft, curtainSoftRight, glass, door]) {
     blockHallLight(material, true);
   }
@@ -2356,6 +2476,7 @@ function makeMaterials() {
     ground: new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 0.95 }),
     wood,
     wall,
+    wallOuter,
     hall,
     hallTrim,
     ceiling,

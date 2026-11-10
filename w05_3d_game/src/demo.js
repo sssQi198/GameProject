@@ -136,8 +136,8 @@ export class DemoDirector {
   }
 
   point(step) {
-    if (step.to === 'hall') return { x: step.x ?? 0, z: LAYOUT.hall.z };
-    if (step.to === 'inside') return { x: step.x ?? 0, z: LAYOUT.room.maxZ - 2.45 };
+    if (step.to === 'hall') return { x: step.x ?? LAYOUT.door.x, z: LAYOUT.hall.z };
+    if (step.to === 'inside') return { x: step.x ?? LAYOUT.door.x, z: LAYOUT.room.maxZ - 2.45 };
     if (step.to === 'pickup') return { ...LAYOUT.pickup };
     if (step.to === 'aisle') {
       const stand = this.game.level.getAnomalyStand(1);
@@ -153,8 +153,8 @@ export class DemoDirector {
 const STEPS = [
   { type: 'say', text: '就在这间。', time: 1.6 },
   { type: 'wait', time: 0.35 },
-  { type: 'move', to: 'hall', x: 0.1, speed: 3.6 },
-  { type: 'move', to: 'inside', x: 0.1, speed: 3.6 },
+  { type: 'move', to: 'hall', speed: 3.6 },
+  { type: 'move', to: 'inside', speed: 3.6 },
   { type: 'waitPhase', phase: 'level' },
   { type: 'move', to: 'pickup', speed: 3.2 },
   { type: 'interact' },
@@ -165,8 +165,8 @@ const STEPS = [
   { type: 'waitCleared' },
   { type: 'wait', time: 1.05 },
   { type: 'move', to: 'aisle', speed: 3.6 },
-  { type: 'move', to: 'inside', x: 0, speed: 3.6 },
-  { type: 'move', to: 'hall', x: 0, speed: 3.8 },
+  { type: 'move', to: 'inside', speed: 3.6 },
+  { type: 'move', to: 'hall', speed: 3.8 },
   { type: 'finale' },
   { type: 'waitPhase', phase: 'finaleChase' },
   { type: 'move', to: 'ending', speed: 5.6 },

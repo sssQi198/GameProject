@@ -252,6 +252,8 @@ export class Game {
     this.l5ShakeT = 0; // 第5关拍照后颤抖计时
     this.entityStepAcc = 0; // 追逐中怪物已走的距离，攒够一个步幅就响一声
     this.entityStepSide = 1; // 左右脚交替（声音声像 ±0.28）
+    this.visionLimit = null;
+    this.entryClosing = false;
     this.controlHints = [];
     this.level.reset();
     this.player.setScripted(asDemo);
@@ -266,8 +268,8 @@ export class Game {
       this.player.setControl(false);
       this.demo.start();
     } else {
-      // 正常模式：先播放intro对话，门虚掩，NPC 站桩
-      this.level.setDoorAjar(true);
+      // 正常模式：先播放 intro 对话。门关着，等同学走到门口再开。
+      this.level.setDoorOpen(false, true);
       this.phase = 'intro';
       this.player.setControl(false);
       this.requestLock();
@@ -282,6 +284,7 @@ export class Game {
     this.hud.setDanger(0);
     this.hud.setChase(false);
     this.hud.setAimHot(false);
+    this.endRoomBlackout();
     this.audio.unlock();
     // 开场衔接那边会传一个更大的 musicTau，让 BGM 跟着黑幕一起「渐起」
     this.audio.setMood('play', opts.musicTau || 0.5);
@@ -331,6 +334,7 @@ export class Game {
     this.hud.setDanger(0);
     this.hud.setChase(false);
     this.hud.setAimHot(false);
+    this.endRoomBlackout();
     this.intentionalUnlock = true;
     if (document.pointerLockElement) document.exitPointerLock();
   }
@@ -472,6 +476,7 @@ export class Game {
       if (this.l5ShakeT <= 0) this.l5ShakeT = 0;
     }
     this.updateZones();
+    this.tickRoomBlackout(dt);
     this.updateFlow(dt);
     this.level.stepItems(dt, this.player);
     // 终局期间 level 停在「被藏起来」的状态，走廊/教室不该再被更新：
@@ -485,6 +490,7 @@ export class Game {
       this.level.updatePointPool(this.env(), this.camera.position);
     } else {
       this.level.update(dt, this.env());
+      this.applyVisionFog();
     }
     this.updatePresentation();
     this.hud.setTime(this.time);
@@ -545,9 +551,10 @@ export class Game {
 
   onEnter() {
     if (this.phase === 'prologue') {
-      // 序章：第一次走进教室 → 第 1 关
+      // 序章：第一次走进教室 → 第 1 关。先让人走进去，门关上后再收视野。
       this.aheadLevel = 1;
       this.phase = 'entering';
+      this.entryClosing = false;
       return;
     }
     if (this.phase !== 'corridor') return;
@@ -561,11 +568,86 @@ export class Game {
       return;
     }
     this.phase = 'entering';
+    this.entryClosing = false;
+  }
+
+  /**
+   * 进门后先收到全黑，停 1 秒，再睁开。
+   * 异常只在画面已经全黑之后放进来，睁开时它已经在屋里。
+   * 这段时间人站在原地，不能走动。
+   */
+  startRoomBlackout() {
+    this.visionLimit = { phase: 'in', t: 0, fade: 0.4, hold: 1 };
+    this.setVisionLimit(0);
+    this.player.moveLocked = true;
+  }
+
+  tickRoomBlackout(dt) {
+    const limit = this.visionLimit;
+    if (!limit) return;
+    limit.t += dt;
+    if (limit.phase === 'in') {
+      const k = smoothStep(limit.t / limit.fade);
+      this.setVisionLimit(k);
+      if (limit.t >= limit.fade) {
+        limit.phase = 'hold';
+        limit.t = 0;
+        this.spawnEnteringAnomaly();
+      }
+      return;
+    }
+    if (limit.phase === 'hold') {
+      this.setVisionLimit(1);
+      if (limit.t >= limit.hold) {
+        limit.phase = 'out';
+        limit.t = 0;
+      }
+      return;
+    }
+    const k = 1 - smoothStep(limit.t / limit.fade);
+    this.setVisionLimit(Math.max(0, k));
+    if (limit.t >= limit.fade) this.endRoomBlackout();
+  }
+
+  spawnEnteringAnomaly() {
+    // 只在画面已经全黑时调用。关门那一步还没放异常，这里才放进来。
+    // enterLevelNow 会把 aheadLevel 清成 0，所以用已经拨好的 levelIndex。
+    const level = this.aheadLevel || this.levelIndex;
+    if (level >= 1 && level <= LEVELS) this.level.spawnUpTo(level);
+  }
+
+  setVisionLimit(amount) {
+    this.visionAmount = amount;
+    this.hud.fadeBlack(amount);
+  }
+
+  /**
+   * 用指数雾把大约 2.5 米外慢慢淹没。曲线是连续的，没有球体切出来的那一圈。
+   * 必须写在 level.update 之后，那边每帧会把雾密度设回正常值。
+   * FogExp2 的能见距离和 density 成反比，0.68 是原先 0.34 的两倍，视野再收一半。
+   */
+  applyVisionFog() {
+    const amount = this.visionAmount || 0;
+    const fog = this.scene.fog;
+    if (!fog || amount <= 0) return;
+    const limited = 0.68;
+    fog.density += (limited - fog.density) * amount;
+  }
+
+  endRoomBlackout() {
+    this.visionLimit = null;
+    this.visionAmount = 0;
+    this.player.moveLocked = false;
+    this.hud.fadeBlack(0);
   }
 
   onExit() {
     if (this.phase === 'entering') {
       this.phase = this.levelIndex === 0 ? 'prologue' : 'corridor';
+      // 门还没合上就退回去：重新打开，这次进门不算数。
+      if (this.entryClosing && !this.visionLimit) this.level.setDoorOpen(true);
+      this.entryClosing = false;
+      this.endRoomBlackout();
       return;
     }
     if (this.phase === 'level' && this.cleared) this.phase = 'leaving';
@@ -589,7 +671,6 @@ export class Game {
         // E 跳过或全部播完 → NPC 直接走进教室，玩家仍不可操作
         this.introPhase = 1;
         this.hud.setPrompt('');
-        this.level.setDoorOpen(true); // NPC 开始走时开门，以免被门阻挡
         this.level.setNpcState('walking');
       }
       return;
@@ -680,14 +761,18 @@ export class Game {
       this.updateIntro(dt);
       return;
     }
-    if (this.phase === 'entering' && this.player.z < LAYOUT.room.maxZ - 2.1) this.enterLevelNow();
+    // 刚进门还能再往里走一点。走到约 1.2 米处才关门；门合上之后才收视野、停住。
+    if (this.phase === 'entering') this.updateEntrySeal();
     if (this.phase === 'leaving' && this.level.isInsideRoom(this.player.x, this.player.z)) this.phase = 'level';
     // 走廊中段换场：走出教室门十几米、背对着教室的时候，才把下一关的场景真的铺进来。
     // 铺完之后玩家走回门口进屋，剩下的只有状态切换——不会再有"站在房间里看它变样"。
+    // 门在讲台一端。刚走出东侧门口时人还对着门洞，不能在那儿换场。
+    const doorClear = Math.hypot(this.player.x - LAYOUT.door.x, this.player.z - LAYOUT.room.maxZ);
     if (this.phase === 'corridor' && !this.aheadLevel && this.levelIndex < LEVELS
       && this.player.z > LAYOUT.room.maxZ
-      && Math.abs(this.player.x) >= LAYOUT.hallSwapX) {
-      this.installLevel(this.levelIndex + 1);
+      && Math.abs(this.player.x) >= LAYOUT.hallSwapX
+      && doorClear >= 14) {
+      this.installLevel(this.levelIndex + 1, false);
     }
     if (this.phase === 'leaving' && this.player.z > 7.35) {
       if (this.levelIndex >= LEVELS) this.beginFinale();
@@ -728,15 +813,15 @@ export class Game {
   }
 
   /**
-   * 把第 index 关"装进世界"：异常、道具、进度、提示都换成这一关的。
-   * 只动世界、不动玩家，所以走廊里就能提前调用（那时门还开着、玩家还在外面）。
-   * 幂等：同一关调第二次，spawnUpTo 跳过已挂的异常，其余都是重设同样的值。
+   * 把第 index 关的进度和提示换上。
+   * spawn 为 false 时先不放异常：进门要等画面全黑再放，避免人看着它冒出来。
+   * 调试跳关走默认，当场放好。
    */
-  installLevel(index) {
+  installLevel(index, spawn = true) {
     this.levelIndex = index;
     this.aheadLevel = index;
     this.cleared = false;
-    this.level.spawnUpTo(index);
+    if (spawn) this.level.spawnUpTo(index);
     this.level.hideNpc();
     if (!this.hasCamera) this.level.revealPickup();
     this.hud.setRecord(index - 1, LEVELS);
@@ -744,18 +829,40 @@ export class Game {
   }
 
   /**
-   * 玩家已经走进教室：定 phase、关门、播报。
-   * 异常早就铺好了（走廊中段），所以这一步只剩状态切换；序章第一次进屋、
-   * 调试跳关这类"没有走廊"的入口也走这里，installLevel 兜住"还没铺"的情况。
+   * 进门后先还能往里走。大约 1.2 米处才关门；门合严之后收视野并停住。
+   * 门还在开、或人退回走廊时，不收视野。
    */
-  enterLevelNow(index = this.aheadLevel || this.levelIndex) {
-    this.installLevel(index);
+  updateEntrySeal() {
+    const stepIn = LAYOUT.room.maxZ - 1.2;
+    if (!this.entryClosing) {
+      if (this.player.z < stepIn) {
+        this.entryClosing = true;
+        this.level.setDoorOpen(false);
+        this.audio.door();
+      }
+      return;
+    }
+    if (this.level.doorAngle > 0.05 || this.visionLimit) return;
+    this.enterLevelNow(this.aheadLevel || this.levelIndex, true, false);
+    this.startRoomBlackout();
+  }
+
+  /**
+   * 玩家已经走进教室：定 phase、关门、播报。
+   * 异常不在这里放：进门这条路径等画面全黑再放。调试跳关 spawn 默认为 true，当场放好。
+   * quietDoor：门已经在合上，不要再响一次。
+   * spawn：false 时异常留到全黑之后再放。
+   */
+  enterLevelNow(index = this.aheadLevel || this.levelIndex, quietDoor = false, spawn = true) {
+    this.installLevel(index, spawn);
     this.aheadLevel = 0;
     this.phase = 'level';
     this.cleared = false;
     this.level.loopEnabled = false;
-    this.level.setDoorOpen(false);
-    this.audio.door();
+    if (!quietDoor) {
+      this.level.setDoorOpen(false);
+      this.audio.door();
+    }
     if (index === 1) {
       this.say(copy.someoneGone, 2.2);
       this.pendingLine = { t: 2.3, text: copy.cameraOnFloor, ttl: 2.4 };
@@ -1585,6 +1692,11 @@ export class Game {
       + ` mate=${this.safehouse ? this.safehouse.mateYaw().toFixed(2) : 'none'}`;
   }
 
+}
+
+function smoothStep(t) {
+  const x = Math.min(1, Math.max(0, t));
+  return x * x * (3 - 2 * x);
 }
 
 function clamp(v, a, b) {

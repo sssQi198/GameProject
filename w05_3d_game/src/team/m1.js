@@ -14,16 +14,16 @@
 import { asset } from '../asset-url.js';
 
 const ANOMALY_ANCHORS = [
-  { x: -7.85, z: 4.0, r: 2.0, note: 'level 1 seated figure' },
-  { x: 9.84, z: 0, r: 2.2, note: 'level 2 blackboard' },
+  { x: 0, z: -5.31, r: 1.15, note: 'level 2 ram skull' },
+  { x: -9.84, z: 0, r: 2.2, note: 'level 1 back blackboard' },
   { x: 0, z: 0, r: 2.8, note: 'level 3 summoning circle' },
   { x: 0.2, z: -2.75, r: 1.6, note: 'level 4 second camera' },
-  { x: 0, z: 6.0, r: 2.2, note: 'level 5 door gap' },
+  { x: 8.6, z: 6.0, r: 2.2, note: 'level 5 door gap' },
 ];
 
 const PHOTO_STANDS = [
-  { x: -6.0, z: 2.75, r: 1.3 },
-  { x: 6.2, z: 0, r: 1.3 },
+  { x: 0, z: -2.5, r: 1.3 },
+  { x: -6.2, z: 0, r: 1.3 },
   { x: 0, z: 3.5, r: 1.3 },
   { x: -1.05, z: -2.75, r: 1.3 },
   { x: 0, z: 4.2, r: 1.3 },
@@ -225,8 +225,8 @@ export function createSceneExtra(THREE, LAYOUT) {
     guard += 1;
     const wall = walls[Math.floor(random() * walls.length)];
     const point = wallPoint(wall);
-    // 右墙是黑板那一面，整段留白，不跟第 2 关的字抢注意力
-    if (wall.x > 0 && Math.abs(point.z) < 3.0) continue;
+    // 后墙是第 1 关写字的黑板，字周围留白。
+    if (wall.x < 0 && Math.abs(point.z) < 3.0) continue;
     if (tooClose(point.x, point.z, 0.3)) continue;
     scratches.push({
       x: point.x,
@@ -244,7 +244,7 @@ export function createSceneExtra(THREE, LAYOUT) {
     guard += 1;
     const wall = walls[Math.floor(random() * walls.length)];
     const point = wallPoint(wall);
-    if (wall.x > 0 && Math.abs(point.z) < 3.0) continue;
+    if (wall.x < 0 && Math.abs(point.z) < 3.0) continue;
     if (tooClose(point.x, point.z, 0.45)) continue;
     hands.push({
       x: point.x,

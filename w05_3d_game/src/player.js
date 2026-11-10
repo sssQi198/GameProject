@@ -29,6 +29,7 @@ export class Player {
     this.radius = CONFIG.playerRadius;
     this.controlEnabled = false;
     this.scripted = false;
+    this.moveLocked = false;
     this.sprinting = false;
     this.moving = false;
     this.course = null;
@@ -85,6 +86,7 @@ export class Player {
     this.gaitAmount = 0;
     this.moving = false;
     this.sprinting = false;
+    this.moveLocked = false;
     this.syncCamera();
   }
 
@@ -340,6 +342,13 @@ export class Player {
     if (keys.has('ArrowUp')) this.pitch += 1.1 * dt;
     if (keys.has('ArrowDown')) this.pitch -= 1.1 * dt;
     this.pitch = clamp(this.pitch, -LOOK_LIMIT, LOOK_LIMIT);
+
+    // 进门视野收紧时人站着不动，视角仍然可以转。
+    if (this.moveLocked) {
+      this.moving = false;
+      this.sprinting = false;
+      return;
+    }
 
     let ix = 0;
     let iz = 0;
