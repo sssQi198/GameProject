@@ -131,6 +131,331 @@ function stainGoatSkull(root) {
  */
 const SKULL_SCALE = 3.6;
 const SKULL_FLOOR = 0.03;
+/** 木偶身体离开羊头网格的余量。头骨未缩放包围是 x ±0.175、z 0–0.3802。 */
+const PUPPET_SKULL_CLEAR = 0.5;
+
+/** 羊头在地面上占的范围，外加木偶身体的余量。冲刺和落点都不能进这块。 */
+function skullKeepOut() {
+  const halfW = 0.175 * SKULL_SCALE;
+  const depth = 0.3802 * SKULL_SCALE;
+  const { skull } = LAYOUT;
+  return {
+    minX: skull.x - halfW - PUPPET_SKULL_CLEAR,
+    maxX: skull.x + halfW + PUPPET_SKULL_CLEAR,
+    minZ: skull.z,
+    maxZ: skull.z + depth + PUPPET_SKULL_CLEAR,
+  };
+}
+
+function insideSkull(x, z, box) {
+  return x > box.minX && x < box.maxX && z > box.minZ && z < box.maxZ;
+}
+
+/** 线段是否穿过羊头的禁区。端点贴在边上不算穿进去。 */
+function segmentHitsSkull(x0, z0, x1, z1, box) {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = x1 - x0;
+  const dz = z1 - z0;
+  const p = [-dx, dx, -dz, dz];
+  const q = [x0 - box.minX, box.maxX - x0, z0 - box.minZ, box.maxZ - z0];
+  for (let i = 0; i < 4; i += 1) {
+    if (Math.abs(p[i]) < 1e-8) {
+      if (q[i] < 0) return false;
+    } else {
+      const t = q[i] / p[i];
+      if (p[i] < 0) {
+        if (t > t1) return false;
+        if (t > t0) t0 = t;
+      } else {
+        if (t < t0) return false;
+        if (t < t1) t1 = t;
+      }
+    }
+  }
+  return t0 <= t1;
+}
+
+function clampRoom(x, z) {
+  const { room } = LAYOUT;
+  return {
+    x: Math.max(room.minX + 0.3, Math.min(room.maxX - 0.3, x)),
+    z: Math.max(room.minZ + 0.3, Math.min(room.maxZ - 0.3, z)),
+  };
+}
+
+/** 落点已经在骨头里时，推到最近的外侧，优先推到头骨前方。 */
+function exitSkull(x, z, box) {
+  if (!insideSkull(x, z, box)) return { x, z };
+  const left = x - box.minX;
+  const right = box.maxX - x;
+  const front = box.maxZ - z;
+  if (front <= left && front <= right) return clampRoom(x, box.maxZ + 0.08);
+  if (left <= right) return clampRoom(box.minX - 0.08, z);
+  return clampRoom(box.maxX + 0.08, z);
+}
+
+/**
+ * 冲刺路线。直线会穿过羊头时，改从骨头前方的角上绕过去。
+ * 返回的点不含起点，最后一个点是终点。
+ */
+function routeAroundSkull(x0, z0, x1, z1, box) {
+  const end = { x: x1, z: z1 };
+  if (!segmentHitsSkull(x0, z0, x1, z1, box)) return [end];
+  const mid = (box.minX + box.maxX) / 2;
+  const goLeft = x0 < mid;
+  const frontZ = box.maxZ + 0.12;
+  const nearX = (goLeft ? box.minX : box.maxX) + (goLeft ? -0.12 : 0.12);
+  const farX = (goLeft ? box.maxX : box.minX) + (goLeft ? 0.12 : -0.12);
+  const near = clampRoom(nearX, frontZ);
+  const far = clampRoom(farX, frontZ);
+  const targetOnFarSide = goLeft ? x1 > box.maxX : x1 < box.minX;
+  if (targetOnFarSide && z1 < box.maxZ) return [near, far, end];
+  return [near, end];
+}
+
+/**
+ * 羊头周围的干血。对照血迹形态：
+ * 墙上是冲击喷溅，近处圆、远处拉成椭圆，从骨头往外放射；
+ * 地上是渗进木地板的血泊，边沿带短刺和卫星血滴；
+ * 墙上较重的点再顺着重力往下淌，末端收成一个圆头。
+ * 厚处近黑，薄处略红。不随灯光变白。
+ */
+function skullSplatterTexture(kind) {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  const rand = seeded(kind === 'wall' ? 0x5b100d : 0x4a100e);
+  const dried = 'rgba(54,8,8,0.96)';
+  const body = 'rgba(102,20,18,0.92)';
+  const thin = 'rgba(124,32,26,0.84)';
+
+  const ellipse = (x, y, rx, ry, rot, color) => {
+    if (rx < 0.35 || ry < 0.35) return;
+    if (x < 2 || y < 2 || x > size - 2 || y > size - 2) return;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  };
+
+  // 落在粗糙面上的一滴：圆斑、短刺、刺尖一颗卫星点。刺很短，不像长尾巴。
+  const parentDrop = (x, y, r, aim) => {
+    ellipse(x, y, r * 1.05, r * 0.86, aim, body);
+    ellipse(x, y, r * 0.42, r * 0.34, aim, dried);
+    const spines = 3 + Math.floor(rand() * 2);
+    ctx.lineCap = 'round';
+    for (let i = 0; i < spines; i += 1) {
+      const a = aim + (rand() - 0.5) * Math.PI * 0.65;
+      const len = r * (0.22 + rand() * 0.4);
+      const x0 = x + Math.cos(a) * r * 0.72;
+      const y0 = y + Math.sin(a) * r * 0.72;
+      const x1 = x + Math.cos(a) * (r + len);
+      const y1 = y + Math.sin(a) * (r + len);
+      ctx.strokeStyle = body;
+      ctx.lineWidth = Math.max(0.6, r * 0.11);
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+      ellipse(x1, y1, 0.7 + rand() * 1.3, 0.55 + rand() * 0.8, a, thin);
+    }
+  };
+
+  // 飞出去的小血点。离源头越远越扁，长轴顺着飞行方向。
+  const spatter = (x, y, dir, travel) => {
+    const ry = 0.7 + rand() * (travel < 0.35 ? 3.4 : 1.8);
+    const rx = ry * (1 + travel * (0.5 + rand() * 1.3));
+    ellipse(x, y, rx, ry, dir, rand() > 0.72 ? thin : body);
+    if (travel > 0.4 && rand() > 0.45) {
+      ctx.strokeStyle = thin;
+      ctx.lineWidth = 0.7;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(dir) * rx * 0.9, y + Math.sin(dir) * rx * 0.9);
+      ctx.stroke();
+    }
+  };
+
+  // 木地板上的一摊：边沿不齐，中间更暗，周围一圈卫星点。
+  const floorPool = (x, y, rx, ry) => {
+    ellipse(x, y, rx * 1.18, ry * 1.22, 0.1, 'rgba(42,10,8,0.55)');
+    const n = 7 + Math.floor(rand() * 4);
+    for (let i = 0; i < n; i += 1) {
+      const a = rand() * Math.PI * 2;
+      const d = rand() * Math.min(rx, ry) * 0.5;
+      ellipse(
+        x + Math.cos(a) * d,
+        y + Math.sin(a) * d,
+        rx * (0.32 + rand() * 0.38),
+        ry * (0.3 + rand() * 0.4),
+        rand() * Math.PI,
+        i % 3 === 0 ? dried : body,
+      );
+    }
+    const sats = 10 + Math.floor(rand() * 8);
+    for (let i = 0; i < sats; i += 1) {
+      const a = rand() * Math.PI * 2;
+      const d = Math.max(rx, ry) * (0.85 + rand() * 0.55);
+      spatter(x + Math.cos(a) * d, y + Math.sin(a) * d * 0.75, a, 0.55 + rand() * 0.4);
+    }
+  };
+
+  // 顺着墙往下的细流，末端一个圆头。
+  const flow = (x, y, len) => {
+    const wob = (rand() - 0.5) * 10;
+    const x1 = x + wob;
+    const y1 = y + len;
+    if (y1 > size - 4) return;
+    ctx.strokeStyle = dried;
+    ctx.lineWidth = 1.15 + rand() * 1.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.quadraticCurveTo(x + wob * 0.4, y + len * 0.55, x1, y1);
+    ctx.stroke();
+    ellipse(x1, y1 + 1.2, 1.5 + rand() * 1.4, 1.8 + rand() * 1.6, 0, body);
+  };
+
+  if (kind === 'floor') {
+    // 画布上方贴墙，下方朝教室里面。头骨盖住上半中部。
+    floorPool(size * 0.5, size * 0.3, 72, 34);
+    floorPool(size * 0.22, size * 0.46, 34, 20);
+    floorPool(size * 0.78, size * 0.44, 30, 18);
+    parentDrop(size * 0.4, size * 0.6, 11, Math.PI / 2);
+    parentDrop(size * 0.62, size * 0.68, 9, Math.PI * 0.55);
+    parentDrop(size * 0.3, size * 0.72, 7, Math.PI * 0.4);
+    const origins = [
+      [0.5, 0.34],
+      [0.24, 0.46],
+      [0.76, 0.44],
+    ];
+    for (const [fx, fy] of origins) {
+      const count = 16 + Math.floor(rand() * 8);
+      for (let i = 0; i < count; i += 1) {
+        const ang = Math.PI * 0.05 + rand() * Math.PI * 0.9;
+        const dist = 16 + (rand() ** 0.72) * 150;
+        spatter(
+          size * fx + Math.cos(ang) * dist,
+          size * fy + Math.sin(ang) * dist,
+          ang,
+          dist / 170,
+        );
+      }
+    }
+  } else {
+    // 画布上方是高处。源头在头骨后方，能看见的是头顶、两侧，以及往下的细流。
+    const sources = [
+      [0.5, 0.66],
+      [0.16, 0.58],
+      [0.84, 0.56],
+      [0.34, 0.4],
+      [0.66, 0.36],
+    ];
+    parentDrop(size * 0.18, size * 0.52, 10, -Math.PI * 0.55);
+    parentDrop(size * 0.82, size * 0.5, 9, -Math.PI * 0.4);
+    parentDrop(size * 0.32, size * 0.34, 7, -Math.PI / 2);
+    parentDrop(size * 0.68, size * 0.3, 6, -Math.PI * 0.6);
+    parentDrop(size * 0.46, size * 0.22, 6, -Math.PI * 0.45);
+    parentDrop(size * 0.12, size * 0.38, 5, -Math.PI * 0.7);
+    parentDrop(size * 0.88, size * 0.36, 5, -Math.PI * 0.3);
+    for (const [fx, fy] of sources) {
+      const count = 28 + Math.floor(rand() * 12);
+      for (let i = 0; i < count; i += 1) {
+        const ang = -Math.PI * 0.98 + rand() * Math.PI * 0.96;
+        const dist = 10 + (rand() ** 0.55) * 190;
+        spatter(
+          size * fx + Math.cos(ang) * dist,
+          size * fy + Math.sin(ang) * dist,
+          ang,
+          dist / 200,
+        );
+      }
+      const drips = 3 + Math.floor(rand() * 2);
+      for (let i = 0; i < drips; i += 1) {
+        flow(
+          size * fx + (rand() - 0.5) * 70,
+          size * fy + rand() * 10,
+          48 + rand() * 130,
+        );
+      }
+    }
+  }
+
+  const pixels = ctx.getImageData(0, 0, size, size);
+  const data = pixels.data;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 8) {
+      data[i] = 0;
+      data[i + 1] = 0;
+      data[i + 2] = 0;
+      data[i + 3] = 0;
+    }
+  }
+  ctx.putImageData(pixels, 0, 0);
+
+  const map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = 4;
+  return map;
+}
+
+function skullSplatterMaterial(map) {
+  const mat = new THREE.MeshBasicMaterial({
+    map,
+    transparent: true,
+    depthWrite: false,
+    alphaTest: 0.02,
+  });
+  mat.toneMapped = false;
+  mat.polygonOffset = true;
+  mat.polygonOffsetFactor = -4;
+  mat.polygonOffsetUnits = -4;
+  return mat;
+}
+
+/** 羊头贴南墙。血铺在地板和这面墙的内侧，范围比头骨大一圈，中心被骨头挡住。 */
+function addSkullSplatter(group) {
+  const holder = new THREE.Group();
+  holder.name = 'skull-splatter';
+  holder.scale.setScalar(1 / SKULL_SCALE);
+  holder.userData.noRay = true;
+  group.add(holder);
+
+  const { skull, room } = LAYOUT;
+  const originY = SKULL_FLOOR + 0.131 * SKULL_SCALE;
+  // 父级已经放大 SKULL_SCALE，这里再缩回去，所以位移直接用米，不用再除一次。
+  const place = (mesh, x, y, z) => {
+    mesh.position.set(x - skull.x, y - originY, z - skull.z);
+    holder.add(mesh);
+  };
+
+  const floorW = 3.4;
+  const floorD = 2.8;
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(floorW, floorD),
+    skullSplatterMaterial(skullSplatterTexture('floor')),
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.renderOrder = 3;
+  place(floor, skull.x, SKULL_FLOOR + 0.012, room.minZ + 0.02 + floorD / 2);
+
+  const wallW = 3.2 * 1.25;
+  const wallH = 2.05 * 1.25;
+  const wall = new THREE.Mesh(
+    new THREE.PlaneGeometry(wallW, wallH),
+    skullSplatterMaterial(skullSplatterTexture('wall')),
+  );
+  wall.renderOrder = 3;
+  place(wall, skull.x, SKULL_FLOOR + wallH / 2 - 0.02, room.minZ + 0.02);
+}
 
 function createRamSkull() {
   const group = new THREE.Group();
@@ -138,6 +463,7 @@ function createRamSkull() {
   const y = SKULL_FLOOR + 0.131 * SKULL_SCALE;
   group.position.set(skull.x, y, skull.z);
   group.scale.setScalar(SKULL_SCALE);
+  addSkullSplatter(group);
   const halfW = 0.175 * SKULL_SCALE;
   const height = 0.262 * SKULL_SCALE;
   const depth = 0.3802 * SKULL_SCALE;
@@ -178,170 +504,16 @@ function createRamSkull() {
 /* ---------------------------------------------------------------- 第 1 关 */
 
 /**
- * 黑板：一行暗红血字，写成草书，字与字牵丝相连，血从字里往下淌。
- * 不再做重复的第二行，也不再画下方的计数划痕。
+ * 黑板：贴一张生成的血字，「你就是下一个」。图是透明底，只盖字和血滴。
+ * 平面宽高按图片比例，避免拉变形。
  */
 function createBoard() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 384;
-  const ctx = canvas.getContext('2d');
-  const rand = seeded(20251031);
+  const imgW = 1583;
+  const imgH = 837;
+  const planeW = 2.7;
+  const planeH = planeW * (imgH / imgW);
 
-  // 底板留空。整块不透明的深色面会比真正的黑板更亮，看起来像反光。
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  const text = '你就是下一个';
-  const baseY = 188;
-  const baseSize = 132;
-  // 行楷是系统里最接近草书的一款。不加粗，免得连笔被涂死。
-  const fontOf = (size) => `400 ${size}px "STXingkai", "华文行楷", "KaiTi", "STKaiti", "Microsoft YaHei", sans-serif`;
-
-  ctx.font = fontOf(baseSize);
-  const widths = [...text].map((ch) => ctx.measureText(ch).width);
-
-  // 行楷自己已经是连笔。这里只轻轻侧过身，字距收一点，好让牵丝接得上。
-  const rhythm = [0.96, 1.06, 0.94, 1.08, 0.92, 1.02];
-  const glyphs = [...text].map((ch, i) => ({
-    ch,
-    size: baseSize * rhythm[i],
-    rot: -0.1 + (rand() - 0.5) * 0.06,
-    skew: 0.1 + rand() * 0.04,
-    sx: 0.96,
-    sy: 1.04,
-    gap: 0.78 + rand() * 0.08,
-    dx: (rand() - 0.5) * 3,
-    dy: Math.sin(i * 0.95) * 8 + (rand() - 0.5) * 4,
-    weight: 1,
-    x: 0,
-  }));
-  let cursor = 0;
-  for (let i = 0; i < glyphs.length; i += 1) {
-    glyphs[i].x = cursor + widths[i] / 2;
-    cursor += widths[i] * glyphs[i].gap;
-  }
-  const mid = (glyphs[0].x + glyphs[glyphs.length - 1].x) / 2;
-  for (const g of glyphs) g.x += 512 - mid;
-
-  const placeGlyph = (g, extraRot = 0) => {
-    ctx.translate(g.x + g.dx, baseY + g.dy);
-    ctx.rotate(g.rot + extraRot);
-    ctx.transform(g.sx, g.skew * 0.55, g.skew, g.sy, 0, 0);
-    ctx.font = fontOf(g.size);
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-  };
-
-  // 牵丝先铺在字底下：一笔的收尾拖进下一字的起笔
-  ctx.lineCap = 'round';
-  ctx.lineJoin = 'round';
-  for (let i = 0; i < glyphs.length - 1; i += 1) {
-    const a = glyphs[i];
-    const b = glyphs[i + 1];
-    const x1 = a.x + a.dx + a.size * 0.16;
-    const y1 = baseY + a.dy + a.size * 0.22;
-    const x2 = b.x + b.dx - b.size * 0.3;
-    const y2 = baseY + b.dy - b.size * 0.08;
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.quadraticCurveTo((x1 + x2) / 2, Math.max(y1, y2) + 22, x2, y2);
-    ctx.strokeStyle = 'rgba(132,14,18,1)';
-    ctx.lineWidth = 3.2;
-    ctx.globalAlpha = 0.7;
-    ctx.stroke();
-  }
-
-  // 末字收笔拉出一条长锋
-  const last = glyphs[glyphs.length - 1];
-  ctx.beginPath();
-  ctx.moveTo(last.x + last.dx + last.size * 0.12, baseY + last.dy + last.size * 0.16);
-  ctx.quadraticCurveTo(
-    last.x + last.dx + 78,
-    baseY + last.dy + 36,
-    last.x + last.dx + 128,
-    baseY + last.dy - 6,
-  );
-  ctx.strokeStyle = 'rgba(136,14,18,1)';
-  ctx.lineWidth = 4.5;
-  ctx.globalAlpha = 0.85;
-  ctx.stroke();
-  ctx.globalAlpha = 1;
-
-  // 主笔两遍：一遍侧锋垫厚，一遍压在上面，边沿留一点飞白
-  for (const g of glyphs) {
-    ctx.save();
-    placeGlyph(g);
-    ctx.fillStyle = 'rgba(150,16,20,1)';
-    ctx.globalAlpha = g.weight;
-    ctx.fillText(g.ch, 1.5, 1.5);
-    ctx.fillText(g.ch, 0, 0);
-    ctx.restore();
-  }
-  ctx.globalAlpha = 1;
-
-  // 血迹：从字里往下淌
-  const drip = (x, top, len, width, alpha) => {
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = 'rgba(104,9,13,0.95)';
-    ctx.beginPath();
-    ctx.moveTo(x - width / 2, top);
-    ctx.quadraticCurveTo(x - width * 0.45, top + len * 0.72, x - width * 0.16, top + len * 0.95);
-    ctx.quadraticCurveTo(x, top + len * 1.06, x + width * 0.16, top + len * 0.95);
-    ctx.quadraticCurveTo(x + width * 0.45, top + len * 0.72, x + width / 2, top);
-    ctx.closePath();
-    ctx.fill();
-    // 滴头
-    ctx.beginPath();
-    ctx.arc(x, top + len, width * 0.6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1;
-  };
-
-  const glyphX = glyphs.map((g) => g.x + g.dx);
-  const left = Math.min(...glyphX) - 28;
-  const span = Math.max(...glyphX) - left + 56;
-
-  // 沿这行字撒血迹，长短不一
-  for (let i = 0; i < 15; i += 1) {
-    const x = left + rand() * span;
-    const top = 150 + rand() * 60;
-    const len = 10 + rand() * 86;
-    const width = 2.2 + rand() * 5;
-    drip(x, top, len, width, 0.55 + rand() * 0.4);
-  }
-
-  // 三个字底下拖到底的长痕
-  for (const g of [glyphs[0], glyphs[2], glyphs[5]]) {
-    drip(g.x + g.dx, baseY + g.dy + 16, 130 + rand() * 70, 3.4 + rand(), 0.62);
-  }
-
-  // 溅点
-  for (let i = 0; i < 40; i += 1) {
-    const x = left + rand() * span;
-    const y = 130 + rand() * 150;
-    const r = 0.8 + rand() * 2.6;
-    ctx.globalAlpha = 0.25 + rand() * 0.45;
-    ctx.fillStyle = 'rgba(96,8,12,0.9)';
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-
-  // 抗锯齿会在笔画边上留下几乎透明的浅色像素，叠在黑板上就像一圈反光。
-  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = pixels.data;
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] < 12) {
-      data[i] = 0;
-      data[i + 1] = 0;
-      data[i + 2] = 0;
-      data[i + 3] = 0;
-    }
-  }
-  ctx.putImageData(pixels, 0, 0);
-
-  const map = new THREE.CanvasTexture(canvas);
+  const map = new THREE.TextureLoader().load(asset('textures/blood_text.png'));
   map.colorSpace = THREE.SRGBColorSpace;
   map.anisotropy = 4;
   map.premultiplyAlpha = false;
@@ -358,7 +530,7 @@ function createBoard() {
   mat.polygonOffsetUnits = -2;
 
   const group = new THREE.Group();
-  const plane = new THREE.Mesh(new THREE.PlaneGeometry(2.55, 0.95), mat);
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), mat);
   group.add(plane);
   group.position.set(LAYOUT.board.x, LAYOUT.board.y, LAYOUT.board.z);
   group.rotation.y = Math.PI / 2;
@@ -1070,9 +1242,84 @@ function addPuppetFace(head) {
 }
 
 /**
+ * 胶合板。木偶网格没有 UV，按物体表面三向投影，大约 2 米一块。
+ * 脸上的墨线是后来另挂的，不走这张材质。
+ */
+let plywoodMat = null;
+
+function plywoodMaterial() {
+  if (plywoodMat) return plywoodMat;
+  const loader = new THREE.TextureLoader();
+  const map = loader.load(asset('textures/plywood_diff.jpg'));
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  const roughnessMap = loader.load(asset('textures/plywood_rough.jpg'));
+  roughnessMap.colorSpace = THREE.LinearSRGBColorSpace;
+  roughnessMap.wrapS = roughnessMap.wrapT = THREE.RepeatWrapping;
+  plywoodMat = new THREE.MeshStandardMaterial({
+    name: 'Plywood',
+    color: 0xffffff,
+    map,
+    roughnessMap,
+    roughness: 1,
+    metalness: 0,
+  });
+  plywoodMat.onBeforeCompile = (shader) => {
+    if (!shader.vertexShader || !shader.fragmentShader) return;
+    if (!shader.vertexShader.includes('#include <begin_vertex>')) return;
+    if (!shader.fragmentShader.includes('#include <map_fragment>')) return;
+    const decl = '\nvarying vec3 vPlyPos;\nvarying vec3 vPlyNor;\n';
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>' + decl)
+      .replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\nvPlyPos = transformed;\nvPlyNor = normal;',
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>${decl}
+vec4 plyTri(sampler2D tex, vec3 pos, vec3 nor) {
+  vec3 n = abs(normalize(nor));
+  n = pow(max(n, vec3(1e-4)), vec3(4.0));
+  n /= (n.x + n.y + n.z);
+  vec4 sx = texture2D(tex, pos.zy * 0.5);
+  vec4 sy = texture2D(tex, pos.xz * 0.5);
+  vec4 sz = texture2D(tex, pos.xy * 0.5);
+  return sx * n.x + sy * n.y + sz * n.z;
+}
+`)
+      .replace('#include <map_fragment>', `
+#ifdef USE_MAP
+	vec4 sampledDiffuseColor = plyTri(map, vPlyPos, vPlyNor);
+	diffuseColor *= sampledDiffuseColor;
+#endif`)
+      .replace('#include <roughnessmap_fragment>', `
+float roughnessFactor = roughness;
+#ifdef USE_ROUGHNESSMAP
+	vec4 texelRoughness = plyTri(roughnessMap, vPlyPos, vPlyNor);
+	roughnessFactor *= texelRoughness.g;
+#endif`);
+  };
+  return plywoodMat;
+}
+
+function applyPlywood(root) {
+  const mat = plywoodMaterial();
+  const retired = new Set();
+  root.traverse((obj) => {
+    if (!obj.isMesh || !obj.material || obj.userData.puppetFace) return;
+    const list = Array.isArray(obj.material) ? obj.material : [obj.material];
+    for (const item of list) {
+      if (item && item !== mat) retired.add(item);
+    }
+    obj.material = mat;
+  });
+  for (const item of retired) item.dispose();
+}
+
+/**
  * 红色人偶瞬移惊吓异常。外形用 assets/models/puppet_v03.glb（木人偶），
- * 脚底在本地 Y=0。瞬移和冲刺的时机不变。
- * - 每 4 次灯灭触发一次瞬移
+ * 脚底在本地 Y=0。
+ * - 每 4 次灯灭触发一次瞬移。刚出现的那一次先在原地多留几秒，方便进门第一眼看到
  * - 第 3/6/9… 次瞬移为"冲刺贴脸"：从玩家视野前方约 2m 处以 3.4m/s 冲向玩家面前急停
  * - 不冲刺时姿势不动。每次瞬移到新位置才换下一副静止姿势
  * - 冲刺时支撑脚踩地，另一条腿屈膝前摆，急停后定格成「贴脸」姿势：头正对玩家、脸占满画面
@@ -1111,6 +1358,7 @@ function createRedDoll() {
     limbs.handR = bound.hands[1] ?? null;
     limbs.head = bound.head ?? null;
     limbs.body = bound.body ?? null;
+    applyPlywood(bound.root);
     // 脸上的简笔画：两个黑点当眼睛、一条弧线当嘴，笔画都带墨晕和往下挂的墨滴
     if (limbs.head) addPuppetFace(limbs.head);
     document.body.dataset.puppetModel = 'glb';
@@ -1122,8 +1370,9 @@ function createRedDoll() {
   tagAnomaly(group, 4, 'doll');
 
   // ── 预定义安全角落位置 ──
+  // 南墙正中是羊头，不能再站 (0, -5.4)，否则身体嵌在骨头里。改到头骨左侧。
   const CORNERS = [
-    { x: 0, z: -5.4 },
+    { x: -2.2, z: -5.4 },
     { x: -9.4, z: 2.5 },
     { x: 9.4, z: -5.4 },
     { x: -9.4, z: -4.5 },
@@ -1136,6 +1385,11 @@ function createRedDoll() {
   let teleportPhase = 0;          // 瞬移阶段，%3==2 为冲刺贴脸
   let cornerIndex = 0;
   let firstFlicker = true;
+  // 灯灭一轮只有一两秒。按「每 4 次」算，木偶常在玩家转头之前就换位。
+  // 刚进教室的第一次出现先钉在原地，这段时间里的灯灭不触发瞬移。
+  let firstLookLeft = 0;
+  let firstLookPending = false;   // 停留期间错过的那次瞬移，时间一到就补上
+  const FIRST_LOOK_HOLD = 5;
 
   // 冲刺状态
   let charging = false;           // 是否正在冲刺中
@@ -1144,7 +1398,9 @@ function createRedDoll() {
   let chargeTargetX = 0;
   let chargeTargetZ = 0;
   let chargeProgress = 0;         // 0..1 归一化进度
-  let chargeMaxDist = 0;          // 总距离
+  let chargeMaxDist = 0;          // 总距离，含绕开羊头的那段
+  let chargePts = null;           // 含起点的折线
+  let chargeLens = null;          // 折线各点的累计长度
   const CHARGE_SPEED = 3.4;       // m/s 冲刺速度
   const LAUNCH_DIST = 1.8;        // 出现距离玩家多远
   const FACE_DIST = 0.42;         // 急停后停在离玩家眼睛多近：脸要占满画面
@@ -1174,6 +1430,40 @@ function createRedDoll() {
     holdI = (holdI + 1) % PUPPET_HOLDS.length;
     faceOff = false;          // 换了姿势/位置，贴脸定格结束
     woodClick(env);
+  }
+
+  /** 把冲刺折线记下来。直线穿过羊头时改走骨头前方。 */
+  function setChargePath(x0, z0, x1, z1) {
+    const box = skullKeepOut();
+    const from = exitSkull(x0, z0, box);
+    const to = exitSkull(x1, z1, box);
+    const rest = routeAroundSkull(from.x, from.z, to.x, to.z, box);
+    chargePts = [{ x: from.x, z: from.z }, ...rest];
+    chargeLens = [0];
+    for (let i = 1; i < chargePts.length; i += 1) {
+      const a = chargePts[i - 1];
+      const b = chargePts[i];
+      chargeLens.push(chargeLens[i - 1] + Math.hypot(b.x - a.x, b.z - a.z));
+    }
+    chargeFromX = from.x;
+    chargeFromZ = from.z;
+    chargeTargetX = to.x;
+    chargeTargetZ = to.z;
+    chargeMaxDist = Math.max(0.05, chargeLens[chargeLens.length - 1]);
+  }
+
+  function pointAlongCharge(dist) {
+    const pts = chargePts;
+    const lens = chargeLens;
+    if (!pts || pts.length < 2) return { x: chargeTargetX, z: chargeTargetZ };
+    if (dist >= lens[lens.length - 1]) return pts[pts.length - 1];
+    let i = 1;
+    while (i < lens.length - 1 && lens[i] < dist) i += 1;
+    const span = lens[i] - lens[i - 1];
+    const u = span < 1e-6 ? 1 : (dist - lens[i - 1]) / span;
+    const a = pts[i - 1];
+    const b = pts[i];
+    return { x: a.x + (b.x - a.x) * u, z: a.z + (b.z - a.z) * u };
   }
 
   // 躯干朝房间里，不跟着玩家转。
@@ -1240,9 +1530,8 @@ function createRedDoll() {
           const t = chargeProgress;
           // 缓入缓出：前快后慢，在到达时平滑停止
           const easedT = t < 0.7 ? t / 0.7 * 0.85 : 0.85 + (t - 0.7) / 0.3 * 0.15;
-          const cx = chargeFromX + (chargeTargetX - chargeFromX) * easedT;
-          const cz = chargeFromZ + (chargeTargetZ - chargeFromZ) * easedT;
-          group.position.set(cx, groundY, cz);
+          const along = pointAlongCharge(easedT * chargeMaxDist);
+          group.position.set(along.x, groundY, along.z);
           const stride = chargeProgress * Math.max(chargeMaxDist, 0.4) * 8;
           sampleCharge(stride, pose);
           applyPuppetPose(limbs, pose);
@@ -1254,6 +1543,7 @@ function createRedDoll() {
       }
 
       // ===== 2. 灯灭上升沿检测 =====
+      if (firstLookLeft > 0) firstLookLeft = Math.max(0, firstLookLeft - dt);
       const flickerRise = env.flickerDark && !lastFlicker;
       lastFlicker = env.flickerDark;
 
@@ -1262,6 +1552,7 @@ function createRedDoll() {
 
         if (firstFlicker) {
           firstFlicker = false;
+          firstLookLeft = FIRST_LOOK_HOLD;
           group.visible = true;
           cornerIndex = 0;
           group.position.set(CORNERS[cornerIndex].x, groundY, CORNERS[cornerIndex].z);
@@ -1269,8 +1560,16 @@ function createRedDoll() {
           advanceHold(env);
         }
 
-        // 每 4 次灯灭触发一次瞬移
-        if (flickerCount % 4 === 0) {
+        // 每 4 次灯灭触发一次瞬移。进门后的第一次先留在原地，错过的拍子等停留结束再补。
+        let teleportDue = flickerCount % 4 === 0;
+        if (firstLookLeft > 0) {
+          if (teleportDue) firstLookPending = true;
+          teleportDue = false;
+        } else if (firstLookPending) {
+          teleportDue = true;
+          firstLookPending = false;
+        }
+        if (teleportDue) {
           const isClosePhase = teleportPhase % 3 === 2;
           // 第5关禁用冲刺，只做角落瞬移
           const inLevel5 = (env.levelIndex ?? 0) === 5;
@@ -1309,6 +1608,7 @@ function createRedDoll() {
                   }
                   if (blocked) break;
                 }
+                if (!blocked && insideSkull(nx, nz, skullKeepOut())) blocked = true;
                 if (!blocked) {
                   const dx = nx - 8.2;
                   const dz = nz - 0;
@@ -1348,16 +1648,12 @@ function createRedDoll() {
               advanceHold(env);
             } else {
               // 开始冲刺
-              group.position.set(launchX, groundY, launchZ);
-              group.rotation.y = Math.atan2(faceX - launchX, faceZ - launchZ);
+              setChargePath(launchX, launchZ, faceX, faceZ);
+              group.position.set(chargeFromX, groundY, chargeFromZ);
+              group.rotation.y = Math.atan2(chargeTargetX - chargeFromX, chargeTargetZ - chargeFromZ);
               group.visible = true;
               charging = true;
-              chargeFromX = launchX;
-              chargeFromZ = launchZ;
-              chargeTargetX = faceX;
-              chargeTargetZ = faceZ;
               chargeProgress = 0;
-              chargeMaxDist = Math.hypot(faceX - launchX, faceZ - launchZ);
               advanceHold(env);
 
               // 突脸音效：只在第四关小人真正冲过来的这一刻响一次

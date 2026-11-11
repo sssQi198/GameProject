@@ -4,9 +4,9 @@
 
 ## Run
 
-需要 Node.js 18 或更高。Three.js 和 lil-gui 已经放在 `vendor/`，不用再装依赖。
+Three.js 和 lil-gui 已经放在 `vendor/`，不用再装依赖。
 
-Windows 上直接双击 `start.bat`，它会启动本地服务器并打开浏览器。玩的时候别关那个黑色窗口。
+Windows 上直接双击 `start.bat`。没有安装 Node.js 也可以，它会用系统自带的 PowerShell 打开浏览器。玩的时候别关那个黑色窗口。已经安装 Node.js 18 或更高时，`start.bat` 仍会优先用 Node。
 
 也可以用终端：
 

@@ -1,5 +1,53 @@
 import * as THREE from '../vendor/three.module.js';
+import { asset } from './asset-url.js';
 import { configureMateModel, createClassmate, mateModelConfig } from './team/m2.js';
+
+/** 平铺一张数据贴图。roughness / normal 用线性空间，颜色图用 sRGB。 */
+function tilingMap(url, repeatX, repeatY, colorSpace) {
+  const tex = new THREE.TextureLoader().load(asset(url));
+  tex.colorSpace = colorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeatX, repeatY);
+  tex.anisotropy = 8;
+  return tex;
+}
+
+/** 教室用的颜色贴图。重复交给几何 UV，1 个 UV 仍是一整张图。 */
+function colorMap(url) {
+  const tex = new THREE.TextureLoader().load(asset(url));
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.anisotropy = 8;
+  return tex;
+}
+
+/** 和教室方盒子同一套：1 个 UV = 2 米。参数顺序是 BoxGeometry 的宽、高、深。 */
+function scaleBoxUvs(geo, w, h, d) {
+  const uv = geo.attributes.uv;
+  const faces = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let face = 0; face < 6; face += 1) {
+    const su = faces[face][0] / 2;
+    const sv = faces[face][1] / 2;
+    for (let i = 0; i < 4; i += 1) {
+      const idx = face * 4 + i;
+      uv.setXY(idx, uv.getX(idx) * su, uv.getY(idx) * sv);
+    }
+  }
+}
+
+/** 把指定面的横纹转成顺着另一条边走。教室门的正面是第 4、5 面。 */
+function turnBoxGrain(geo, faces) {
+  const uv = geo.attributes.uv;
+  for (const face of faces) {
+    for (let i = 0; i < 4; i += 1) {
+      const idx = face * 4 + i;
+      const u = uv.getX(idx);
+      uv.setXY(idx, uv.getY(idx), u);
+    }
+  }
+}
 
 export const SAFEHOUSE = {
   minX: 120, maxX: 136, minZ: -8, maxZ: 8, height: 3.0,
@@ -38,15 +86,56 @@ export function createSafehouse(scene) {
   const lights = [];
 
   // ── 材质 ──
-  const floorMat = new THREE.MeshStandardMaterial({ color: 0x6b4f36, roughness: 0.9 });
+  // 地板：lacquered_cherry_wood。贴图大约 2 米见方，16 米房间铺 8 次。
+  const floorRepeat = 8;
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    map: tilingMap('textures/cherry_diff.jpg', floorRepeat, floorRepeat, THREE.SRGBColorSpace),
+    roughnessMap: tilingMap('textures/cherry_rough.jpg', floorRepeat, floorRepeat, THREE.LinearSRGBColorSpace),
+    normalMap: tilingMap('textures/cherry_nor.jpg', floorRepeat, floorRepeat, THREE.LinearSRGBColorSpace),
+    roughness: 1,
+    metalness: 0,
+  });
   const ceilingMat = new THREE.MeshStandardMaterial({ color: 0xf2ece2, roughness: 0.9 });
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0xe8dfd0, roughness: 0.92 });
-  const doorFrameMat = new THREE.MeshStandardMaterial({ color: 0xbfae96, roughness: 0.8 });
-  const doorMat = new THREE.MeshStandardMaterial({ color: 0xd8cfc0, roughness: 0.8, emissive: 0xffe9c8, emissiveIntensity: 0 });
-  const handleMat = new THREE.MeshStandardMaterial({ color: 0x8a7a5f, roughness: 0.5 });
-  const carpetMat = new THREE.MeshStandardMaterial({ color: 0x7a4a3a, roughness: 1.0 });
+  // 墙：Tiles107 的砖面。砖缝不要，只留颜色和反光。
+  // 砖心采样约 #fafafa，粗糙度约 0.02。渲染器把粗糙度托在 0.0525，这里用 0.06。
+  const wallMat = new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.06, metalness: 0 });
+  // 门：教室门的 door_diff。门框和门板同一张。
+  const doorMat = new THREE.MeshStandardMaterial({
+    map: colorMap('textures/door_diff.jpg'),
+    color: 0xffffff,
+    roughness: 0.72,
+    emissive: 0xffe9c8,
+    emissiveIntensity: 0,
+  });
+  const doorFrameMat = doorMat;
+  const handleMat = new THREE.MeshStandardMaterial({ color: 0xc8c2b4, metalness: 0.7, roughness: 0.3 });
+  // 地毯：Fabric026。贴图按 1 米见方铺，4×3 的毯子上纹路不拉变形。
+  const carpetRepeatX = 4;
+  const carpetRepeatY = 3;
+  const carpetMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    map: tilingMap('textures/fabric026_diff.jpg', carpetRepeatX, carpetRepeatY, THREE.SRGBColorSpace),
+    roughnessMap: tilingMap('textures/fabric026_rough.jpg', carpetRepeatX, carpetRepeatY, THREE.LinearSRGBColorSpace),
+    normalMap: tilingMap('textures/fabric026_nor.jpg', carpetRepeatX, carpetRepeatY, THREE.LinearSRGBColorSpace),
+    roughness: 1,
+    metalness: 0,
+  });
   const sofaMat = new THREE.MeshStandardMaterial({ color: 0x5b4a3e, roughness: 0.85 });
-  const tableMat = new THREE.MeshStandardMaterial({ color: 0x4a3a2e, roughness: 0.8 });
+  // 桌子：教室桌椅的 desk_diff。桌面用 Wood，桌腿用 WoodDark。
+  const deskMap = colorMap('textures/desk_diff.jpg');
+  const tableMat = new THREE.MeshStandardMaterial({
+    map: deskMap,
+    color: 0x4d433a,
+    roughness: 0.82,
+    metalness: 0.04,
+  });
+  const tableLegMat = new THREE.MeshStandardMaterial({
+    map: deskMap,
+    color: 0x453930,
+    roughness: 0.86,
+    metalness: 0.04,
+  });
   const shelfMat = new THREE.MeshStandardMaterial({ color: 0x5c4a3a, roughness: 0.88 });
   const lampPoleMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a, roughness: 0.4, metalness: 0.6 });
   const lampShadeMat = new THREE.MeshStandardMaterial({ color: 0xffe4c0, roughness: 0.6, emissive: 0xffa040, emissiveIntensity: 0.6 });
@@ -58,6 +147,7 @@ export function createSafehouse(scene) {
 
   // ── 地面：y ∈ [-0.16, 0] ──
   const floor = new THREE.Mesh(new THREE.BoxGeometry(16, 0.16, 16), floorMat);
+  floor.geometry.computeTangents();
   floor.position.set(128, -0.08, 0);
   group.add(floor);
   meshes.push(floor);
@@ -102,40 +192,68 @@ export function createSafehouse(scene) {
   group.add(wallHeader);
   meshes.push(wallHeader);
 
-  // ── 门框：左、右、上 ──
-  const doorFrameLeft = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.3, 0.12), doorFrameMat);
-  doorFrameLeft.position.set(119.96, 1.15, -0.85);
+  // ── 门框：贴在西墙内侧（x = 120）。以前框和门板中心在 119.96 / 120，
+  // 一半埋进墙体，关严时门缝和门楣都穿在墙里。
+  const faceX = 120;
+  const openHalfZ = 0.85;
+  const openTop = 2.30;
+  const frameDepth = 0.08;
+  const frameX = faceX - 0.008 + frameDepth / 2;
+  const jambDepth = 0.12;
+  const jambZ = openHalfZ + jambDepth / 2;
+  const jambH = openTop - 0.002;
+  const headH = 0.12;
+  const headSpan = openHalfZ * 2 + jambDepth * 2;
+
+  const jambGeo = new THREE.BoxGeometry(frameDepth, jambH, jambDepth);
+  scaleBoxUvs(jambGeo, frameDepth, jambH, jambDepth);
+  turnBoxGrain(jambGeo, [0, 1, 4, 5]);
+  const doorFrameLeft = new THREE.Mesh(jambGeo, doorFrameMat);
+  doorFrameLeft.position.set(frameX, jambH / 2, -jambZ);
   group.add(doorFrameLeft);
   meshes.push(doorFrameLeft);
 
-  const doorFrameRight = new THREE.Mesh(new THREE.BoxGeometry(0.08, 2.3, 0.12), doorFrameMat);
-  doorFrameRight.position.set(119.96, 1.15, 0.85);
+  const doorFrameRight = new THREE.Mesh(jambGeo, doorFrameMat);
+  doorFrameRight.position.set(frameX, jambH / 2, jambZ);
   group.add(doorFrameRight);
   meshes.push(doorFrameRight);
 
-  const doorFrameHead = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.12, 1.7), doorFrameMat);
-  doorFrameHead.position.set(119.96, 2.3, 0);
+  const headGeo = new THREE.BoxGeometry(frameDepth, headH, headSpan);
+  scaleBoxUvs(headGeo, frameDepth, headH, headSpan);
+  turnBoxGrain(headGeo, [0, 1]);
+  const doorFrameHead = new THREE.Mesh(headGeo, doorFrameMat);
+  doorFrameHead.position.set(frameX, openTop + headH / 2, 0);
   group.add(doorFrameHead);
   meshes.push(doorFrameHead);
 
-  // ── 门板 + pivot ──
+  // ── 门板 + pivot。铰链在靠房间一侧的立边上，板厚朝墙铺。
+  // 这样一转，立边的角是往门扇里收的，不会扫进门框，关严时背面也贴在墙面上。
+  const panelT = 0.06;
+  const panelGap = 0.015;
+  const panelW = openHalfZ * 2 - panelGap * 2;
+  const panelH = openTop - 0.04;
   const doorPivot = new THREE.Group();
-  doorPivot.position.set(120, 0, -0.85);
+  doorPivot.position.set(faceX + panelT, 0, -openHalfZ + panelGap);
   group.add(doorPivot);
 
-  const doorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.06, 2.30, 1.70), doorMat);
-  doorPanel.position.set(0, 1.15, 0.85);
+  const doorGeo = new THREE.BoxGeometry(panelT, panelH, panelW);
+  scaleBoxUvs(doorGeo, panelT, panelH, panelW);
+  turnBoxGrain(doorGeo, [0, 1]);
+  const doorPanel = new THREE.Mesh(doorGeo, doorMat);
+  doorPanel.position.set(-panelT / 2, panelH / 2, panelW / 2);
   doorPivot.add(doorPanel);
   meshes.push(doorPanel);
 
-  // ── 门把手 ──
+  // ── 门把手：在房间这一侧，关严时不会戳进墙。
   const handle = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, 0.10), handleMat);
-  handle.position.set(-0.035, 1.15, 1.55);
+  handle.position.set(0.015, 1.10, panelW - 0.16);
   doorPivot.add(handle);
   meshes.push(handle);
 
   // ── 地毯 ──
-  const carpet = new THREE.Mesh(new THREE.PlaneGeometry(4, 3), carpetMat);
+  const carpetGeo = new THREE.PlaneGeometry(4, 3);
+  carpetGeo.computeTangents();
+  const carpet = new THREE.Mesh(carpetGeo, carpetMat);
   carpet.rotation.x = -Math.PI / 2;
   carpet.position.set(126, 0.012, 0);
   group.add(carpet);
@@ -173,18 +291,21 @@ export function createSafehouse(scene) {
   meshes.push(sofaCushionR);
 
   // ── 茶几 ──
-  const tableTop = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.06, 0.7), tableMat);
+  const tableTopGeo = new THREE.BoxGeometry(1.2, 0.06, 0.7);
+  scaleBoxUvs(tableTopGeo, 1.2, 0.06, 0.7);
+  const tableTop = new THREE.Mesh(tableTopGeo, tableMat);
   tableTop.position.set(126, 0.43, 0);
   group.add(tableTop);
   meshes.push(tableTop);
 
   const tableLegGeo = new THREE.BoxGeometry(0.06, 0.43, 0.06);
+  scaleBoxUvs(tableLegGeo, 0.06, 0.43, 0.06);
   const tableLegs = [
     { x: 125.43, z: -0.28 }, { x: 126.57, z: -0.28 },
     { x: 125.43, z: 0.28 }, { x: 126.57, z: 0.28 },
   ];
-  tableLegs.forEach((pos, i) => {
-    const leg = new THREE.Mesh(tableLegGeo, tableMat);
+  tableLegs.forEach((pos) => {
+    const leg = new THREE.Mesh(tableLegGeo, tableLegMat);
     leg.position.set(pos.x, 0.215, pos.z);
     group.add(leg);
     meshes.push(leg);

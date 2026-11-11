@@ -7,7 +7,7 @@ import { cameraModel, createAnomaly } from './anomalies.js';
 import { emit } from './team/bus.js';
 import { EVENT, tagPhysical } from './team/contract.js';
 import { extraColliders, createSceneExtra } from './team/m1.js';
-import { createClassmate, createEyes } from './team/m2.js';
+import { createClassmate, createEyes, hangClassmateForearms, tuckClassmateArms } from './team/m2.js';
 import { extraProps, stepFlicker, tick as tickRoom } from './team/p3.js';
 import { asset } from './asset-url.js';
 
@@ -236,7 +236,7 @@ export class Level {
     this.setSummoningLayout(false);
     this.doorOpen = false;
     this.doorAngle = 0;
-    this.doorPivot.rotation.y = 0;
+    this.applyDoorRotation();
     this.loopEnabled = false;
     this.npcDone = false;
     this.npcState = 'idle';
@@ -314,11 +314,16 @@ export class Level {
    * 关门前 emit(EVENT.door) 发出事件（谁关心谁自己听）。
    * 后续AI接管者不用改这个函数，改门旋转角度或速度调 doorAngle target 和 dt*4。
    */
+  /** doorAngle 保持正数。轴在右侧，往教室里开要用负的 rotation.y。 */
+  applyDoorRotation() {
+    if (this.doorPivot) this.doorPivot.rotation.y = -this.doorAngle;
+  }
+
   setDoorOpen(open, snap = false) {
     this.doorOpen = open;
     if (snap) {
       this.doorAngle = open ? 1.42 : 0;
-      this.doorPivot.rotation.y = this.doorAngle;
+      this.applyDoorRotation();
     }
     emit(EVENT.door, { open });
   }
@@ -395,7 +400,7 @@ export class Level {
     this.doorOpen = false;
     if (snap) {
       this.doorAngle = 0.55;
-      this.doorPivot.rotation.y = this.doorAngle;
+      this.applyDoorRotation();
     }
   }
 
@@ -619,6 +624,19 @@ export class Level {
     return x > room.minX + 0.08 && x < room.maxX - 0.08 && z > room.minZ + 0.08 && z < room.maxZ - 0.05;
   }
 
+  /**
+   * 人整个人已经离开门扇扫过的扇形。
+   * 门轴在门洞右侧，门板长 1.6，开着时伸进教室。人还在这圈里就关门，会被门推一下。
+   */
+  playerClearOfDoor(x, z, radius) {
+    const hingeX = LAYOUT.door.x + LAYOUT.door.half;
+    const hingeZ = LAYOUT.room.maxZ + LAYOUT.wall / 2;
+    const reach = LAYOUT.door.half * 2 + 0.12 + radius;
+    const dx = x - hingeX;
+    const dz = z - hingeZ;
+    return z < LAYOUT.room.maxZ && dx * dx + dz * dz > reach * reach;
+  }
+
   getColliders() {
     const out = this.colliders;
     out.length = 0;
@@ -637,11 +655,12 @@ export class Level {
   }
 
   /**
-   * 门轴在 doorPivot，门板沿局部 +X 伸出，绕 Y 转到 doorAngle。
+   * 门轴在门洞右侧。门板沿局部 −X 伸出，rotation.y = −doorAngle，
+   * 这样开的时候往教室里、朝右收。
    * 和 three 的 rotation.y 同一套：x' = x cos + z sin，z' = -x sin + z cos。
    */
   fillDoorLeafColliders() {
-    const angle = this.doorAngle;
+    const angle = -this.doorAngle;
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
     const hingeX = this.doorPivot.position.x;
@@ -653,8 +672,8 @@ export class Level {
     const minY = 0;
     const maxY = LAYOUT.door.height;
     for (let i = 0; i < segments; i += 1) {
-      const x0 = (length * i) / segments;
-      const x1 = (length * (i + 1)) / segments;
+      const x0 = -(length * i) / segments;
+      const x1 = -(length * (i + 1)) / segments;
       let minX = Infinity;
       let maxX = -Infinity;
       let minZ = Infinity;
@@ -851,7 +870,7 @@ export class Level {
 
     const target = this.doorOpen ? 1.42 : 0;
     this.doorAngle += (target - this.doorAngle) * Math.min(1, dt * 4);
-    this.doorPivot.rotation.y = this.doorAngle;
+    this.applyDoorRotation();
 
     stepFlicker(this, dt, env.mood);
     this.updateLights(env, dt);
@@ -987,7 +1006,7 @@ export class Level {
       const breathe = 1 + Math.sin(this.npcIdlePhase) * 0.006;
       if (this.npcTorso) this.npcTorso.scale.y = breathe;
       for (const leg of (this.npcLegs ?? [])) leg.rotation.x = 0;
-      for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
+      this.restNpcArms();
       this.npc.position.y = 0;
       // 面向玩家方向 (Z正方向)
       const faceYaw = Math.PI / 2;
@@ -1006,7 +1025,7 @@ export class Level {
       const breathe = 1 + Math.sin(this.npcIdlePhase) * 0.006;
       if (this.npcTorso) this.npcTorso.scale.y = breathe;
       for (const leg of (this.npcLegs ?? [])) leg.rotation.x = 0;
-      for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
+      this.restNpcArms();
       this.npc.position.y = 0;
       // 面向房间内
       this.npcSmoothYaw += (Math.PI / 2 - this.npcSmoothYaw) * Math.min(1, dt * 3);
@@ -1035,7 +1054,7 @@ export class Level {
       if (this.npcIndex >= this.npcPath.length) this.hideNpc();
       // 站桩/到达后四肢归零
       for (const leg of (this.npcLegs ?? [])) leg.rotation.x = 0;
-      for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
+      this.restNpcArms();
       if (this.npcTorso) this.npcTorso.position.y = 0;
       this.npc.position.y = 0;
       this.npc.rotation.x = 0;
@@ -1065,6 +1084,12 @@ export class Level {
   updatePickup(dt) {
     if (!this.pickup.visible) return;
     this.pickup.position.y += (0.12 - this.pickup.position.y) * Math.min(1, dt * 3);
+  }
+
+  restNpcArms() {
+    for (const arm of (this.npcArms ?? [])) arm.rotation.x = 0;
+    tuckClassmateArms(this.npcArms);
+    hangClassmateForearms(this.npcForearms, 0, 0);
   }
 
   swingLegs(time) {
@@ -1097,6 +1122,14 @@ export class Level {
     const armSwing = Math.sign(armRaw) * Math.pow(Math.abs(armRaw), 0.9) * 0.22;
     if (arms?.[0]) arms[0].rotation.x = -armSwing;
     if (arms?.[1]) arms[1].rotation.x = armSwing;
+    tuckClassmateArms(arms);
+    // 肘保持前屈。大臂往后时前臂再弯一点，手不会和大臂甩成一条直线。
+    const reach = 0.22;
+    hangClassmateForearms(
+      this.npcForearms,
+      Math.max(0, -armSwing) / reach,
+      Math.max(0, armSwing) / reach,
+    );
 
     // 躯干：改为整体上下起伏（整个npc的位置y浮动），不单独移动torso
     // 用 2倍步频的单位周期起伏，幅度 0.012m
@@ -1185,7 +1218,19 @@ export class Level {
     // 北墙一整条封到底：追逐走廊必须是纯直线，不能有侧向凸出的空间
     span(hall.minX - t, hall.maxX + t, hall.maxZ, northOuter, hh, this.materials.hall);
     span(hall.minX - t, hall.minX, faceZ, hall.maxZ, hh, this.materials.hall);
-    span(hall.maxX, hall.maxX + t, faceZ, hall.maxZ, hh, this.materials.hall);
+    // 东墙在发光门的位置留洞。门往走廊里开，洞里如果还是整面墙，门板一转就会穿进去。
+    // 洞比门板各边收 2 厘米，缝藏在门板后面，侧面看不到墙和门之间的亮缝。
+    const doorCz = hall.z;
+    const doorZ0 = doorCz - 0.83;
+    const doorZ1 = doorCz + 0.83;
+    const doorTop = 2.33;
+    span(hall.maxX, hall.maxX + t, faceZ, doorZ0, hh, this.materials.hall);
+    span(hall.maxX, hall.maxX + t, doorZ1, hall.maxZ, hh, this.materials.hall);
+    this.addBox(
+      t, hh - doorTop, doorZ1 - doorZ0,
+      hall.maxX + t / 2, doorTop + (hh - doorTop) / 2, doorCz,
+      this.materials.hall, true,
+    );
 
     this.addBox(room.maxX - room.minX + 1, 0.16, room.maxZ - room.minZ + 1, 0, room.height + 0.08, 0, this.materials.ceiling, false);
     const ceilZ0 = room.maxZ + t;
@@ -1206,8 +1251,9 @@ export class Level {
 
   /**
    * 走廊东端（x = hall.maxX）那扇发光的门。终局的终点。
-   * 注意：这里不挖墙洞。玩家跑到 LAYOUT.doorwayX 就整屏换场，
-   * 门从来没有「走过去」的那一帧，所以门板只是贴在墙内侧的一块装饰。
+   * 玩家跑到 LAYOUT.doorwayX 就整屏换场，不会真的走过去。
+   * 门仍然要开一条缝：正 Y 会把自由边甩进东墙，所以只往走廊（−X）开。
+   * 东墙在 buildShell 里按这扇门留了洞，缝藏在门板后面。
    */
   buildEndDoor() {
     const { hall } = LAYOUT;
@@ -1350,7 +1396,8 @@ export class Level {
   openEndDoor(to) {
     const v = Math.max(0, Math.min(1.92, to));
     this.endDoorAngle = v;
-    if (this.endDoorPivot) this.endDoorPivot.rotation.y = v;
+    // 铰链在门的 −Z 侧，门板沿 +Z 铺开。正 Y 让自由边走向 +X（东墙里面）。
+    if (this.endDoorPivot) this.endDoorPivot.rotation.y = -v;
   }
 
   /** 门口的对焦点：镜头要「看住这扇门」时用这个。 */
@@ -1443,19 +1490,14 @@ export class Level {
 
   /**
    * 一扇窗：窗框、横竖分格、窗台、插销，其中第 2、5 扇是破的。
-   * 破窗用锯齿形黑片当缺口（外面本来就是黑的），再叠裂纹和几块挂着的碎玻璃。
+   * 破窗把玻璃挖成锯齿缺口，缺口处没有片，直接看到窗外的走廊；
+   * 裂纹从缺口每个尖角贴着边向外爬，边上再挂几块碎玻璃。
    */
   addWindow(centerX, centerY, w, h, z, sillY, topY, broken) {
     const innerW = w - 0.10;
     const innerH = h - 0.10;
-    const faceZ = z - 0.06;      // 朝教室这一侧
     const trim = this.materials.trim;
-
-    // 玻璃
-    const glass = new THREE.Mesh(new THREE.PlaneGeometry(innerW, innerH), this.materials.glass);
-    glass.position.set(centerX, centerY, z - 0.02);
-    markNoRay(glass);
-    this.scene.add(glass);
+    const glassZ = z - 0.02;
 
     // 外框四条
     const bar = 0.055;
@@ -1472,64 +1514,123 @@ export class Level {
     // 插销
     this.addBox(0.05, 0.018, 0.02, centerX + 0.02, centerY - 0.02, frameZ - 0.03, trim, false);
 
-    if (!broken) return;
+    if (!broken) {
+      const glass = new THREE.Mesh(new THREE.PlaneGeometry(innerW, innerH), this.materials.glass);
+      glass.position.set(centerX, centerY, glassZ);
+      markNoRay(glass);
+      this.scene.add(glass);
+      return;
+    }
 
-    // 缺口：锯齿黑片
     const holeRng = seededRandom(centerX * 13.7 + 3.1);
     const holeW = innerW * (0.42 + holeRng() * 0.16);
     const holeH = innerH * (0.5 + holeRng() * 0.2);
     const cx = centerX + (holeRng() - 0.5) * (innerW - holeW) * 0.7;
     const cy = centerY + (holeRng() - 0.5) * (innerH - holeH) * 0.6;
-    const shape = new THREE.Shape();
-    const points = 9;
-    for (let i = 0; i < points; i += 1) {
-      const angle = (i / points) * Math.PI * 2;
+    const pts = [];
+    const pointCount = 9;
+    for (let i = 0; i < pointCount; i += 1) {
+      const angle = (i / pointCount) * Math.PI * 2;
       const radius = 0.5 + (holeRng() - 0.5) * 0.34;
-      const px = cx + Math.cos(angle) * (holeW / 2) * radius;
-      const py = cy + Math.sin(angle) * (holeH / 2) * radius;
-      if (i === 0) shape.moveTo(px, py);
-      else shape.lineTo(px, py);
+      pts.push({
+        x: cx + Math.cos(angle) * (holeW / 2) * radius,
+        y: cy + Math.sin(angle) * (holeH / 2) * radius,
+      });
     }
-    shape.closePath();
-    const hole = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({
-      color: 0x000000, side: THREE.DoubleSide,
-    }));
-    hole.position.z = faceZ + 0.005;
-    markNoRay(hole);
-    this.scene.add(hole);
 
-    // 从缺口向外爬的裂纹
+    const left = centerX - innerW / 2;
+    const right = centerX + innerW / 2;
+    const bottom = centerY - innerH / 2;
+    const top = centerY + innerH / 2;
+    const pane = new THREE.Shape();
+    pane.moveTo(left, bottom);
+    pane.lineTo(right, bottom);
+    pane.lineTo(right, top);
+    pane.lineTo(left, top);
+    pane.closePath();
+    const holePath = new THREE.Path();
+    holePath.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length; i += 1) holePath.lineTo(pts[i].x, pts[i].y);
+    holePath.closePath();
+    pane.holes.push(holePath);
+    const glass = new THREE.Mesh(new THREE.ShapeGeometry(pane, 1), this.materials.glass);
+    glass.position.z = glassZ;
+    markNoRay(glass);
+    this.scene.add(glass);
+
+    // 缺口对着走廊那面墙。墙在雾里几乎是黑的，挖空以后看起来还是一块黑片。
+    // 在走廊里补一盏冷光，把这扇窗能看见的那一块墙照亮，斜着看也不会缩成一个小亮点。
+    // 教室材质会丢掉 z 大于门内的灯，所以这盏灯不会把窗框和窗帘照亮。
+    const spill = this.adoptLight(new THREE.PointLight(0xc9d4de, 28, 18, 2));
+    spill.name = 'broken-window-spill';
+    spill.position.set(cx, cy, LAYOUT.hall.maxZ - 2.1);
+    this.scene.add(spill);
+
+    // 缺口一圈亮边，用来把挖空的口和剩下的玻璃分开
+    const rimPos = [];
+    for (let i = 0; i < pts.length; i += 1) {
+      const a = pts[i];
+      const b = pts[(i + 1) % pts.length];
+      rimPos.push(a.x, a.y, 0, b.x, b.y, 0);
+    }
+    const rimGeo = new THREE.BufferGeometry();
+    rimGeo.setAttribute('position', new THREE.Float32BufferAttribute(rimPos, 3));
+    const rim = new THREE.LineSegments(rimGeo, brokenGlassLine(0xe4eef2, 0.92));
+    rim.position.z = glassZ - 0.012;
+    markNoRay(rim);
+    this.scene.add(rim);
+
+    // 每条裂纹都从缺口尖角起笔，先探进缺口 1.5 cm，再贴着玻璃向外爬
     const cracks = [];
-    for (let i = 0; i < 5; i += 1) {
-      const angle = holeRng() * Math.PI * 2;
-      const len = 0.35 + holeRng() * 0.85;
-      const sx = cx + Math.cos(angle) * holeW * 0.5;
-      const sy = cy + Math.sin(angle) * holeH * 0.5;
-      let px = sx;
-      let py = sy;
-      let a = angle;
-      for (let seg = 0; seg < 3; seg += 1) {
-        a += (holeRng() - 0.5) * 0.7;
-        const step = len / 3;
-        const nx = px + Math.cos(a) * step;
-        const ny = py + Math.sin(a) * step;
-        cracks.push(px, py, 0.002, nx, ny, 0.002);
+    const margin = 0.025;
+    const minX = left + margin;
+    const maxX = right - margin;
+    const minY = bottom + margin;
+    const maxY = top - margin;
+    for (let i = 0; i < pts.length; i += 1) {
+      const p = pts[i];
+      const out = Math.atan2(p.y - cy, p.x - cx);
+      const long = i % 2 === 0;
+      const len = long ? 0.42 + holeRng() * 0.7 : 0.12 + holeRng() * 0.18;
+      const segs = long ? 4 : 2;
+      let angle = out;
+      let px = p.x - Math.cos(out) * 0.015;
+      let py = p.y - Math.sin(out) * 0.015;
+      for (let seg = 0; seg < segs; seg += 1) {
+        angle += (holeRng() - 0.5) * 0.5;
+        let delta = angle - out;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        if (delta > 0.8) angle = out + 0.8;
+        if (delta < -0.8) angle = out - 0.8;
+        const nx = px + Math.cos(angle) * (len / segs);
+        const ny = py + Math.sin(angle) * (len / segs);
+        if (nx < minX || nx > maxX || ny < minY || ny > maxY) break;
+        cracks.push(px, py, 0, nx, ny, 0);
+        if (long && seg === 1) {
+          const branch = angle + (holeRng() > 0.5 ? 0.7 : -0.7);
+          const reach = 0.1 + holeRng() * 0.2;
+          const bx = nx + Math.cos(branch) * reach;
+          const by = ny + Math.sin(branch) * reach;
+          if (bx > minX && bx < maxX && by > minY && by < maxY) {
+            cracks.push(nx, ny, 0, bx, by, 0);
+          }
+        }
         px = nx;
         py = ny;
       }
     }
     const crackGeo = new THREE.BufferGeometry();
     crackGeo.setAttribute('position', new THREE.Float32BufferAttribute(cracks, 3));
-    const crackLines = new THREE.LineSegments(crackGeo, new THREE.LineBasicMaterial({
-      color: 0xbfc9c4, transparent: true, opacity: 0.45,
-    }));
-    crackLines.position.z = faceZ + 0.008;
+    const crackLines = new THREE.LineSegments(crackGeo, brokenGlassLine(0xd5e0dc, 0.8));
+    crackLines.position.z = glassZ - 0.01;
     markNoRay(crackLines);
     this.scene.add(crackLines);
 
-    // 还挂着没掉的碎玻璃
+    // 还挂着没掉的碎玻璃，贴在缺口边上，不漂在洞中间
     for (let i = 0; i < 3; i += 1) {
       const shardRng = seededRandom(i * 31.7 + centerX);
+      const anchor = pts[Math.floor(shardRng() * pts.length)];
       const wS = 0.10 + shardRng() * 0.16;
       const hS = 0.08 + shardRng() * 0.14;
       const tri = new THREE.Shape();
@@ -1538,12 +1639,13 @@ export class Level {
       tri.lineTo(wS * 0.35, hS);
       tri.closePath();
       const shard = new THREE.Mesh(new THREE.ShapeGeometry(tri), this.materials.glass);
+      const outward = Math.atan2(anchor.y - cy, anchor.x - cx);
       shard.position.set(
-        cx + (shardRng() - 0.5) * innerW * 0.8,
-        cy + (shardRng() - 0.5) * innerH * 0.8,
-        faceZ + 0.01,
+        anchor.x,
+        anchor.y,
+        glassZ - 0.008,
       );
-      shard.rotation.z = shardRng() * Math.PI;
+      shard.rotation.z = outward + (shardRng() - 0.5) * 0.5;
       markNoRay(shard);
       this.scene.add(shard);
     }
@@ -1560,10 +1662,12 @@ export class Level {
       geo.translate(0, -h / 2, 0);
       this.curtainGeometry = geo;
     }
-    // 从讲台（+X）往后每扇都是软布。脸上那一块布在着色器里按住，避免五官和布对穿。
+    // 从讲台（+X）往后每扇都是软布。每块布单独一份材质：质点写在材质上，
+    // 同一张材质连续绘制时显卡不会重传参数，后画的会突然变成先画的那块的形状。
+    // 着色器程序仍共用，多出来的只是每块布 12 个浮点数。
     for (const side of [-0.55, 0.55]) {
       const outer = side < 0 ? 0 : 1;
-      const material = outer === 0 ? this.materials.curtainSoft : this.materials.curtainSoftRight;
+      const material = makeCurtainPanel(this.materials.curtain, outer, this.materials.curtainSway);
       const curtain = new THREE.Mesh(this.curtainGeometry, material);
       curtain.position.set(x + side, top, z);
       const gust = makeCurtainGust(outer);
@@ -1585,6 +1689,48 @@ export class Level {
       markNoRay(curtain);
       this.scene.add(curtain);
       this.curtains.push(curtain);
+    }
+    this.addCurtainRod(x, top, z);
+  }
+
+  /** 一根金属窗帘杆，比两块布略长，两端有头，两只支架钉在墙上。 */
+  addCurtainRod(x, top, z) {
+    if (!this.curtainRodMat) {
+      this.curtainRodMat = new THREE.MeshStandardMaterial({
+        color: 0x3e4246,
+        roughness: 0.4,
+        metalness: 0.7,
+      });
+      blockHallLight(this.curtainRodMat, true);
+      const rodLen = 0.55 * 2 + CURTAIN_W + 0.14;
+      const rodGeo = new THREE.CylinderGeometry(0.012, 0.012, rodLen, 12);
+      rodGeo.rotateZ(Math.PI / 2);
+      this.curtainRodGeometry = rodGeo;
+      this.curtainRodLen = rodLen;
+      this.curtainFinialGeometry = new THREE.SphereGeometry(0.022, 10, 8);
+      this.curtainBracketGeometry = new THREE.BoxGeometry(0.018, 0.026, 0.09);
+    }
+    const mat = this.curtainRodMat;
+    const y = top + 0.012;
+    const rodZ = z - 0.02;
+    const rod = new THREE.Mesh(this.curtainRodGeometry, mat);
+    rod.position.set(x, y, rodZ);
+    markNoRay(rod);
+    this.scene.add(rod);
+    const half = this.curtainRodLen / 2;
+    for (const end of [-1, 1]) {
+      const finial = new THREE.Mesh(this.curtainFinialGeometry, mat);
+      finial.position.set(x + end * half, y, rodZ);
+      markNoRay(finial);
+      this.scene.add(finial);
+    }
+    const { room } = LAYOUT;
+    const bracketZ = room.maxZ - 0.045;
+    for (const end of [-0.72, 0.72]) {
+      const bracket = new THREE.Mesh(this.curtainBracketGeometry, mat);
+      bracket.position.set(x + end, y, bracketZ);
+      markNoRay(bracket);
+      this.scene.add(bracket);
     }
   }
 
@@ -1673,7 +1819,8 @@ export class Level {
 
   buildDoor() {
     this.doorPivot = new THREE.Group();
-    this.doorPivot.position.set(LAYOUT.door.x - LAYOUT.door.half, 0, LAYOUT.room.maxZ + LAYOUT.wall / 2);
+    // 轴在门洞右侧（走廊里面对门时的右手边）。门板往 −X 铺满门洞。
+    this.doorPivot.position.set(LAYOUT.door.x + LAYOUT.door.half, 0, LAYOUT.room.maxZ + LAYOUT.wall / 2);
     const doorW = LAYOUT.door.half * 2;
     const doorH = LAYOUT.door.height;
     const doorGeo = new THREE.BoxGeometry(doorW, doorH, 0.08);
@@ -1688,13 +1835,13 @@ export class Level {
       }
     }
     const door = new THREE.Mesh(doorGeo, this.materials.door);
-    door.position.set(LAYOUT.door.half, LAYOUT.door.height / 2, 0);
+    door.position.set(-LAYOUT.door.half, LAYOUT.door.height / 2, 0);
     door.name = 'door-panel';
     const handle = new THREE.Mesh(
       new THREE.BoxGeometry(0.04, 0.16, 0.08),
       new THREE.MeshStandardMaterial({ color: 0xc8c2b4, metalness: 0.7, roughness: 0.3 }),
     );
-    handle.position.set(LAYOUT.door.half * 2 - 0.16, 1.15, -0.06);
+    handle.position.set(-LAYOUT.door.half * 2 + 0.16, 1.15, -0.06);
     this.doorPivot.add(door, handle);
     this.scene.add(this.doorPivot);
     this.buildDoorFrame();
@@ -1727,12 +1874,14 @@ export class Level {
       group: customMate,
       legs: customMate.userData.legs ?? [],
       arms: customMate.userData.arms ?? [],
+      forearms: customMate.userData.forearms ?? [],
       torso: customMate.userData.torso ?? null,
       materials: customMate.userData.materials ?? [],
     } : makePerson(0x242833, 0xc4a48a);
     this.npc = npc.group;
     this.npcLegs = npc.legs;
     this.npcArms = npc.arms;
+    this.npcForearms = npc.forearms ?? [];
     this.npcTorso = npc.torso;
     this.npcMaterials = npc.materials;
     this.npcPhase = 0;          // 步态相位，按位移推进
@@ -1764,13 +1913,14 @@ export class Level {
     this.scene.add(this.npc);
 
     // 尾声：同学回头后脸上浮现的红眼，和追逐实体同色。
-    // z 必须大于头球在该高度的表面（≈0.155），否则眼睛会埋进头壳里看不见。
+    // classmate_v02 的头是球心 y=1.59、半径 0.135 的圆球。眼位和 safehouse 的变脸对齐
+    // （左右 ±0.052、离地 1.605），再往球面外放一点，这颗半径 0.038 的球才不会埋进头里。
     const mateEyeMat = new THREE.MeshBasicMaterial({ color: 0xff2438, toneMapped: false });
     this.npcEyes = new THREE.Group();
     const mateEyeL = new THREE.Mesh(new THREE.SphereGeometry(0.038, 16, 12), mateEyeMat);
-    mateEyeL.position.set(-0.062, 1.600, 0.182);
+    mateEyeL.position.set(-0.052, 1.605, 0.145);
     const mateEyeR = mateEyeL.clone();
-    mateEyeR.position.set(0.062, 1.600, 0.182);
+    mateEyeR.position.set(0.052, 1.605, 0.145);
     mateEyeL.frustumCulled = false;
     mateEyeR.frustumCulled = false;
     this.npcEyes.add(mateEyeL, mateEyeR);
@@ -2221,24 +2371,34 @@ function makeCurtainGust(outer) {
 /**
  * 软布：顶边钉死，下摆做竖褶，只往房间（局部 −Z）鼓。
  * 靠窗间墙的那条边不横移，避免摆进墙和窗框。
- * 12 个质点位移和 uPull 由每块窗帘在绘制前写入。
- * 脸上的一块区域位移为 0。
+ * 时间和风力共用；每块布自己的 12 个质点位移和 uPull 在绘制前写入。
  * outer 为 0 时左缘贴墙，为 1 时右缘贴墙。
  */
+function makeCurtainPanel(template, outer, sway) {
+  const material = template.clone();
+  material.userData = {};
+  material.map = template.map;
+  attachCurtainSway(material, outer, sway);
+  blockHallLight(material, true);
+  return material;
+}
+
 function attachCurtainSway(material, outer, sway) {
   const uOuter = { value: outer };
+  const uNodeX = { value: new Float32Array(12) };
+  const uPull = { value: 0.35 };
   material.userData.uTime = sway.uTime;
   material.userData.uAmp = sway.uAmp;
-  material.userData.uNodeX = sway.uNodeX;
-  material.userData.uPull = sway.uPull;
+  material.userData.uNodeX = uNodeX;
+  material.userData.uPull = uPull;
   material.userData.uFace = sway.uFace;
   material.userData.uOuter = uOuter;
   material.customProgramCacheKey = () => 'curtain-flex-lattice';
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = sway.uTime;
     shader.uniforms.uAmp = sway.uAmp;
-    shader.uniforms.uNodeX = sway.uNodeX;
-    shader.uniforms.uPull = sway.uPull;
+    shader.uniforms.uNodeX = uNodeX;
+    shader.uniforms.uPull = uPull;
     shader.uniforms.uFace = sway.uFace;
     shader.uniforms.uOuter = uOuter;
     shader.vertexShader = shader.vertexShader
@@ -2434,15 +2594,14 @@ function makeMaterials() {
   const sway = {
     uTime: { value: 0 },
     uAmp: { value: 1 },
-    uNodeX: { value: new Float32Array(12) },
-    uPull: { value: 0.35 },
-    // 窗帘上不再顶着一张脸，按住布的那一块挪到场景外，整面布都跟着风走。
+    // 脸上那一块已经挪到场景外，整面布都跟着风走。
     uFace: { value: new THREE.Vector2(1000, 1000) },
   };
+  // 时间、风力记在这里，p3 每帧只改这一处。每块布的质点在 makeCurtainPanel 里另开。
   const curtainSoft = curtain.clone();
+  curtainSoft.userData.uTime = sway.uTime;
+  curtainSoft.userData.uAmp = sway.uAmp;
   const curtainSoftRight = curtain.clone();
-  attachCurtainSway(curtainSoft, 0, sway);
-  attachCurtainSway(curtainSoftRight, 1, sway);
   const ceiling = new THREE.MeshStandardMaterial({ color: 0x121418, roughness: 1 });
   const desk = new THREE.MeshStandardMaterial({ color: 0x4a3828, roughness: 0.78 });
   const chair = new THREE.MeshStandardMaterial({ color: 0x3a2e24, roughness: 0.8 });
@@ -2486,6 +2645,7 @@ function makeMaterials() {
     board,
     trim,
     curtain,
+    curtainSway: sway,
     curtainSoft,
     curtainSoftRight,
     glass,
@@ -2801,6 +2961,16 @@ function chairPose(dx, dz) {
 function markNoRay(object) {
   object.traverse((child) => {
     child.userData.noRay = true;
+  });
+}
+
+/** 破窗裂纹和缺口亮边。不写深度，避免细线把窗外的走廊挡掉。 */
+function brokenGlassLine(color, opacity) {
+  return new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    depthWrite: false,
   });
 }
 

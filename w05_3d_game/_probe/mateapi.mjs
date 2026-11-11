@@ -56,7 +56,8 @@ const {
 // ───────────────────── 1. 默认配置 ─────────────────────
 console.log('— 默认配置 —');
 const d0 = mateModelConfig();
-ok(d0.url === PROCEDURAL_MATE, '默认用程序化模型（旧 classmate_v01.glb 已丢失，靠 ?mate= 覆盖）', d0.url);
+ok(d0.url === CLASSMATE_URL && d0.url.endsWith('classmate_v02.glb'),
+  '默认用 classmate_v02（无五官圆头，变脸贴在球面上；程序化用 ?mate=proc）', d0.url);
 ok(eq(d0.hideMaterials, []),
   '默认不隐藏任何材质（程序化模型本来就没有五官面片可藏）', d0.hideMaterials.join(',') || '(空)');
 ok(d0.scale === 1 && d0.yawOffset === 0 && d0.offsetY === 0, '默认不做缩放/转向/抬高',

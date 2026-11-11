@@ -5,7 +5,7 @@
  * group 必须用 tagAnomaly(group, level, id) 打过标记，否则拍不到。
  * parent === 'door' 时会挂到门轴上，随门打开。
  *
- * createClassmate 默认加载 assets/models/classmate_v01.glb，失败才退回程序化模型。
+ * createClassmate 默认加载 assets/models/classmate_v02.glb，失败才退回程序化模型。
  *   换模型走下面的 MATE_MODEL（url / scale / yawOffset / offsetY / hideMaterials），
  *   或者在地址栏加 ?mate=proc（程序化） / ?mate=/assets/models/xxx.glb&mateface=keep。
  *   ?mate= 的路径由浏览器按当前页面解析：子目录部署（如 GitHub Pages 项目站点）时写
@@ -13,6 +13,7 @@
  *   glb 自带的五官（Eye_White/Eye_Dark/Face_Shadow 三个材质槽）默认按材质隐藏，
  *   给尾声的红眼和尖牙让位；换成没有五官的模型时把 hideMaterials 改成 []。
  * 同学：脚底在原点。userData.legs = [左腿, 右腿]，userData.arms = [左上臂, 右上臂]，
+ *   userData.forearms = [左前臂, 右前臂]。前臂相对大臂前屈，不是一条直线。
  *   userData.torso = 身体（用于呼吸缩放），userData.materials 用于尾声淡出。
  *   这四项在 glb 加载完成前是空的，加载后填进同一批数组。
  * createEyes 返回 null 就继续用程序化眼睛。
@@ -30,7 +31,7 @@ import { asset } from '../asset-url.js';
 // 要替换某一关，把对应函数填进来。
 export const anomalyFactory = {};
 
-export const CLASSMATE_URL = asset('models/classmate_v01.glb');
+export const CLASSMATE_URL = asset('models/classmate_v02.glb');
 
 /** url 填这个值就完全不用 glb（= 接 glb 之前那套程序化同学）。 */
 export const PROCEDURAL_MATE = 'proc';
@@ -49,18 +50,47 @@ export const PROCEDURAL_MATE = 'proc';
  *                换成一个没有五官的模型时，把它改成 []。
  */
 export const MATE_MODEL = {
-  // 第十八轮定稿：默认就是程序化模型（A 方案）。
-  // 理由：终局要的是「脸上先亮起两个红光点，再咧嘴露出尖牙」，而 classmate_v01.glb
-  // 把眼睛和嘴烘进头网格（6 个面片材质），红眼只能贴在它上面做重影；
-  // 程序化那颗球头本来是**完全没有五官**的，红眼 / 嘴 / 牙全部由 safehouse 现挂，
-  // 想怎么亮、什么时候咧嘴都是纯参数。glb 仍然可用 `?mate=` 临时换回来。
-  url: PROCEDURAL_MATE,
+  // classmate_v02 是一颗没有五官的圆头（半径 0.135，球心 y=1.59），
+  // 红眼和尖牙由 safehouse 贴在这颗球上。旧的 classmate_v01 把眼睛嘴巴烘进了网格，
+  // 会和变脸重叠，所以不再当默认。程序化球头仍可用 ?mate=proc 换回来。
+  url: CLASSMATE_URL,
   scale: 1,
   yawOffset: 0,
   offsetY: 0,
   // 程序化头没有五官，没有要藏的东西
   hideMaterials: [],
 };
+
+/** 站着时肘约 26° 前屈，手略朝身体内侧。往后摆时再多弯一截。 */
+const ELBOW_REST = -0.46;
+const ELBOW_TRAIL = 0.22;
+
+/**
+ * 模型上臂外张约 11°，站着像撑开的 A 字。
+ * 往身体收 0.18 弧度（约 10°）：手靠近大腿外侧，前臂内侧仍在外套外面。
+ */
+const ARM_TUCK = 0.18;
+
+export function tuckClassmateArms(arms) {
+  for (const arm of arms ?? []) {
+    if (!arm) continue;
+    const side = Math.sign(arm.position.x);
+    if (!side) continue;
+    arm.rotation.z = -side * ARM_TUCK;
+  }
+}
+
+export function hangClassmateForearms(forearms, backL = 0, backR = 0) {
+  const pair = [
+    [forearms?.[0], ELBOW_REST - ELBOW_TRAIL * backL, -0.1],
+    [forearms?.[1], ELBOW_REST - ELBOW_TRAIL * backR, 0.1],
+  ];
+  for (const [fore, x, z] of pair) {
+    if (!fore) continue;
+    fore.rotation.x = x;
+    fore.rotation.z = z;
+  }
+}
 
 /** 读一份拷贝，避免外面拿着引用改到内部状态。 */
 export function mateModelConfig() {
@@ -120,6 +150,7 @@ export function createClassmate(THREE, hooks = {}) {
   group.name = 'Classmate';
   group.userData.legs = [];
   group.userData.arms = [];
+  group.userData.forearms = [];
   group.userData.torso = null;
   group.userData.materials = [];
   group.userData.hiddenMaterials = [];
@@ -166,11 +197,50 @@ function mountCharacter(group, bound, report = setDataset) {
   group.add(bound.root);
   group.userData.legs.push(...bound.legs);
   group.userData.arms.push(...bound.arms);
+  group.userData.forearms.push(...bound.forearms);
+  tuckClassmateArms(bound.arms);
+  hangClassmateForearms(bound.forearms);
   group.userData.materials.push(...bound.materials);
   group.userData.torso = bound.body ?? null;
   group.userData.hiddenMaterials = applyFaceOverride(bound.root, hideMaterials);
+  const rig = measureHeadBall(group, bound.head);
+  if (rig) group.userData.faceRig = rig;
   report('classmateHidden', group.userData.hiddenMaterials.join(',') || 'none');
   applyOpacity(group);
+}
+
+/**
+ * 变脸把红眼和嘴贴在一颗球上，球心和半径要从头的皮肤读出来。
+ * 头发是另一块、不是球，取三边最接近的那块（同学 v02 的头是半径 0.135 的球）。
+ * 量不到就留空，safehouse 会退回「头顶 − 0.16、半径 0.135」。
+ */
+function measureHeadBall(group, head) {
+  if (!head) return null;
+  group.updateMatrixWorld(true);
+  let best = null;
+  head.traverse((obj) => {
+    if (!obj.isMesh || !obj.geometry) return;
+    if (!obj.geometry.boundingBox) obj.geometry.computeBoundingBox();
+    const box = obj.geometry.boundingBox;
+    if (!box) return;
+    const sx = box.max.x - box.min.x;
+    const sy = box.max.y - box.min.y;
+    const sz = box.max.z - box.min.z;
+    if (sx < 0.15 || sy < 0.15 || sz < 0.15) return;
+    const score = Math.abs(sx - sy) + Math.abs(sx - sz) + Math.abs(sy - sz);
+    const center = new THREE.Vector3(
+      (box.min.x + box.max.x) / 2,
+      (box.min.y + box.max.y) / 2,
+      (box.min.z + box.max.z) / 2,
+    );
+    obj.updateWorldMatrix(true, false);
+    center.applyMatrix4(obj.matrixWorld);
+    const local = group.worldToLocal(center);
+    const headR = (sx + sy + sz) / 6;
+    if (!best || score < best.score) best = { score, headY: local.y, headR };
+  });
+  if (!best || best.score > 0.04) return null;
+  return { headY: best.headY, headR: best.headR };
 }
 
 function applyOpacity(group) {
@@ -187,6 +257,8 @@ function adoptProcedural(group, THREE) {
   while (built.children.length) group.add(built.children[0]);
   group.userData.legs.push(...built.userData.legs);
   group.userData.arms.push(...built.userData.arms);
+  group.userData.forearms.push(...built.userData.forearms);
+  tuckClassmateArms(group.userData.arms);
   group.userData.materials.push(...built.userData.materials);
   group.userData.torso = built.userData.torso ?? null;
   // 五官接口也要一起搬：safehouse.buildFaceRig 靠 headR 把红眼 / 嘴贴到球面上，
@@ -282,26 +354,25 @@ function buildProceduralClassmate(THREE) {
   armR.position.set(0.26, 1.36, 0);
   group.add(armL, armR);
 
-  // ── 前臂（上臂子节点，固定约 12° 肘弯） ──
+  // ── 前臂（上臂子节点）。肘前屈，手跟着前臂走，不和大臂拉成直线。 ──
   const foreGeo = new THREE.CylinderGeometry(0.038, 0.03, 0.24, 8);
   foreGeo.translate(0, -0.12, 0);
   const foreL = new THREE.Mesh(foreGeo, cloth);
   const foreR = new THREE.Mesh(foreGeo, cloth);
   foreL.position.y = -0.26;
-  foreL.rotation.x = 0.21;                         // ~12°
   foreR.position.y = -0.26;
-  foreR.rotation.x = 0.21;
   armL.add(foreL);
   armR.add(foreR);
 
-  // ── 手 ──
+  // ── 手：挂在前臂末端 ──
   const handGeo = new THREE.SphereGeometry(0.03, 8, 6);
   const handL = new THREE.Mesh(handGeo, skin);
   const handR = new THREE.Mesh(handGeo, skin);
-  handL.position.set(0, -0.49, 0);
-  handR.position.set(0, -0.49, 0);
-  armL.add(handL);
-  armR.add(handR);
+  handL.position.set(0, -0.24, 0);
+  handR.position.set(0, -0.24, 0);
+  foreL.add(handL);
+  foreR.add(handR);
+  hangClassmateForearms([foreL, foreR]);
 
   // ── 书包 ──
   const bagGroup = new THREE.Group();
@@ -324,6 +395,7 @@ function buildProceduralClassmate(THREE) {
   // ── userData：供 level.js 使用 ──
   group.userData.legs = [legL, legR];
   group.userData.arms = [armL, armR];
+  group.userData.forearms = [foreL, foreR];
   group.userData.torso = torso;
   group.userData.materials = mats;
 

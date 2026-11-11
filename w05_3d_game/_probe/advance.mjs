@@ -287,5 +287,76 @@ ok(level.spawned.length === 5, '终局不会去装第 6 关', `spawned=[${level.
     `subtitle=${g.hud.state.setSubtitle}`);
 }
 
+// ── 10. 拍完再进教室：第一次就关门并放出下一关，不用再出去重进 ──
+{
+  class DoorLevel extends FakeLevel {
+    constructor() {
+      super();
+      this.doorOpen = true;
+      this.doorAngle = 1.42;
+    }
+    setDoorOpen(open) {
+      this.doorOpen = open;
+    }
+    /** 和 level.js 同一套趋近：开 1.42，关 0。 */
+    update() {
+      const target = this.doorOpen ? 1.42 : 0;
+      this.doorAngle += (target - this.doorAngle) * Math.min(1, STEP * 4);
+    }
+  }
+  const camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.05, 120);
+  const player = new Player(camera);
+  player.reset(0.4, LAYOUT.hall.z, -Math.PI / 2);
+  const level = new DoorLevel();
+  const hud = recorder();
+  const audio = recorder();
+  const canvas = {
+    addEventListener() {},
+    setPointerCapture() {},
+    releasePointerCapture() {},
+    requestPointerLock() {},
+    style: {},
+  };
+  const game = new Game({ scene: new THREE.Scene(), camera, canvas, hud, audio, level, player });
+  const stepIn = (x, z, n = 1) => {
+    player.x = x;
+    player.z = z;
+    for (let i = 0; i < n; i += 1) game.update(STEP);
+  };
+  const shut = () => {
+    for (let i = 0; i < 180 && game.phase === 'entering'; i += 1) game.update(STEP);
+  };
+
+  game.phase = 'prologue';
+  stepIn(LAYOUT.door.x, 8.0);
+  stepIn(LAYOUT.door.x, LAYOUT.room.maxZ - 1.0);
+  ok(game.phase === 'entering' && level.doorOpen === false, '序章进门开始关门',
+    `phase=${game.phase} door=${level.doorOpen}`);
+  shut();
+  ok(game.phase === 'level' && game.levelIndex === 1 && game.entryClosing === false,
+    '第 1 关落定后清掉关门标记', `phase=${game.phase} closing=${game.entryClosing}`);
+  ok(level.spawned.join(',') === '1', '第 1 关异常已放出', `spawned=[${level.spawned}]`);
+
+  game.cleared = true;
+  level.doorOpen = true;
+  level.doorAngle = 1.42;
+  stepIn(LAYOUT.door.x, 7.4);
+  stepIn(LAYOUT.door.x, 9.0);
+  // 门在讲台一端。既要 |x| ≥ hallSwapX，又要离门洞至少 14 米，往西走到 x=-13 才同时满足。
+  stepIn(-LAYOUT.hallSwapX, 9.0);
+  ok(game.aheadLevel === 2 && game.phase === 'corridor', '走廊里铺好第 2 关',
+    `ahead=${game.aheadLevel} phase=${game.phase}`);
+  ok(level.spawned.join(',') === '1', '铺好时还没把第 2 关挂进教室', `spawned=[${level.spawned}]`);
+
+  stepIn(LAYOUT.door.x, 9.0);
+  stepIn(LAYOUT.door.x, LAYOUT.room.maxZ - 1.0);
+  ok(game.phase === 'entering' && level.doorOpen === false,
+    '拍完后第一次进教室就会关门', `phase=${game.phase} door=${level.doorOpen} closing=${game.entryClosing}`);
+  shut();
+  ok(game.phase === 'level' && game.levelIndex === 2 && game.entryClosing === false,
+    '第一次重进就落定第 2 关', `phase=${game.phase} lv=${game.levelIndex} closing=${game.entryClosing}`);
+  ok(level.spawned.join(',') === '1,2', '第一次重进就放出下一异常', `spawned=[${level.spawned}]`);
+}
+
 console.log(fail === 0 ? '\n全部通过' : `\n${fail} 项失败`);
 process.exit(fail === 0 ? 0 : 1);

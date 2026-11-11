@@ -546,10 +546,9 @@ export class Game {
 
   onEnter() {
     if (this.phase === 'prologue') {
-      // 序章：第一次走进教室 → 第 1 关。进门就关门，人可以继续走。
+      // 序章：第一次走进教室 → 第 1 关。先记进入，等人完全走进去再关门。
       this.aheadLevel = 1;
       this.phase = 'entering';
-      this.sealEntry();
       return;
     }
     if (this.phase !== 'corridor') return;
@@ -563,11 +562,10 @@ export class Game {
       return;
     }
     this.phase = 'entering';
-    this.sealEntry();
   }
 
   /**
-   * 一进教室就关门。人不停，也不收成黑屏。
+   * 人完全走进教室后再关门。人不停，也不收成黑屏。
    * 门合严之后 updateEntrySeal 才把这一关定下来并放出异常。
    */
   sealEntry() {
@@ -670,12 +668,15 @@ export class Game {
     }
 
     if (this.introPhase === 4) {
-      // 文字对话结束后，进入 prologue
+      // 文字对话结束后，进入 prologue。
+      // 出事字幕还在时玩家已经能走。这期间进了教室，phase 仍是 intro，
+      // onEnter 不会记这次进门；等字幕结束人已经在里面，wasInside 也不再翻边。
+      // 不在这里补一次的话，相机和这一关都要先退出去再进来才会出现。
       if (this.lineT <= 0) {
         this.hud.setSubtitle('');
-        // 进入 prologue
         this.phase = 'prologue';
         this.requestLock();
+        if (this.level.isInsideRoom(this.player.x, this.player.z)) this.onEnter();
       }
       return;
     }
@@ -767,7 +768,10 @@ export class Game {
    * 人退回走廊时，onExit 会重新开门，这次进门不算数。
    */
   updateEntrySeal() {
-    if (!this.entryClosing) return;
+    if (!this.entryClosing) {
+      if (this.level.playerClearOfDoor(this.player.x, this.player.z, this.player.radius)) this.sealEntry();
+      return;
+    }
     if (this.level.doorAngle > 0.05) return;
     this.enterLevelNow(this.aheadLevel || this.levelIndex, true);
   }
@@ -780,6 +784,10 @@ export class Game {
   enterLevelNow(index = this.aheadLevel || this.levelIndex, quietDoor = false, spawn = true) {
     this.installLevel(index, spawn);
     this.aheadLevel = 0;
+    // 这一关已经落定。不清掉的话，下一次进门 sealEntry 会以为门还在关，
+    // 不再关门，updateEntrySeal 也就一直等不到合严，新异常放不出来。
+    // 玩家只能先离开教室，让 onExit 把标记清掉，再进来才看得到。
+    this.entryClosing = false;
     this.phase = 'level';
     this.cleared = false;
     this.level.loopEnabled = false;

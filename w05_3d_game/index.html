@@ -257,8 +257,8 @@
         var el = document.getElementById('boot-error');
         el.innerHTML =
           '<span>游戏没有启动：直接双击 index.html 时，浏览器会拦住游戏脚本，按钮点了也没反应。<br><br>' +
-          '请双击 <b>w05_3d_game/start.bat</b>，它会自动打开游戏。<br>' +
-          '或者在 w05_3d_game 目录运行 <code>node server.js</code>，再打开 ' +
+          '请双击本文件夹里的 <b>start.bat</b>。没有安装 Node.js 也可以，它会用 Windows 自带功能打开游戏。<br>' +
+          '已经安装 Node.js 18 的话，也可以在这个目录运行 <code>node server.js</code>，再打开 ' +
           '<a href="http://127.0.0.1:5173">http://127.0.0.1:5173</a></span>';
         el.classList.remove('hidden');
       }
