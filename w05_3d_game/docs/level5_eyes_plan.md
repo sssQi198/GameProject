@@ -227,7 +227,7 @@
 | 必须走近才能拍，节奏变慢 | 低 | 这是刻意的；不行就调 `photoRange`（`config.js`，全局影响其他关，慎用） |
 | 新增点光源导致卡顿 | 低 | 默认不加；要加也是第 5 关生成时一次性的着色器重编译 |
 
-回滚：所有改动集中在 `anomalies.js` 一个 IIFE 内 + `level.js` 3 行；备份 `GameProject\_tmp_anomalies_backup_before_crack_rewrite.js` 仍在。
+回滚：所有改动集中在 `anomalies.js` 一个 IIFE 内 + `level.js` 3 行；备份在仓库的 `_多余/备份/_tmp_anomalies_backup_before_crack.js`。
 
 ---
 

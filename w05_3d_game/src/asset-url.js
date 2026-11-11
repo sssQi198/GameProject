@@ -13,7 +13,7 @@
  * 于是 asset('models/x.glb') 分别得到
  *   '/w05_3d_game/assets/models/x.glb' 和 '/assets/models/x.glb'，两种部署都成立。
  *
- * 没有 document 的环境（_probe/*.mjs 的 Node 用例）退回 '/'，
+ * 没有 document 的环境（Node 里的旧探针，现放在仓库 `_多余/开发临时文件/_probe/`）退回 '/'，
  * 行为和改成这版之前一模一样——探针里的 fetch 桩按 http://local/assets/... 匹配。
  */
 

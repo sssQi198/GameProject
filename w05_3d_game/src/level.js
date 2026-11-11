@@ -21,7 +21,7 @@ const CURTAIN_W = 0.72;
 const CURTAIN_TOP = 2.72;
 const CURTAIN_HEM = 1.0;
 const CURTAIN_H = CURTAIN_TOP - CURTAIN_HEM;
-/** 与 generate_furniture_glb.py 同一套偏移。第二关那套桌椅（−7.4, 4）保持原位。 */
+/** 与 tools/generate_furniture_glb.py 同一套偏移。第二关那套桌椅（−7.4, 4）保持原位。 */
 const SHOVED_DESK_YAW = [
   { x: -7.4, z: -4, yaw: 0.3 },
   { x: 4.6, z: -1.5, yaw: -0.26 },
@@ -2820,7 +2820,7 @@ function sameSpot(spot, x, z) {
   return Math.abs(spot.x - x) < 0.001 && Math.abs(spot.z - z) < 0.001;
 }
 
-/** 与 generate_furniture_glb.py 的 jitter 同一条线性同余。 */
+/** 与 tools/generate_furniture_glb.py 的 jitter 同一条线性同余。 */
 function furnitureJitter(seed, amount) {
   let s = (Math.imul(seed, 1103515245) + 12345) >>> 0;
   s = (Math.imul(s, 1103515245) + 12345) >>> 0;
@@ -2862,7 +2862,7 @@ function boxCorners(hx, y0, y1, hz) {
   return out;
 }
 
-/** 与 generate_furniture_glb.py 的 rotate_xyz 同一套，对应 Three.js Euler XYZ。 */
+/** 与 tools/generate_furniture_glb.py 的 rotate_xyz 同一套，对应 Three.js Euler XYZ。 */
 function rotateXYZ(x, y, z, pitch, yaw, roll) {
   const cp = Math.cos(pitch);
   const sp = Math.sin(pitch);

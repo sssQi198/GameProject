@@ -11,7 +11,7 @@ import math
 import pathlib
 import struct
 
-OUT = pathlib.Path(__file__).resolve().parent / 'w05_3d_game' / 'assets' / 'models' / 'classroom_m1_v01.glb'
+OUT = pathlib.Path(__file__).resolve().parent.parent / 'assets' / 'models' / 'classroom_m1_v01.glb'
 
 MATERIALS = [
     ('Wood', [0.0, 0.0, 0.0, 1]),
