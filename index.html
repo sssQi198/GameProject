@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>错层 Wrong Floor — 在线试玩</title>
+<meta name="description" content="错层 Wrong Floor：浏览器里的第一人称 3D 短篇恐怖游戏。教室每进一次多一处不该存在的东西，拍下来才能出门。">
+<link rel="icon" href="./w05_3d_game/favicon.ico">
+<style>
+  :root { --bg:#0a0a0c; --fg:#e8e6e1; --dim:#8d8a84; --accent:#b3271f; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(120% 90% at 50% 0%, #17161a 0%, var(--bg) 62%);
+    color: var(--fg);
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 32px 20px; text-align: center;
+  }
+  h1 { font-size: clamp(34px, 7vw, 64px); margin: 0 0 6px; letter-spacing: .18em; font-weight: 700; }
+  .en { color: var(--dim); letter-spacing: .34em; font-size: clamp(11px, 1.6vw, 14px); text-transform: uppercase; }
+  p.lede { max-width: 46em; line-height: 1.9; color: #b9b5ae; margin: 28px 0 34px; font-size: 15px; }
+  .play {
+    display: inline-block; padding: 16px 54px; border: 1px solid var(--accent);
+    color: #f2e9e7; text-decoration: none; font-size: 17px; letter-spacing: .22em;
+    background: rgba(179,39,31,.10); transition: background .18s, box-shadow .18s;
+  }
+  .play:hover, .play:focus { background: rgba(179,39,31,.26); box-shadow: 0 0 34px rgba(179,39,31,.35); outline: none; }
+  .meta { margin-top: 26px; color: var(--dim); font-size: 13px; line-height: 2; }
+  .meta a { color: #9c9891; }
+  footer { margin-top: 46px; color: #5f5c58; font-size: 12px; line-height: 1.9; }
+  footer a { color: #77736e; }
+  .note { margin-top: 14px; color: #6d6a66; font-size: 12px; }
+</style>
+</head>
+<body>
+  <h1>错层</h1>
+  <div class="en">Wrong Floor</div>
+
+  <p class="lede">
+    夜里你回到教室。每一轮，教室里都会多出一件不该存在的东西——对准它，按下快门，门才会开。<br>
+    第五扇门之后，先看清那双眼睛，再跑。
+  </p>
+
+  <a class="play" href="./w05_3d_game/">开始游戏</a>
+
+  <div class="meta">
+    第一人称 · 约 10 分钟 · 键盘鼠标 · 无需登录<br>
+    建议桌面版 Chrome 或 Edge，窗口 1280×720 以上；请开声音（标题画面与暂停面板可静音）
+  </div>
+
+  <footer>
+    <a href="https://github.com/sssQi198/GameProject">GitHub 源码</a>
+    ·
+    <a href="https://github.com/sssQi198/GameProject/blob/main/README.md">README（操作、限制、署名）</a>
+    <div class="note">打不开或黑屏时，看 README 里的「已知限制」。</div>
+  </footer>
+</body>
+</html>
