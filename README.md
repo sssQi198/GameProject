@@ -38,12 +38,10 @@ node server.js
 
 ## 发布
 
-当前用 GitHub Pages 发布静态文件，不需要构建步骤：
-
 1. `Settings → Pages → Build and deployment`
-2. Source 选 `Deploy from a branch`
-3. Branch 选 `main`，目录选 `/`（根）
-4. 等 Actions 里的 `pages build and deployment` 跑完，访问 <https://sssqi198.github.io/GameProject/>
+2. Source: `Deploy from a branch`
+3. Branch: `main`，目录: / (root)
+4. <https://sssqi198.github.io/GameProject/> 已经过测试可以运行
 
 发布要点：
 
@@ -71,7 +69,7 @@ node server.js
 
 | 成员 | 负责内容 |
 | --- | --- |
-| `@sssQi198` | _本人填写_ |
+| `@sssQi198` | 贴图和模型优化，物件碰撞逻辑，窗帘运动逻辑，灯光细节，第二关山羊头设计|
 | `@xiaoba084` | 相机系统：抬/放动画、取景框外不透明机身、终局自动收起<br>第五关：血肉教室、裂缝之眼、黑色巨脸与尖牙<br>序章与同学模型、行走动画<br>音频：追逐伴奏换实录 MP3、音量曲线<br>ui:开发者模式 |
 | `@FenggangHuang` | _本人填写_ |
 | `@windymaker` | _本人填写_ |
