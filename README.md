@@ -79,8 +79,9 @@ node server.js
 
 > **NO AI**：由小组成员亲自查看 Actions 后记录，不要用 AI 代写。内容待填。
 
-- 查看的部署 / 提交：
-- 触发方式与步骤：
-- 自动 / 手动环节：
-- 实际跑过的检查：
-- 发现缺少的一项检查：
+- **查看的部署 / 提交**：`pages build and deployment` 的第一次运行（run [#45611786512](https://github.com/sssQi198/GameProject/actions/runs/45611786512)），源提交 `c1188ae`，即 PR #8 合并进 `main` 的那个提交；对应部署记录 #8057119362，环境 `github-pages`。
+- **触发方式与步骤**：合并 PR #8 后 `main` 收到 push，GitHub Pages 自动生成的内部工作流被触发（事件类型显示为 `dynamic`，仓库里没有自己写的 workflow 文件）。三个 job：`build`（Checkout → Upload artifact）→ `report-build-status` → `deploy`（Deploy to GitHub Pages），从 12:14:00Z 到 12:14:36Z，约 36 秒。
+- **结果**：三个 job 全部 success，部署状态 `success`，站点 <https://sssqi198.github.io/GameProject/> 上线。发布内容就是该提交的仓库根目录：`index.html`（跳转到 `w05_3d_game/`）、`README.md`、`W07_TASKS.md`、`.nojekyll`、`_多余/`、`w05_3d_game/`。
+- **自动 / 手动环节**：手动只有两件事——在 Settings → Pages 把 Source 设为 `Deploy from a branch`、`main` / `/ (root)`（接口里 `build_type` 至今仍是 `legacy`），以及合并那个 PR。此后的打包、上传 artifact、发布、回写部署状态全自动；本地没有构建步骤，`node server.js` 只用于本地预览，发布不经过它。
+- **实际跑过的检查**：**没有内容层面的检查**。仓库里没有 `.github/workflows` 目录，`w05_3d_game/package.json` 也只有 `dev` / `start` 两个脚本，所以那次运行实际只做了 Checkout 和 Upload artifact，等于「能打包就发布」。唯一接近检查的是 `report-build-status`，外加一条 `actions/upload-artifact@v4` 的 Node.js 20 弃用告警。
+- **发现缺少的一项检查**：部署前缺一个冒烟检查——用无头浏览器打开 `w05_3d_game/index.html`，断言标题画面渲染出来、控制台没有 404 或 JS 报错。部署成功只证明文件传上去了：这次首发连 `_多余/`（探针脚本、`_tmp/audiodl/aargh.zip` 等调试文件）都原样公开，今天实测 `/_多余/开发临时文件/_tmp/audiodl/aargh.zip` 仍返回 200，说明「发布成功」和「游戏真能玩、发出去的东西是干净的」是两件事。
